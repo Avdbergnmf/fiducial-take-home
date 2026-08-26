@@ -1,0 +1,4 @@
+# Unpinned until the analysis scripts actually work; pin exact versions then so
+# the macOS and Windows images resolve identically.
+numpy
+matplotlib
