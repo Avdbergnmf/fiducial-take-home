@@ -1,0 +1,28 @@
+# Build outputs
+build/
+**/build/
+
+# Python
+.venv/
+__pycache__/
+
+# macOS
+.DS_Store
+
+# Simulator output. runs/fixture.* is a committed test fixture, so keep it.
+runs/*.jsonl
+runs/*.json
+runs/*.bin
+!runs/fixture.*
+
+# Unity (viewer/)
+viewer/Library/
+viewer/Temp/
+viewer/Obj/
+viewer/Build/
+viewer/Logs/
+viewer/UserSettings/
+viewer/*.csproj
+viewer/*.sln
+
+# NOTE: pkg/ is deliberately NOT ignored -- the challenge package is committed.
