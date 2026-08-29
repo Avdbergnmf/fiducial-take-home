@@ -1,0 +1,91 @@
+{
+  "id": "s5",
+  "description": "Tier 5, the insider. Partway through the engagement one of your own drones stops being yours. Its brain is untouched and still trying; what changed is that what it is told about itself is no longer true and what it decides no longer entirely reaches its motors. Its fix drifts, coherently - its velocity and its accelerometer agree with the drift exactly, so no amount of dead reckoning finds a disagreement - and because its sensor reports in its own frame, everything it can see moves with it. It therefore slanders every peer and every hostile it reports, sincerely, in your own message format and under a valid signature. Some of the time it is also being flown at something. The mode is not fixed: it may ram a teammate, slide into an interceptor's path, hold its picket a few degrees off, or do nothing physical at all. Finding it is a geometry problem over the whole fleet, not a check any one drone can run, and the run may contain nobody at all.",
+
+  "params": {
+    "fleet": {
+      "n_friendly": 16,
+      "n_enemy": 7,
+      "n_neutral": 10,
+      "n_compromised": 1
+    },
+    "arena": {
+      "size_ne": 500.0,
+      "ceiling": 120.0
+    },
+    "asset": {
+      "position": [0.0, 0.0, 0.0],
+      "radius": 30.0
+    },
+    "spawn": {
+      "enemy_radius": 220.0,
+      "enemy_altitude": 45.0,
+      "friendly_radius": 70.0,
+      "friendly_altitude": 30.0,
+      "neutral_radius": 180.0,
+      "neutral_altitude": 55.0
+    },
+    "sense": {
+      "radius": 60.0,
+      "track_drop_time": 2.0,
+      "fix_sigma": 0.35,
+      "fix_bias_sigma": 1.2,
+      "fix_bias_tau": 60.0
+    },
+    "_sense": "The fix figures are the published defaults, spelled out here because this is the tier they decide. Every drone's idea of where it is wanders by about a metre and a fifth per axis over a minute, honestly and independently, and reports that number in fix_sigma. Against exact fixes the insider is found with a threshold - any claim that misses its measured range by more than the ranging noise is a lie, one frame settles it. Against these, the residual on an honest neighbour is a metre or two and moving, and separating that from an insider a couple of metres off and moving needs several observers, several seconds, and an accepted chance of being wrong.",
+    "comm": {
+      "radius": 75.0,
+      "radius_soft_band": 12.0,
+      "packet_loss": 0.08,
+      "latency_ticks": 3,
+      "jitter_ticks": 2,
+      "tx_budget_bytes_per_s": 5120,
+      "range_sigma": 0.5,
+      "bearing_sigma": 0.05
+    },
+    "_comm": "range_sigma is the measurement the whole tier rests on. The range to a transmitter is physical: it comes from where the two airframes actually are, not from what either of them believes, and it is the only thing in the run that a compromised drone cannot lie about. Half a metre of noise on it against a metre and a fifth of honest fix wander is the ratio that decides how hard this is - the signal you are looking for is buried in the fleet's own navigation error, not in the ranging.",
+    "adv": {
+      "enemy_dash_speed": 13.0,
+      "enemy_first_spawn": 10.0,
+      "enemy_spawn_interval": 15.0,
+      "evasion_A": 5.5,
+      "evasion_period": 1.8,
+      "replay_window": 12.0,
+      "replay_min_age": 2.0,
+      "replay_rate": 0.8,
+      "mutate_prob": 0.35,
+      "noise_rate": 0.3,
+      "alert_frames": 20,
+      "alert_decay": 1.5,
+      "alert_tau_scale": 3.5,
+      "alert_radius_scale": 2.2,
+      "t_compromise": 24.0,
+      "spoof_onset_time": 4.0,
+      "spoof_drift_rate": 0.45,
+      "override_mode": "shepherd",
+      "override_duty": 0.6,
+      "override_period": 9.0,
+      "outbound_drop_prob": 0.3,
+      "exfil_delay": 8.0
+    },
+    "_adv": "The fixed scenario picks shepherd deliberately, because it is the mode that is hardest to argue is happening at all: the drone flies where its own brain decided to fly and arrives thirteen degrees beside it, which opens a sector over half a minute and looks exactly like a drone with a poor fix. The generated variants of this tier draw all four modes, passive included. At 0.45 m/s the spoof passes the honest wander after about three seconds of drift and is unambiguous by twenty, which is inside the thirty-second detection deadline for a fleet that is measuring and outside it for one that waits to be sure.",
+    "score": {
+      "detect_deadline": 30.0
+    },
+    "sim": {
+      "time_limit": 220.0
+    }
+  },
+
+  "spawns": [
+    { "time": 0.0, "kind": "neutral", "count": 10 },
+    { "time": 10.0, "kind": "enemy", "count": 1, "enemy_type": 0, "remote": true },
+    { "time": 25.0, "kind": "enemy", "count": 1, "enemy_type": 1, "remote": true },
+    { "time": 40.0, "kind": "enemy", "count": 1, "enemy_type": 0, "remote": true },
+    { "time": 55.0, "kind": "enemy", "count": 1, "enemy_type": 1, "remote": true },
+    { "time": 70.0, "kind": "enemy", "count": 1, "enemy_type": 0, "remote": true },
+    { "time": 85.0, "kind": "enemy", "count": 1, "enemy_type": 1, "remote": true },
+    { "time": 100.0, "kind": "enemy", "count": 1, "enemy_type": 0, "remote": true }
+  ],
+  "events": []
+}

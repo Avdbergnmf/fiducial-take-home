@@ -1,0 +1,63 @@
+{
+  "id": "s2",
+  "description": "Tier 2, distribution. Same threat picture as s1, but hostiles enter on the bearing furthest from any defender, the sensing radius is smaller than the arena by a wide margin, and the radio is lossy with real latency. No single drone can see the arrival, so a drone that only acts on what it can see itself will watch the asset die. Multi-hop propagation and a shared picture are the whole tier.",
+
+  "params": {
+    "fleet": {
+      "n_friendly": 16,
+      "n_enemy": 6,
+      "n_neutral": 10,
+      "n_compromised": 0
+    },
+    "arena": {
+      "size_ne": 500.0,
+      "ceiling": 120.0
+    },
+    "asset": {
+      "position": [0.0, 0.0, 0.0],
+      "radius": 30.0
+    },
+    "spawn": {
+      "enemy_radius": 220.0,
+      "enemy_altitude": 45.0,
+      "friendly_radius": 70.0,
+      "friendly_altitude": 30.0,
+      "neutral_radius": 180.0,
+      "neutral_altitude": 55.0
+    },
+    "sense": {
+      "radius": 60.0,
+      "track_drop_time": 2.0
+    },
+    "_sense": "Sensing has to be comparable to the spacing the radio forces on the formation, not much smaller than it. Neighbours have to hear each other, so they sit at roughly three quarters of comm radius apart, which here is 56 m; at a 50 m sensing radius every ring a fleet can hold has permanent blind gaps between its members, and a hostile on the widest bearing is first seen after it has already crossed the ring with four seconds to run. That is not the tier-2 problem, which is that the arrival happens 220 m out where only one drone can see it and the fleet has to be told. It survives this change intact.",
+    "comm": {
+      "radius": 75.0,
+      "radius_soft_band": 12.0,
+      "packet_loss": 0.08,
+      "latency_ticks": 3,
+      "jitter_ticks": 2,
+      "tx_budget_bytes_per_s": 3072
+    },
+    "adv": {
+      "enemy_dash_speed": 13.0,
+      "enemy_first_spawn": 10.0,
+      "enemy_spawn_interval": 16.0,
+      "evasion_A": 4.5,
+      "evasion_period": 1.8
+    },
+    "sim": {
+      "time_limit": 200.0
+    }
+  },
+
+  "spawns": [
+    { "time": 0.0, "kind": "neutral", "count": 10 },
+    { "time": 10.0, "kind": "enemy", "count": 1, "enemy_type": 0, "remote": true },
+    { "time": 26.0, "kind": "enemy", "count": 1, "enemy_type": 1, "remote": true },
+    { "time": 42.0, "kind": "enemy", "count": 1, "enemy_type": 0, "remote": true },
+    { "time": 58.0, "kind": "enemy", "count": 1, "enemy_type": 1, "remote": true },
+    { "time": 74.0, "kind": "enemy", "count": 1, "enemy_type": 0, "remote": true },
+    { "time": 90.0, "kind": "enemy", "count": 1, "enemy_type": 1, "remote": true }
+  ],
+  "events": []
+}

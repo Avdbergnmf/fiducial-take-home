@@ -1,0 +1,64 @@
+{
+  "id": "s1",
+  "description": "Tier 1, the baseline problem. Hostiles arrive one at a time from the perimeter and transit toward the asset; civilian traffic crosses the same airspace on straight lines at a similar speed. Everything is visible to somebody at some point and the radio is clean. The whole difficulty is telling a threat from a bystander and paying one drone per kill and not two.",
+  "_evasion": "A hostile weaves once an interceptor is inside 40 m. The amplitude here, 3.5 m/s^2, is deliberately about half of an interceptor's lateral authority, which is g*tan(max_tilt) = 6.7 m/s^2 and not max_accel. At the published default of 8 m/s^2 the hostile out-turns the interceptor and the endgame cannot be flown by anybody, which is not the thing tier 1 is supposed to be testing. Fitting the manoeuvre is tier 7's job.",
+
+  "_fleet": "Sixteen against six, not twelve. The weapon is the airframe, so every interception spends one: a fleet of twelve that stops all six arrivals is a fleet of six by the end, holding a ring it was spaced for at twelve, with the gaps between neighbours twice what the sensors can cover. Measured across tier 1, that is where the leak was - not the first arrival, which is met by a full formation, but the fifth or sixth against a picket with holes in it. A fleet has to be sized as the ring plus one drone per hostile, and the ring is what the radio and the sensors say it is.",
+
+  "params": {
+    "fleet": {
+      "n_friendly": 16,
+      "n_enemy": 6,
+      "n_neutral": 8,
+      "n_compromised": 0
+    },
+    "arena": {
+      "size_ne": 400.0,
+      "ceiling": 120.0
+    },
+    "asset": {
+      "position": [0.0, 0.0, 0.0],
+      "radius": 30.0
+    },
+    "spawn": {
+      "enemy_radius": 170.0,
+      "enemy_altitude": 40.0,
+      "friendly_radius": 60.0,
+      "friendly_altitude": 30.0,
+      "neutral_radius": 150.0,
+      "neutral_altitude": 50.0
+    },
+    "sense": {
+      "radius": 60.0,
+      "track_drop_time": 2.0
+    },
+    "comm": {
+      "radius": 90.0,
+      "packet_loss": 0.02,
+      "latency_ticks": 2,
+      "jitter_ticks": 1,
+      "tx_budget_bytes_per_s": 4096
+    },
+    "adv": {
+      "enemy_dash_speed": 16.0,
+      "enemy_first_spawn": 8.0,
+      "enemy_spawn_interval": 14.0,
+      "evasion_A": 3.5,
+      "evasion_period": 2.0
+    },
+    "sim": {
+      "time_limit": 180.0
+    }
+  },
+
+  "spawns": [
+    { "time": 0.0, "kind": "neutral", "count": 8 },
+    { "time": 8.0, "kind": "enemy", "count": 1, "enemy_type": 0 },
+    { "time": 22.0, "kind": "enemy", "count": 1, "enemy_type": 0 },
+    { "time": 36.0, "kind": "enemy", "count": 1, "enemy_type": 1 },
+    { "time": 50.0, "kind": "enemy", "count": 1, "enemy_type": 0 },
+    { "time": 64.0, "kind": "enemy", "count": 1, "enemy_type": 1 },
+    { "time": 78.0, "kind": "enemy", "count": 1, "enemy_type": 1 }
+  ],
+  "events": []
+}

@@ -1,9 +1,0 @@
-services:
-  dev:
-    build: .
-    platform: linux/amd64
-    volumes:
-      - .:/work
-    working_dir: /work
-    stdin_open: true
-    tty: true

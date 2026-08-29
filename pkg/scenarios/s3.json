@@ -1,0 +1,69 @@
+{
+  "id": "s3",
+  "description": "Tier 3, naive impostors. The threat picture and the handoff problem are s2's, and the radio is no longer trustworthy: hostiles record what they overhear and put it back on the air from where they are, seconds after it was true, sometimes with bytes bent, and sometimes they transmit noise. Nothing the enemy sends was authored by it, because it cannot speak the protocol - which is exactly why a receiver cannot dismiss it on format. Three defences answer this and each catches a different frame: a signature rejects the corrupted copy, freshness rejects the stale one, and comparing the claimed position against the measured range and bearing rejects the copy that arrived from the wrong side of the arena. A fleet that believes what it is told loses the picture and then the asset.",
+
+  "params": {
+    "fleet": {
+      "n_friendly": 16,
+      "n_enemy": 6,
+      "n_neutral": 10,
+      "n_compromised": 0
+    },
+    "arena": {
+      "size_ne": 500.0,
+      "ceiling": 120.0
+    },
+    "asset": {
+      "position": [0.0, 0.0, 0.0],
+      "radius": 30.0
+    },
+    "spawn": {
+      "enemy_radius": 220.0,
+      "enemy_altitude": 45.0,
+      "friendly_radius": 70.0,
+      "friendly_altitude": 30.0,
+      "neutral_radius": 180.0,
+      "neutral_altitude": 55.0
+    },
+    "sense": {
+      "radius": 60.0,
+      "track_drop_time": 2.0
+    },
+    "comm": {
+      "radius": 75.0,
+      "radius_soft_band": 12.0,
+      "packet_loss": 0.08,
+      "latency_ticks": 3,
+      "jitter_ticks": 2,
+      "tx_budget_bytes_per_s": 4096
+    },
+    "_comm": "A thousand bytes a second more than s2, because from here every frame carries a 64-byte signature and a tier that made authentication compulsory without paying for it would be measuring the budget rather than the defence. It is not generous: 64 bytes on a 48-byte heartbeat is more than half the frame, so batching and scheduling matter more here than they did at s2, not less.",
+    "adv": {
+      "enemy_dash_speed": 13.0,
+      "enemy_first_spawn": 10.0,
+      "enemy_spawn_interval": 16.0,
+      "evasion_A": 4.5,
+      "evasion_period": 1.8,
+      "replay_window": 12.0,
+      "replay_min_age": 2.0,
+      "replay_rate": 0.8,
+      "mutate_prob": 0.35,
+      "noise_rate": 0.3
+    },
+    "_adv": "A replay every 1.25 s per hostile, drawn from frames between 2 and 12 s old. Two seconds is the floor because a frame from the last instant is very nearly true, and a scenario whose lies are almost right tests arithmetic tolerance rather than provenance. The 12 s ceiling is what a replay window has to cover to be sure of catching these, and it is deliberately wider than any reasonable freshness bound so that a window tuned to the loss and latency of this radio still rejects them.",
+    "sim": {
+      "time_limit": 200.0
+    }
+  },
+
+  "spawns": [
+    { "time": 0.0, "kind": "neutral", "count": 10 },
+    { "time": 10.0, "kind": "enemy", "count": 1, "enemy_type": 0, "remote": true },
+    { "time": 26.0, "kind": "enemy", "count": 1, "enemy_type": 1, "remote": true },
+    { "time": 42.0, "kind": "enemy", "count": 1, "enemy_type": 0, "remote": true },
+    { "time": 58.0, "kind": "enemy", "count": 1, "enemy_type": 1, "remote": true },
+    { "time": 74.0, "kind": "enemy", "count": 1, "enemy_type": 0, "remote": true },
+    { "time": 90.0, "kind": "enemy", "count": 1, "enemy_type": 1, "remote": true }
+  ],
+  "events": []
+}

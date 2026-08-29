@@ -1,0 +1,73 @@
+{
+  "id": "s4",
+  "description": "Tier 4, eavesdroppers. Everything s3 has, and now the hostiles listen. A hostile that overhears enough unencrypted traffic while it is inside the fleet's radio footprint concludes that it has been seen and assigned, and stops waiting for an interceptor to appear before it starts running - it breaks early, while the geometry still favours it, and a stern chase by one drone cannot retrieve that. The simulator never looks inside a payload to decide this: the host knows which bytes came out of seal(), so it can tell an encrypted frame from a plaintext one without having any opinion about what either says. The answer is a group key the fleet derives for itself, since nothing in the ABI hands one out, and the cost of getting it wrong is measured in intercepts that miss rather than in a warning.",
+
+  "params": {
+    "fleet": {
+      "n_friendly": 16,
+      "n_enemy": 6,
+      "n_neutral": 10,
+      "n_compromised": 0
+    },
+    "arena": {
+      "size_ne": 500.0,
+      "ceiling": 120.0
+    },
+    "asset": {
+      "position": [0.0, 0.0, 0.0],
+      "radius": 30.0
+    },
+    "spawn": {
+      "enemy_radius": 220.0,
+      "enemy_altitude": 45.0,
+      "friendly_radius": 70.0,
+      "friendly_altitude": 30.0,
+      "neutral_radius": 180.0,
+      "neutral_altitude": 55.0
+    },
+    "sense": {
+      "radius": 60.0,
+      "track_drop_time": 2.0
+    },
+    "comm": {
+      "radius": 75.0,
+      "radius_soft_band": 12.0,
+      "packet_loss": 0.08,
+      "latency_ticks": 3,
+      "jitter_ticks": 2,
+      "tx_budget_bytes_per_s": 4608
+    },
+    "_comm": "Five hundred bytes a second above s3, which is roughly what sealing every frame costs: a nonce and a tag on each one, plus the key distribution the fleet has to run for itself before any of it works.",
+    "adv": {
+      "enemy_dash_speed": 13.0,
+      "enemy_first_spawn": 10.0,
+      "enemy_spawn_interval": 16.0,
+      "evasion_A": 5.5,
+      "evasion_period": 1.8,
+      "replay_window": 12.0,
+      "replay_min_age": 2.0,
+      "replay_rate": 0.8,
+      "mutate_prob": 0.35,
+      "noise_rate": 0.3,
+      "alert_frames": 20,
+      "alert_decay": 1.5,
+      "alert_tau_scale": 3.5,
+      "alert_radius_scale": 2.2
+    },
+    "_adv": "Twenty plaintext frames overheard, forgetting 1.5 a second, so an occasional frame in the clear is survivable and a fleet that chatters in the open near a hostile alerts it within a couple of seconds. An alerted hostile breaks at three and a half times the time-to-go and twice the range, which turns a tail chase that would have connected into one that arrives behind a turning target.",
+    "sim": {
+      "time_limit": 200.0
+    }
+  },
+
+  "spawns": [
+    { "time": 0.0, "kind": "neutral", "count": 10 },
+    { "time": 10.0, "kind": "enemy", "count": 1, "enemy_type": 0, "remote": true },
+    { "time": 26.0, "kind": "enemy", "count": 1, "enemy_type": 1, "remote": true },
+    { "time": 42.0, "kind": "enemy", "count": 1, "enemy_type": 0, "remote": true },
+    { "time": 58.0, "kind": "enemy", "count": 1, "enemy_type": 1, "remote": true },
+    { "time": 74.0, "kind": "enemy", "count": 1, "enemy_type": 0, "remote": true },
+    { "time": 90.0, "kind": "enemy", "count": 1, "enemy_type": 1, "remote": true }
+  ],
+  "events": []
+}
