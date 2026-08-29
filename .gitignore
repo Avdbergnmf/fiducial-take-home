@@ -1,4 +1,5 @@
-# Build outputs
+# Build outputs. Scoped to build directories on purpose: *.exe and *.dll are
+# NOT blanket-ignored, because pkg/bin/ has to be committed.
 build/
 **/build/
 
@@ -6,8 +7,10 @@ build/
 .venv/
 __pycache__/
 
-# macOS
+# Editors / OS
+.vs/
 .DS_Store
+Thumbs.db
 
 # Simulator output. runs/fixture.* is a committed test fixture, so keep it.
 runs/*.jsonl
