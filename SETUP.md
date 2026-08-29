@@ -1,100 +1,122 @@
 # Setup runbook
 
-Everything builds and runs inside one linux/amd64 container. The host only ever
-needs Docker and git. Follow the section for the machine you are on.
+Native Windows is the primary path: the package ships `bin\swarm_sim.exe`, so
+there is no container and no emulation between me and the simulator. Docker is a
+fallback, documented at the bottom.
+
+Run the PowerShell scripts like this, so the execution policy never gets in the
+way:
+
+    powershell -ExecutionPolicy Bypass -File scripts\build.ps1
 
 ---
 
-## Tonight, macOS (Apple Silicon)
+## Tonight, Windows
 
-1. **Turn on Rosetta in Docker Desktop.**
-   Settings > General > "Use Rosetta for x86/amd64 emulation". Apply & restart.
-   Without this the x86-64 simulator binary will not start.
+1. **Check what toolchain is already here.** In a normal PowerShell window:
 
-2. **Unzip the challenge package into `pkg/`.**
-   The result must be `pkg/bin/swarm_sim`, `pkg/sdk/include/`, `pkg/scenarios/`,
-   `pkg/examples/`. `pkg/` is committed to git; it is not ignored.
+       where.exe cmake
+       where.exe cl
+       where.exe g++
+       where.exe python
 
-3. **Confirm the binary is what you think it is.**
+   `cmake` plus either `cl` (MSVC) or `g++` (MinGW) is enough. If `cl` is found
+   but only inside the VS developer prompt, use that prompt for everything below.
+   If none of them are found, jump to **If there is no compiler** and come back.
 
-       file pkg/bin/swarm_sim
+2. **Unzip the challenge package into `pkg\`.**
+   The result must be `pkg\bin\swarm_sim.exe`, `pkg\sdk\include\`,
+   `pkg\scenarios\`, `pkg\examples\`. `pkg\` is committed to git, not ignored.
 
-   Expect `ELF 64-bit LSB ... x86-64`.
+3. **Commit the package.** `.gitattributes` already marks `pkg/bin/**` and
+   `*.exe` binary, so the exe is safe to commit as-is.
 
-4. **Store the exec bit in git so it survives the move to Windows.**
+       git add pkg
+       git commit -m "Add challenge package v0.6.0"
 
-       chmod +x pkg/bin/swarm_sim
-       git update-index --chmod=+x pkg/bin/swarm_sim
+4. **Find out what the simulator's command line actually is.**
 
-   Windows checkouts have no POSIX permissions; the mode recorded in the index
-   is what makes the file executable inside the container on Sunday.
+       cd pkg
+       .\bin\swarm_sim.exe --help
+       cd ..
 
-5. **Build the image and get a shell.**
+   The flags in `scripts\run.ps1` and `scripts\example.ps1`
+   (`--scenario --brain --trace --report`) are a guess written before the
+   package existed. Correct them now if they differ — it is a two-line edit in
+   each and it saves a confusing failure later.
 
-       docker compose build
-       docker compose run --rm dev
+5. **Build and run THEIR example brain.** This produces tonight's fixture
+   recording and proves the toolchain, the simulator and the trace format all
+   work before any of my code exists.
 
-   Everything below runs inside that shell.
+       powershell -ExecutionPolicy Bypass -File scripts\example.ps1
 
-6. **Check the simulator's real command line before trusting the Makefile.**
+   Output: `runs\fixture.jsonl` and `runs\fixture.json`.
 
-       cd pkg && ./bin/swarm_sim --help ; cd ..
+6. **See what is actually in the recording.**
 
-   The flag spellings in the Makefile are a best guess, written before the
-   package existed. Fix them in the variable block at the top of the Makefile
-   now if they differ — the scenario runs share one macro, so it is one edit.
+       python tools\inspect_trace.py runs\fixture.jsonl --write
 
-7. **Build the packaged example brain.**
+   This overwrites `notes\schema.md` with the real records. Read the `header`
+   record: it defines the `frame` column names, and the viewer depends on them.
 
-       make example
+7. **Commit the fixture and the schema notes.** `.gitignore` keeps
+   `runs\fixture.*` while ignoring the rest of `runs\`, so no `-f` needed.
 
-   Then check what it produced: `ls pkg/examples/build`. If the library is not
-   called `brain.so`, set `EXAMPLE` at the top of the Makefile to its real path
-   (relative to `pkg/`).
+       git add runs\fixture.jsonl runs\fixture.json notes\schema.md
+       git commit -m "Add fixture recording and observed trace schema"
 
-8. **Record a fixture trace with the example brain.**
+8. **Paste in my own sources**, then build and run them:
 
-       make fixture
+       # brain sources -> brain\src\   (at least one .cpp)
+       powershell -ExecutionPolicy Bypass -File scripts\build.ps1
+       powershell -ExecutionPolicy Bypass -File scripts\run.ps1 -Scenario s1
 
-9. **See what is actually in the trace.**
-
-       make inspect
-
-   Read the `header` record carefully: it defines the `frame` column names, and
-   the viewer and any analysis depend on it.
-
-10. **Commit the fixture** (`runs/fixture.jsonl`, `runs/fixture.json`). The
-    `.gitignore` ignores run output except `runs/fixture.*`, so `git add -f` is
-    not needed.
+   `build.ps1` refuses to configure an empty `brain\src\` and says so; so does
+   `brain\CMakeLists.txt`. That is deliberate — an empty SHARED library fails
+   later and far more confusingly.
 
 ---
 
-## Sunday, Windows
+## If there is no compiler
 
-1. Install Docker Desktop with the **WSL2 backend** (Settings > General > "Use
-   the WSL 2 based engine").
-2. `git clone <this repo>` and `cd` into it.
-3. `docker compose run --rm dev`
-4. `make example`
-5. `make s1`
+Install **Visual Studio Build Tools** (not full Visual Studio — the Build Tools
+package is enough) and tick the **"Desktop development with C++"** workload.
+That gives `cl`, the Windows SDK, and a bundled CMake.
 
-That is the whole setup. No toolchain, no Python, no compiler on the host.
+Afterwards, open **"x64 Native Tools Command Prompt for VS"** from the Start
+menu and run the scripts from there — that prompt puts `cl` and `cmake` on PATH.
+A plain PowerShell window will not find them unless you added them yourself.
+
+Check it worked: `cl` should print a version banner, and `cmake --version`
+should answer.
+
+---
+
+## Docker fallback
+
+Only if the native path is a dead end. The repo still carries `Dockerfile`,
+`docker-compose.yml` and a `Makefile` from an earlier container-first attempt:
+
+    docker compose run --rm dev
+    make example
+
+Those target the Linux binary `pkg/bin/swarm_sim` and are **not** the tested
+path any more. Expect to spend time revalidating them before they work.
 
 ---
 
 ## Gotchas
 
-- **Run the simulator from inside `pkg/`.** It resolves `scenarios/` relative to
-  the working directory, so every run target in the Makefile does `cd pkg` first
-  and writes its output back up to `../runs/`.
+- **Run the simulator from inside `pkg\`.** It resolves `scenarios\` relative to
+  the working directory. Every script does `Push-Location pkg` first and passes
+  absolute paths for the brain, trace and report; that is the single most
+  important thing `scripts\common.ps1` does.
 - **Do not tail the trace file.** It is created empty when the run starts and
   written only at the end. An empty file mid-run means nothing is wrong.
+  `inspect_trace.py` says so explicitly if it finds no records.
 - **`--dump-params` is refused for generated `x<tier>-<token>` ids.** Only the
   fixed scenario ids accept it.
-- **Scores are bit-identical across machines and thread counts.** A number from
-  a Rosetta run on the MacBook compares directly with one from the Windows PC,
-  so results recorded tonight stay valid on Sunday. `make determinism` checks
-  this by running at 1 and 8 threads and diffing the reports.
-- **Tick compute time is measured but not scored.** Rosetta emulation makes the
-  dev loop slow, not the result worse. Do not spend time optimising for it, and
-  do not read timing numbers from a Mac run as if they were meaningful.
+- **Scores are bit-identical across machines and thread counts.** A score is
+  comparable no matter where it was produced, so numbers recorded tonight stay
+  valid all week and there is no need to re-run everything on a different box.
