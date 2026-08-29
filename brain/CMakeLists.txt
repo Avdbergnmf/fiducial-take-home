@@ -8,14 +8,24 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
-set(BRAIN_SOURCES
-    src/brain.cpp
-)
+# A glob is deliberate: sources get pasted in and renamed all week and I do not
+# want to edit this file every time. CONFIGURE_DEPENDS makes the build re-glob
+# when the directory changes. Replace this with an explicit list before
+# submission -- a glob is a reasonable dev-loop shortcut, not a reviewable one.
+file(GLOB BRAIN_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
+
+if(NOT BRAIN_SOURCES)
+    message(FATAL_ERROR
+        "No .cpp files in brain/src/. Paste the brain sources in there, then "
+        "re-run the configure step. (Configuring an empty SHARED library fails "
+        "later and more confusingly than this message does.)")
+endif()
 
 add_library(brain SHARED ${BRAIN_SOURCES})
 
 target_include_directories(brain PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../pkg/sdk/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
 set_target_properties(brain PROPERTIES
