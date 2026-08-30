@@ -228,8 +228,10 @@ Track* TrackStore::MostUrgentHostile(const Vec3& self_position, float now) {
     for (Track& t : tracks_) {
         if (t.belief != Belief::Hostile) continue;
         const float ttg = TimeToTarget(t.position, t.velocity, cfg_.asset);
-        // Total order: time-to-go, then range to us, then track_id. Never leave
-        // a tie to iteration accident -- that is a determinism bug waiting.
+        // Weighted sum, NOT a lexicographic order, and track_id is not
+        // consulted: range is worth 1 s of time-to-go per 1000 m, so it only
+        // separates near-ties. An exact tie still resolves by iteration order,
+        // so the determinism hazard is made unlikely here, not removed.
         const float d = swarm::Distance(t.position, self_position);
         const float key = ttg + d * 0.001f;
         if (key < best_ttg) { best_ttg = key; best = &t; }

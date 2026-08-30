@@ -119,7 +119,7 @@ struct Config {
     float max_speed = 20.0f;
     float max_accel = 15.0f;
     float max_tilt = 0.6f;
-    float kill_radius = 3.0f;
+    float kill_radius = 1.0f;   // s1 value; --dump-params drone.kill_radius=1
 
     Vec3 asset{};
     float asset_radius = 30.0f;
@@ -182,11 +182,13 @@ inline SwClass ToSwClass(Belief b) {
         case Belief::Hostile: return SW_CLASS_ENEMY;
         case Belief::Civilian: return SW_CLASS_NEUTRAL;
 
-        // Wreckage is NOT an aircraft, and nothing published says what the
-        // scorer's truth label for it is. Declaring NEUTRAL is a bet at 1:2
-        // odds -- correct is +1, wrong is -2 -- on a question we have not
-        // measured. UNKNOWN costs 0. Take the zero until a run tells us.
-        // TODO: check a --report for how wreckage is scored, then revisit.
+        // Wreckage is NOT an aircraft. MEASURED, not assumed: the trace header
+        // lists "wreckage" as entity_classes[3] but belief_classes has no
+        // wreckage entry, so no declaration about it can ever match the truth
+        // label. Confirmed by running s1 twice with only this line changed --
+        // NEUTRAL scored 10 more wrong_declarations and 0 more correct, with an
+        // identical state_hash. Declaring anything here costs -2 each. Take the
+        // zero. See notes/fixture-findings.md.
         case Belief::Wreckage: return SW_CLASS_UNKNOWN;
 
         default: return SW_CLASS_UNKNOWN;

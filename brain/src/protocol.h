@@ -55,8 +55,12 @@ public:
     void Vec(const Vec3& v) { F32(v.x); F32(v.y); F32(v.z); }
 
     /// Positions quantised to 0.125 m over a +/-4095 m range: 2 bytes per axis
-    /// instead of 4. Bandwidth is the binding constraint from s2 onward, and
-    /// the quantisation error is far below fix_sigma anyway.
+    /// instead of 4. Bandwidth is the binding constraint from s2 onward.
+    /// This truncates rather than rounds, so the per-axis error is up to the
+    /// full 0.125 m and one-signed. Measured fix_sigma on s1 is 0.35 m
+    /// (--dump-params sense.fix_sigma), so the error is a third of the fix
+    /// noise -- below it, but not negligibly so. The +/-4095 m range is 20x
+    /// wider than the +/-200 m arena, which is two wasted bits per axis.
     void PosQ(const Vec3& v) {
         Q16(v.x); Q16(v.y); Q16(v.z);
     }

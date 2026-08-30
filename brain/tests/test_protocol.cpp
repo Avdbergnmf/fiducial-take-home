@@ -129,7 +129,8 @@ static void TestPayloadRoundTrip() {
     in.Read(r);
     CHECK(r.ok());
 
-    // 0.25 m quantisation, well below fix_sigma.
+    // 0.125 m per-axis quantisation step, truncated not rounded, so the 3D
+    // error is up to sqrt(3)*0.125 = 0.217 m. Measured fix_sigma is 0.35 m.
     CHECK(swarm::Distance(in.position, out.position) < 0.3f);
     CHECK(swarm::Distance(in.velocity, out.velocity) < 0.3f);
     CHECK(in.belief == Belief::Hostile);
