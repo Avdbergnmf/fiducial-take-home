@@ -55,14 +55,27 @@ for id in "${IDS[@]}"; do
     # -- 2. repeatability ---------------------------------------------------
     # Same command twice. Catches anything that varies run to run on one thread,
     # which --replay would not, since it compares against a hash of run one.
+    #
+    # The timing fields are excluded, and must be: CHALLENGE.md section 9.3 says
+    # compute is "a wall-clock reading" and is measured but not scored, so
+    # mean_tick_us, p99_tick_us, overruns, realtime_factor and wall_time_s all
+    # vary between two identical runs by design. Comparing the whole report
+    # byte-for-byte reports a failure every single time, which would hide a real
+    # regression rather than reveal one. Everything else in the report,
+    # integrity.state_hash included, must match exactly.
     "$SIM" --scenario "$id" --brain "$BRAIN" --threads 1 \
            --report "$WORK/$id.b.json" --quiet >/dev/null 2>&1
-    if cmp -s "$WORK/$id.a.json" "$WORK/$id.b.json"; then
+    strip_timing() {
+        grep -vE '"(mean_tick_us|p99_tick_us|overruns|realtime_factor|wall_time_s)"' "$1"
+    }
+    if diff -q <(strip_timing "$WORK/$id.a.json") \
+               <(strip_timing "$WORK/$id.b.json") >/dev/null 2>&1; then
         note "repeatability: ok"
         pass=$((pass + 1))
     else
         note "repeatability: reports DIFFER between two identical runs"
-        diff <(head -40 "$WORK/$id.a.json") <(head -40 "$WORK/$id.b.json") | head -20
+        diff <(strip_timing "$WORK/$id.a.json") \
+             <(strip_timing "$WORK/$id.b.json") | head -20
         fail=$((fail + 1))
     fi
 done
