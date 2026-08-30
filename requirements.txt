@@ -1,4 +1,9 @@
-# Unpinned until the analysis scripts actually work; pin exact versions then so
-# the macOS and Windows images resolve identically.
+# Python deps for the analysis/viewer sidecar. NOT needed to build or run the
+# brain, and NOT needed by tools/inspect_trace.py, which is standard library
+# only and deliberately stays that way.
+#
+# Nothing in the repo imports these yet. Install them when the viewer data
+# pipeline lands:  py -m pip install -r requirements.txt
+# Pin exact versions once it works.
 numpy
 matplotlib

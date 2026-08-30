@@ -1,8 +1,8 @@
 # Setup runbook
 
 Native Windows is the primary path: the package ships `bin\swarm_sim.exe`, so
-there is no container and no emulation between me and the simulator. Docker is a
-fallback, documented at the bottom.
+there is nothing between me and the simulator. WSL works too if I prefer it —
+see the bottom.
 
 Run the PowerShell scripts like this, so the execution policy never gets in the
 way:
@@ -93,16 +93,13 @@ should answer.
 
 ---
 
-## Docker fallback
+## Running under WSL instead
 
-Only if the native path is a dead end. The repo still carries `Dockerfile`,
-`docker-compose.yml` and a `Makefile` from an earlier container-first attempt:
-
-    docker compose run --rm dev
-    make example
-
-Those target the Linux binary `pkg/bin/swarm_sim` and are **not** the tested
-path any more. Expect to spend time revalidating them before they work.
+The package ships both binaries, so the Linux one works too if you would rather
+work in WSL. Build with cmake as usual and run `bin/swarm_sim` instead of
+`bin/swarm_sim.exe`; `tools/check_determinism.sh` expects that path. Everything
+else — the scenarios, the scores, the trace format — is identical, and scores
+are bit-identical across machines, so runs from either side compare directly.
 
 ---
 

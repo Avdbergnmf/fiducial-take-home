@@ -6,9 +6,10 @@ Lines recording and the design write-up.
 
     pkg/      the challenge package (simulator, sdk, scenarios, examples)
     brain/    my brain: brain/src/*.cpp -> brain/build/[Release/]brain.dll
-    scripts/  PowerShell: build.ps1, run.ps1, example.ps1
-    tools/    trace inspection
-    notes/    schema.md (observed records), decisions.md (design log)
+    scripts/  PowerShell runners: build.ps1, run.ps1, example.ps1
+    tools/    inspect_trace.py, check_determinism.sh
+    notes/    observed schema, decisions log, and the audit (provenance,
+              code-map, fixture-findings)
     runs/     simulator output (only runs/fixture.* is committed)
     viewer/   3D visualiser for the recording
 

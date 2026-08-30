@@ -2,9 +2,8 @@
 #
 #     powershell -ExecutionPolicy Bypass -File scripts\run.ps1 -Scenario s1
 #
-# FLAG SPELLINGS: --scenario/--brain/--trace/--report are a best guess, written
-# before the package existed. Check `.\bin\swarm_sim.exe --help` from inside
-# pkg\ on the first run and correct the argument list at the bottom of this file.
+# Flags verified against `bin\swarm_sim.exe --help` (v0.6.0): --scenario,
+# --brain, --trace and --report are all real and spelled correctly here.
 
 [CmdletBinding()]
 param(

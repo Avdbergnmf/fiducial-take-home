@@ -4,7 +4,7 @@
 #
 #     powershell -ExecutionPolicy Bypass -File scripts\example.ps1
 #
-# FLAG SPELLINGS: see the note in run.ps1 -- verify against --help on first run.
+# Flags verified against `bin\swarm_sim.exe --help` (v0.6.0).
 
 [CmdletBinding()]
 param(
