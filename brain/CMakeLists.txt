@@ -1,25 +1,27 @@
+# Brain build. Nothing links against the simulator: the only thing this library
+# needs is the SDK include directory.
+#
+#   cmake -S brain -B brain/build -DCMAKE_BUILD_TYPE=Release
+#   cmake --build brain/build
+#
+# Produces brain/build/brain.so (or brain.dll on Windows).
+
 cmake_minimum_required(VERSION 3.16)
 project(swarm_brain CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# A glob is deliberate: sources get pasted in and renamed all week and I do not
-# want to edit this file every time. CONFIGURE_DEPENDS makes the build re-glob
-# when the directory changes. Replace this with an explicit list before
-# submission -- a glob is a reasonable dev-loop shortcut, not a reviewable one.
-file(GLOB BRAIN_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
-
-if(NOT BRAIN_SOURCES)
-    message(FATAL_ERROR
-        "No .cpp files in brain/src/. Paste the brain sources in there, then "
-        "re-run the configure step. (Configuring an empty SHARED library fails "
-        "later and more confusingly than this message does.)")
-endif()
+set(BRAIN_SOURCES
+    src/brain.cpp
+    src/belief.cpp
+    src/flight.cpp
+    src/policy.cpp
+)
 
 add_library(brain SHARED ${BRAIN_SOURCES})
 
@@ -28,6 +30,9 @@ target_include_directories(brain PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
+# No "lib" prefix, and hide everything except the one exported factory. Hiding
+# matters beyond tidiness: fewer exported symbols means the loader cannot bind
+# something of ours to something of theirs by accident.
 set_target_properties(brain PROPERTIES
     PREFIX ""
     OUTPUT_NAME "brain"
@@ -41,7 +46,29 @@ else()
     target_compile_options(brain PRIVATE -Wall -Wextra)
 endif()
 
-# Fail the build on an unresolved symbol instead of deferring it to dlopen time.
+# Fail the build if any symbol is left unresolved, rather than deferring the
+# error to load time. This is the check that proves the library is standalone.
 if(NOT WIN32 AND NOT APPLE)
     target_link_options(brain PRIVATE -Wl,--no-undefined)
 endif()
+
+# ---------------------------------------------------------------------------
+# Tests. Plain executables that return non-zero on failure -- no framework to
+# vendor, and `ctest` or `make test` drives them either way.
+# ---------------------------------------------------------------------------
+
+enable_testing()
+
+add_executable(test_protocol tests/test_protocol.cpp)
+target_include_directories(test_protocol PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../pkg/sdk/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+add_test(NAME protocol COMMAND test_protocol)
+
+add_executable(test_belief tests/test_belief.cpp src/belief.cpp)
+target_include_directories(test_belief PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../pkg/sdk/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+add_test(NAME belief COMMAND test_belief)
