@@ -12,20 +12,24 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-# Simulator output. runs/fixture.* is a committed test fixture, so keep it.
+# Simulator output. runs/fixture.jsonl, fixture.json and fixture.meta.json
+# are the committed test fixture. The binary is regenerable and stays out.
 runs/*.jsonl
 runs/*.json
 runs/*.bin
-!runs/fixture.*
+runs/*.png
+!runs/fixture.jsonl
+!runs/fixture.json
+!runs/fixture.meta.json
 
-# Unity (viewer/)
-viewer/Library/
-viewer/Temp/
-viewer/Obj/
-viewer/Build/
-viewer/Logs/
-viewer/UserSettings/
-viewer/*.csproj
-viewer/*.sln
+# Unity (viewer/<project>/). Nested so a Hub project under viewer/ is covered.
+viewer/**/Library/
+viewer/**/Temp/
+viewer/**/Obj/
+viewer/**/Build/
+viewer/**/Logs/
+viewer/**/UserSettings/
+viewer/**/*.csproj
+viewer/**/*.sln
 
 # NOTE: pkg/ is deliberately NOT ignored -- the challenge package is committed.

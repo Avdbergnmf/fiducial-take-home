@@ -201,9 +201,9 @@ Full dump is 104 lines; re-run it rather than trusting a copy.
 
 ## For the viewer adapter
 
-`tools/build_viewer_data.py` does not exist in the repo (see the audit summary), but when it
-lands, this is the mapping it needs. Read it from the header at runtime rather than hardcoding
-— `entity_columns` is exactly why that record exists.
+`tools/build_viewer_data.py` is the mapping. It reads column names from the header at
+runtime rather than hardcoding positions — `entity_columns` is exactly why that record
+exists. Output contract is [FORMAT.md](../FORMAT.md).
 
 | Semantic | Trace source |
 |---|---|

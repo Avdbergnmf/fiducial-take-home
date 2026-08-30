@@ -2,8 +2,7 @@
 # brain, and NOT needed by tools/inspect_trace.py, which is standard library
 # only and deliberately stays that way.
 #
-# Nothing in the repo imports these yet. Install them when the viewer data
-# pipeline lands:  py -m pip install -r requirements.txt
-# Pin exact versions once it works.
+# Used by tools/build_viewer_data.py and tools/plot_fixture.py.
+#   py -m pip install -r requirements.txt
 numpy
 matplotlib

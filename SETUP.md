@@ -61,12 +61,24 @@ way:
    record: it defines the `frame` column names, and the viewer depends on them.
 
 7. **Commit the fixture and the schema notes.** `.gitignore` keeps
-   `runs\fixture.*` while ignoring the rest of `runs\`, so no `-f` needed.
+   `runs\fixture.jsonl` and `runs\fixture.json` while ignoring the rest of
+   `runs\`, so no `-f` needed.
 
        git add runs\fixture.jsonl runs\fixture.json notes\schema.md
        git commit -m "Add fixture recording and observed trace schema"
 
-8. **Paste in my own sources**, then build and run them:
+8. **Build the viewer dataset** from that recording. Python owns all parsing;
+   Unity only loads the two files this writes. See [FORMAT.md](FORMAT.md).
+
+       python tools\build_viewer_data.py runs\fixture.jsonl runs\fixture
+       python tools\plot_fixture.py
+
+   `runs\fixture_check.png` must show a clean 60 m ring of friendlies at
+   y ≈ +30. If it does not, the parse is wrong — do not start the viewer.
+   Copy `runs\fixture.bin` and `runs\fixture.meta.json` into
+   `viewer\<project>\Assets\StreamingAssets\` when the Unity side is ready.
+
+9. **Paste in my own sources**, then build and run them:
 
        # brain sources -> brain\src\   (at least one .cpp)
        powershell -ExecutionPolicy Bypass -File scripts\build.ps1
