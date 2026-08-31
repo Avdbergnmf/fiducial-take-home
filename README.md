@@ -6,12 +6,14 @@ Lines recording and the design write-up.
 
     pkg/      the challenge package (simulator, sdk, scenarios, examples)
     brain/    my brain: brain/src/*.cpp -> brain/build/[Release/]brain.dll
-    scripts/  PowerShell runners: build.ps1, run.ps1, example.ps1
+    scripts/  PowerShell. iterate.ps1 is the loop; also sweep, compare,
+              determinism, history, build, run, example, sync_viewer_data
     tools/    inspect_trace.py, build_viewer_data.py, plot_fixture.py,
               check_determinism.sh
     FORMAT.md contract for the two files the 3D viewer loads
-    notes/    observed schema, decisions log, and the audit (provenance,
-              code-map, fixture-findings)
+    notes/    brain-loop (the process), brain-goals (what to do next),
+              brain-walkthrough (reading the brain), plus the audit
+              (provenance, code-map, fixture-findings), schema and decisions
     runs/     simulator output (fixture jsonl/json/meta.json committed; .bin not)
     viewer/   3D visualiser for the recording
 
