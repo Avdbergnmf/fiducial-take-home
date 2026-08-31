@@ -68,3 +68,129 @@ as heavily as the code, so it gets real time, not the last hour.
 ## Known gaps and what I did not get to
 
 - Be specific and honest. A named gap costs less than a discovered one.
+
+---
+
+# Notes for DESIGN.md
+
+Drop these in as sections. Trim to taste — they are written to be pasted, not
+edited heavily.
+
+---
+
+## Viewer pipeline
+
+```
+swarm_sim --trace run.jsonl  ->  build_viewer_data.py  ->  run.bin + run.meta.json  ->  Unity
+```
+
+The Python sidecar owns all data work: parsing, delta expansion, coordinate
+conversion, event derivation. Unity owns rendering and interaction only — it
+never parses the trace, never sees NED, never expands a delta.
+
+The split is deliberate. Coordinate handedness and delta accumulation are the
+two things that cost hours when they go wrong, and they are far cheaper to debug
+against a matplotlib plot than inside a game engine. It also keeps the viewer
+replaceable: the same two files would feed a three.js front end unchanged.
+
+### Why two files
+
+A run has two shapes of data and they want different treatment.
+
+Geometry is dense and uniform — every entity has a position, velocity and
+attitude at every frame, always the same 11 floats. That goes in `run.bin` as a
+fixed-stride binary array, frame-major. Roughly 600,000 numbers for a four-minute
+run: 2.6 MB binary against 15–20 MB of JSON, loaded with one `ReadAllBytes` and
+one block copy instead of a parse.
+
+The decisive property is not size but random access. Any sample is arithmetic:
+
+```
+offset(frame, slot) = ((frame * slot_count) + slot) * stride
+```
+
+One multiply and an add, so seeking backwards costs exactly what playing forwards
+costs. Scrubbing a timeline is the core interaction of this viewer, and a format
+requiring a parse or a scan would make it stutter.
+
+Everything else — events, logs, radio links, belief changes, telemetry, the score
+report — is sparse and irregular: variable-length text, different fields per
+record, absent at most timestamps. That goes in `run.meta.json`, where JSON's
+overhead is irrelevant at a few thousand records and its flexibility is the point.
+
+`run.meta.json` is also the instruction manual for `run.bin`: it declares
+`stride`, `frame_count` and `slot_count`, so the reader is told the layout rather
+than assuming it. Unity validates `bin_length == frame_count * slot_count *
+stride * 4` on load, which turns a stale `.bin` beside a fresh `.meta.json` into
+an immediate error instead of silently wrong geometry.
+
+**Known gap:** stride says how many floats, not which. The field order lives in
+FORMAT.md and in comments on both sides. A `columns` array in the meta would make
+the layout fully self-describing — which is what the simulator's own `header`
+record does for frame rows, and it is the better design. Not done for time.
+
+---
+
+## Forward compatibility
+
+The same rule applies to both formats I control, the wire protocol and the viewer
+format: **a reader must tolerate fields it does not know, and a writer must never
+silently change the meaning of an existing one.**
+
+On the wire, that is a version byte first and a message-type byte second, with a
+frame whose version does not match being dropped rather than guessed at.
+
+In the viewer format, it is that readers treat a missing field as *unknown*, not
+as zero. The distinction matters more than it looks. A `kill_radius` absent from
+an older meta file, defaulted to `0`, produces a viewer that draws a
+zero-radius sphere and separation logic that believes nothing can ever collide —
+wrong, and invisible. Treated as unknown, it falls back to a configured value and
+says so. The failure being avoided is a default that looks like a measurement.
+
+The same reasoning is why `Config` in the brain reads every mission constant from
+`SwBootInfo` rather than carrying defaults. A plausible wrong constant is worse
+than a loud absence, and every one of those values varies between missions.
+
+### Provenance
+
+Each `run.meta.json` records where it came from: source trace, scenario id, brain
+binary, simulator version, and generation timestamp. Most of it is copied
+straight from the trace's own `header`, which already carries it.
+
+The reason is mundane and immediate — after a day of sweeps there are a dozen
+`.bin` files and a filename does not say which scenario or which build produced
+one. A run that describes itself removes a category of mistake rather than
+requiring discipline to avoid it.
+
+---
+
+## Validating a loaded run
+
+Coordinate bugs are silent. Nothing throws, nothing renders red; the picture is
+simply wrong in a way that can go unnoticed for an hour. So the viewer validates
+every run at load, in one pass that reports all problems together rather than
+throwing on the first.
+
+Checks fall into three tiers by where their truth comes from:
+
+**Universal** — properties of a correct conversion, true for any run and needing
+no configuration. Altitude positive at t=0 (NED z is down, so a negative Unity y
+means the conversion was applied twice or not at all); attitude quaternions
+unit-length; no NaN or infinity; slot indices matching array positions; entity
+lifetimes within the frame range.
+
+**Self-describing** — read from the meta file, which already carries arena
+bounds, asset, fleet size and duration. Positions inside the arena, friendly
+count matching fleet size, frame count consistent with duration times trace rate.
+
+**Behaviour expectations** — opt-in per run. "Friendlies hold a 60 m ring at 30 m"
+is a property of the *example brain* on s1, not of s1 itself; my own brain breaks
+formation to intercept and the assertion stops holding. An earlier version keyed
+this off the filename `fixture`, which conflated a name with a property. It is now
+an explicit toggle, off by default.
+
+**What this cannot catch:** a quaternion can be unit-length and still rotated
+wrongly. No automated check finds a handedness error. That is verified manually —
+a gizmo drawing an entity's forward vector against its velocity vector, which
+should agree in straight transit — and it is documented as a manual step rather
+than pretended to be covered.
