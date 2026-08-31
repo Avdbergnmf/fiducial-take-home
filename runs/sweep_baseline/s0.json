@@ -1,0 +1,67 @@
+{
+  "awareness": {
+    "belief_accuracy": 0.0,
+    "compromise_detect_latency_s": null,
+    "compromises": 0,
+    "compromises_detected": 0,
+    "correct_declarations": 0,
+    "false_accusations": 0,
+    "samples": 928,
+    "wrong_declarations": 0
+  },
+  "brain": "C:\\Users\\Alex_\\Documents\\Fiducial\\fiducial-take-home\\brain\\build\\Release\\brain.dll",
+  "comms": {
+    "bytes_per_drone_per_s": 44.0,
+    "frames_dropped_budget": 0,
+    "frames_dropped_loss": 28,
+    "frames_overheard": 0,
+    "frames_overheard_clear": 0,
+    "frames_sent": 960,
+    "impostor_frames": 0,
+    "max_hops_observed": 0,
+    "propagation_p95_s": null
+  },
+  "compute": {
+    "budget_us": 2000,
+    "mean_tick_us": 0.5,
+    "overruns": 0,
+    "p99_tick_us": 1.2
+  },
+  "events": [],
+  "integrity": {
+    "abi_violations": [],
+    "brain_crashes": 0,
+    "state_hash": "0xe4ccc2a31e1066f6"
+  },
+  "mission": {
+    "asset_survival_time_s": 60.0,
+    "civilians_lost": 0,
+    "friendlies_alive": 8,
+    "friendlies_lost_credited": 0,
+    "friendlies_lost_wasted": 0,
+    "friendly_losses": [],
+    "hostiles_destroyed": 0,
+    "hostiles_reached_asset": 0,
+    "hostiles_surviving": 0,
+    "hostiles_total": 0,
+    "intercepts": [],
+    "losses_by_cause": {},
+    "wreckage_kills": 0,
+    "wreckage_spawned": 0
+  },
+  "outcome": "asset_survived",
+  "realtime_factor": 172.7,
+  "scenario": "s0",
+  "schema": 2,
+  "score": {
+    "awareness": 0.0,
+    "comms": 39.6,
+    "learning": null,
+    "mission": 0.0,
+    "total": 39.6
+  },
+  "sim_time_s": 60.0,
+  "sim_version": "swarm_sim 0.6.0",
+  "ticks": 6000,
+  "wall_time_s": 0.3473
+}

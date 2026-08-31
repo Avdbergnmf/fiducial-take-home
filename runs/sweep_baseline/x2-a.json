@@ -1,0 +1,136 @@
+{
+  "awareness": {
+    "belief_accuracy": 0.013,
+    "compromise_detect_latency_s": null,
+    "compromises": 0,
+    "compromises_detected": 0,
+    "correct_declarations": 69,
+    "false_accusations": 0,
+    "samples": 5175,
+    "wrong_declarations": 1279
+  },
+  "brain": "C:\\Users\\Alex_\\Documents\\Fiducial\\fiducial-take-home\\brain\\build\\Release\\brain.dll",
+  "comms": {
+    "bytes_per_drone_per_s": 731.0,
+    "frames_dropped_budget": 0,
+    "frames_dropped_loss": 37760,
+    "frames_overheard": 5142,
+    "frames_overheard_clear": 5142,
+    "frames_sent": 35228,
+    "impostor_frames": 0,
+    "max_hops_observed": 0,
+    "propagation_p95_s": null
+  },
+  "compute": {
+    "budget_us": 2000,
+    "mean_tick_us": 1.9,
+    "overruns": 0,
+    "p99_tick_us": 4.1
+  },
+  "events": [
+    {
+      "drone": 6,
+      "t": 7.78,
+      "target": "pair_neutral",
+      "type": "friendly_lost"
+    },
+    {
+      "t": 7.78,
+      "type": "civilian_lost"
+    },
+    {
+      "drone": 11,
+      "t": 8.15,
+      "target": "pair_neutral",
+      "type": "friendly_lost"
+    },
+    {
+      "t": 8.15,
+      "type": "civilian_lost"
+    },
+    {
+      "drone": 7,
+      "t": 8.18,
+      "target": "wreckage",
+      "type": "friendly_lost"
+    },
+    {
+      "t": 17.84,
+      "target": "hostile_0",
+      "type": "breach"
+    },
+    {
+      "t": 36.9,
+      "target": "hostile_1",
+      "type": "breach"
+    },
+    {
+      "t": 55.97,
+      "target": "hostile_2",
+      "type": "breach"
+    },
+    {
+      "t": 75.03,
+      "target": "hostile_3",
+      "type": "breach"
+    }
+  ],
+  "integrity": {
+    "abi_violations": [],
+    "brain_crashes": 0,
+    "state_hash": "0x977513d24b754197"
+  },
+  "mission": {
+    "asset_survival_time_s": 17.84,
+    "civilians_lost": 2,
+    "friendlies_alive": 11,
+    "friendlies_lost_credited": 0,
+    "friendlies_lost_wasted": 3,
+    "friendly_losses": [
+      {
+        "cause": "pair_neutral",
+        "credited": false,
+        "drone": 6,
+        "t": 7.78
+      },
+      {
+        "cause": "pair_neutral",
+        "credited": false,
+        "drone": 11,
+        "t": 8.15
+      },
+      {
+        "cause": "wreckage",
+        "credited": false,
+        "drone": 7,
+        "t": 8.18
+      }
+    ],
+    "hostiles_destroyed": 0,
+    "hostiles_reached_asset": 4,
+    "hostiles_surviving": 0,
+    "hostiles_total": 4,
+    "intercepts": [],
+    "losses_by_cause": {
+      "pair_neutral": 2,
+      "wreckage": 1
+    },
+    "wreckage_kills": 1,
+    "wreckage_spawned": 2
+  },
+  "outcome": "asset_lost",
+  "realtime_factor": 75.2,
+  "scenario": "x2-a",
+  "schema": 2,
+  "score": {
+    "awareness": 0.0,
+    "comms": 34.9,
+    "learning": null,
+    "mission": -1220.0,
+    "total": -1185.1
+  },
+  "sim_time_s": 75.03,
+  "sim_version": "swarm_sim 0.6.0",
+  "ticks": 7503,
+  "wall_time_s": 0.9978
+}

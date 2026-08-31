@@ -1,0 +1,115 @@
+{
+  "awareness": {
+    "belief_accuracy": 0.018,
+    "compromise_detect_latency_s": null,
+    "compromises": 0,
+    "compromises_detected": 0,
+    "correct_declarations": 57,
+    "false_accusations": 0,
+    "samples": 3149,
+    "wrong_declarations": 31
+  },
+  "brain": "C:\\Users\\Alex_\\Documents\\Fiducial\\fiducial-take-home\\brain\\build\\Release\\brain.dll",
+  "comms": {
+    "bytes_per_drone_per_s": 389.0,
+    "frames_dropped_budget": 0,
+    "frames_dropped_loss": 14568,
+    "frames_overheard": 2018,
+    "frames_overheard_clear": 2018,
+    "frames_sent": 14753,
+    "impostor_frames": 0,
+    "max_hops_observed": 0,
+    "propagation_p95_s": null
+  },
+  "compute": {
+    "budget_us": 2000,
+    "mean_tick_us": 1.2,
+    "overruns": 0,
+    "p99_tick_us": 2.7
+  },
+  "events": [
+    {
+      "drone": 4,
+      "t": 10.12,
+      "target": "pair_neutral",
+      "type": "friendly_lost"
+    },
+    {
+      "t": 10.12,
+      "type": "civilian_lost"
+    },
+    {
+      "drone": 5,
+      "t": 10.51,
+      "target": "wreckage",
+      "type": "friendly_lost"
+    },
+    {
+      "t": 24.58,
+      "target": "hostile_0",
+      "type": "breach"
+    },
+    {
+      "t": 38.51,
+      "target": "hostile_1",
+      "type": "breach"
+    },
+    {
+      "t": 52.45,
+      "target": "hostile_2",
+      "type": "breach"
+    }
+  ],
+  "integrity": {
+    "abi_violations": [],
+    "brain_crashes": 0,
+    "state_hash": "0x5c32f1d33ba3a156"
+  },
+  "mission": {
+    "asset_survival_time_s": 24.58,
+    "civilians_lost": 1,
+    "friendlies_alive": 14,
+    "friendlies_lost_credited": 0,
+    "friendlies_lost_wasted": 2,
+    "friendly_losses": [
+      {
+        "cause": "pair_neutral",
+        "credited": false,
+        "drone": 4,
+        "t": 10.12
+      },
+      {
+        "cause": "wreckage",
+        "credited": false,
+        "drone": 5,
+        "t": 10.51
+      }
+    ],
+    "hostiles_destroyed": 0,
+    "hostiles_reached_asset": 3,
+    "hostiles_surviving": 0,
+    "hostiles_total": 3,
+    "intercepts": [],
+    "losses_by_cause": {
+      "pair_neutral": 1,
+      "wreckage": 1
+    },
+    "wreckage_kills": 1,
+    "wreckage_spawned": 1
+  },
+  "outcome": "asset_lost",
+  "realtime_factor": 92.2,
+  "scenario": "x1-c",
+  "schema": 2,
+  "score": {
+    "awareness": 0.0,
+    "comms": 37.5,
+    "learning": null,
+    "mission": -830.0,
+    "total": -792.5
+  },
+  "sim_time_s": 52.45,
+  "sim_version": "swarm_sim 0.6.0",
+  "ticks": 5245,
+  "wall_time_s": 0.5687
+}

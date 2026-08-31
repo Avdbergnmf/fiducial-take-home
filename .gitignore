@@ -33,3 +33,4 @@ viewer/**/*.csproj
 viewer/**/*.sln
 
 # NOTE: pkg/ is deliberately NOT ignored -- the challenge package is committed.
+runs/sweep/

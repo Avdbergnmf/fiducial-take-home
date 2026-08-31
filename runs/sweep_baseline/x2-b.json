@@ -1,0 +1,197 @@
+{
+  "awareness": {
+    "belief_accuracy": 0.02,
+    "compromise_detect_latency_s": null,
+    "compromises": 0,
+    "compromises_detected": 0,
+    "correct_declarations": 18,
+    "false_accusations": 0,
+    "samples": 912,
+    "wrong_declarations": 168
+  },
+  "brain": "C:\\Users\\Alex_\\Documents\\Fiducial\\fiducial-take-home\\brain\\build\\Release\\brain.dll",
+  "comms": {
+    "bytes_per_drone_per_s": 235.6,
+    "frames_dropped_budget": 0,
+    "frames_dropped_loss": 3376,
+    "frames_overheard": 1318,
+    "frames_overheard_clear": 1318,
+    "frames_sent": 6566,
+    "impostor_frames": 0,
+    "max_hops_observed": 0,
+    "propagation_p95_s": null
+  },
+  "compute": {
+    "budget_us": 2000,
+    "mean_tick_us": 1.1,
+    "overruns": 0,
+    "p99_tick_us": 3.1
+  },
+  "events": [
+    {
+      "drone": 5,
+      "t": 21.21,
+      "target": "pair_hostile",
+      "type": "friendly_lost"
+    },
+    {
+      "t": 21.21,
+      "target": "hostile_0",
+      "type": "intercept"
+    },
+    {
+      "drone": 4,
+      "t": 28.6,
+      "target": "pair_friendly",
+      "type": "friendly_lost"
+    },
+    {
+      "drone": 6,
+      "t": 28.6,
+      "target": "pair_friendly",
+      "type": "friendly_lost"
+    },
+    {
+      "drone": 2,
+      "t": 31.54,
+      "target": "pair_friendly",
+      "type": "friendly_lost"
+    },
+    {
+      "drone": 7,
+      "t": 31.54,
+      "target": "pair_friendly",
+      "type": "friendly_lost"
+    },
+    {
+      "drone": 1,
+      "t": 38.1,
+      "target": "pair_friendly",
+      "type": "friendly_lost"
+    },
+    {
+      "drone": 8,
+      "t": 38.1,
+      "target": "pair_friendly",
+      "type": "friendly_lost"
+    },
+    {
+      "drone": 0,
+      "t": 39.99,
+      "target": "ground",
+      "type": "friendly_lost"
+    },
+    {
+      "t": 42.9,
+      "target": "hostile_1",
+      "type": "breach"
+    },
+    {
+      "t": 62.41,
+      "target": "hostile_2",
+      "type": "breach"
+    }
+  ],
+  "integrity": {
+    "abi_violations": [],
+    "brain_crashes": 0,
+    "state_hash": "0x681f5a77ebe9d981"
+  },
+  "mission": {
+    "asset_survival_time_s": 42.9,
+    "civilians_lost": 0,
+    "friendlies_alive": 1,
+    "friendlies_lost_credited": 1,
+    "friendlies_lost_wasted": 7,
+    "friendly_losses": [
+      {
+        "cause": "pair_hostile",
+        "credited": true,
+        "drone": 5,
+        "t": 21.21
+      },
+      {
+        "cause": "pair_friendly",
+        "credited": false,
+        "drone": 4,
+        "t": 28.6
+      },
+      {
+        "cause": "pair_friendly",
+        "credited": false,
+        "drone": 6,
+        "t": 28.6
+      },
+      {
+        "cause": "pair_friendly",
+        "credited": false,
+        "drone": 2,
+        "t": 31.54
+      },
+      {
+        "cause": "pair_friendly",
+        "credited": false,
+        "drone": 7,
+        "t": 31.54
+      },
+      {
+        "cause": "pair_friendly",
+        "credited": false,
+        "drone": 1,
+        "t": 38.1
+      },
+      {
+        "cause": "pair_friendly",
+        "credited": false,
+        "drone": 8,
+        "t": 38.1
+      },
+      {
+        "cause": "ground",
+        "credited": false,
+        "drone": 0,
+        "t": 39.99
+      }
+    ],
+    "hostiles_destroyed": 1,
+    "hostiles_reached_asset": 2,
+    "hostiles_surviving": 0,
+    "hostiles_total": 3,
+    "intercepts": [
+      {
+        "by_drones": [
+          5
+        ],
+        "hostile": "hostile_0",
+        "reward": 1.0,
+        "t_engage_s": 10.11,
+        "t_free_s": 10.21,
+        "t_kill": 21.21,
+        "t_spawn": 11.1,
+        "urgency_ratio": 0.99
+      }
+    ],
+    "losses_by_cause": {
+      "ground": 1,
+      "pair_friendly": 6,
+      "pair_hostile": 1
+    },
+    "wreckage_kills": 0,
+    "wreckage_spawned": 4
+  },
+  "outcome": "asset_lost",
+  "realtime_factor": 121.5,
+  "scenario": "x2-b",
+  "schema": 2,
+  "score": {
+    "awareness": 0.0,
+    "comms": 31.3,
+    "learning": null,
+    "mission": -679.0,
+    "total": -647.7
+  },
+  "sim_time_s": 62.41,
+  "sim_version": "swarm_sim 0.6.0",
+  "ticks": 6241,
+  "wall_time_s": 0.5136
+}
