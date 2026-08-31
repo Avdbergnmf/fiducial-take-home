@@ -8,7 +8,7 @@
 # the bin length and the meta drift apart.
 
 [CmdletBinding()]
-param(
+param( # default stem is fixture
     [string]$Stem = "fixture",
     [switch]$Rebuild
 )

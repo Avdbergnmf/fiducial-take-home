@@ -6,10 +6,9 @@ prints raw examples verbatim. Nothing here interprets a field's meaning, so it
 cannot go stale or encode a guess about the recording format.
 
     python tools/inspect_trace.py runs/fixture.jsonl
-    python tools/inspect_trace.py runs/fixture.jsonl --write
+    python tools/inspect_trace.py runs/fixture.jsonl --write /tmp/trace.md
 
---write dumps the same output to notes/schema.md (overwriting it) so it can be
-pasted straight into a chat.
+Prints a markdown report to stdout. --write also saves that report to PATH.
 """
 
 import argparse
@@ -104,9 +103,8 @@ def main(argv):
     parser = argparse.ArgumentParser(
         description="Count record types in a JSON Lines trace and print raw examples.")
     parser.add_argument("trace", help="path to the .jsonl recording")
-    parser.add_argument("--write", nargs="?", const=os.path.join("notes", "schema.md"),
-                        default=None, metavar="PATH",
-                        help="also write the report to PATH (default: notes/schema.md)")
+    parser.add_argument("--write", metavar="PATH",
+                        help="also write the report to PATH")
     args = parser.parse_args(argv[1:])
 
     if not os.path.isfile(args.trace):

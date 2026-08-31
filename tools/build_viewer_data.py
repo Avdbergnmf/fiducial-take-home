@@ -7,9 +7,9 @@ Python owns all data work: parsing, delta expansion, coordinate conversion and
 event derivation. The viewer reads two files and renders. It never parses the
 raw trace, never sees NED, and never expands a delta.
 
-Written against the real schema in notes/schema.md. Field names are taken from
-the header record where the header defines them (entity_columns in particular),
-and there are no fallbacks for names this format does not use.
+Written against the header in the JSONL itself. Field names are taken from
+that record (entity_columns in particular), and there are no fallbacks for
+names this format does not use.
 
 Output is engine-agnostic: run.bin is a flat float32 array and run.meta.json is
 plain JSON. Nothing here is Unity-specific except the coordinate convention,
@@ -18,7 +18,6 @@ which is documented in FORMAT.md.
 
 import argparse
 import json
-import math
 import os
 import sys
 from datetime import datetime, timezone
@@ -26,7 +25,8 @@ from datetime import datetime, timezone
 import numpy as np
 
 FORMAT_VERSION = 1
-STRIDE = 11  # pos3 + vel3 + quat4 + alive1
+# floats per entity per frame, Unity axes: px py pz, vx vy vz, qx qy qz qw, alive
+STRIDE = 11
 
 # Trace class name -> the kind names the viewer uses.
 KIND_OF_CLASS = {

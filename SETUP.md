@@ -55,17 +55,17 @@ way:
 
 6. **See what is actually in the recording.**
 
-       python tools\inspect_trace.py runs\fixture.jsonl --write
+       python tools\inspect_trace.py runs\fixture.jsonl
 
-   This overwrites `notes\schema.md` with the real records. Read the `header`
-   record: it defines the `frame` column names, and the viewer depends on them.
+   Prints record-type counts and the first example of each type. Read the
+   `header` record: it defines the `frame` column names, and the viewer
+   depends on them. The source of truth is the JSONL itself, not a dump of it.
 
-7. **Commit the fixture and the schema notes.** `.gitignore` keeps
-   `runs\fixture.jsonl` and `runs\fixture.json` while ignoring the rest of
-   `runs\`, so no `-f` needed.
+7. **Commit the fixture.** `.gitignore` keeps `runs\fixture.jsonl` and
+   `runs\fixture.json` while ignoring the rest of `runs\`, so no `-f` needed.
 
-       git add runs\fixture.jsonl runs\fixture.json notes\schema.md
-       git commit -m "Add fixture recording and observed trace schema"
+       git add runs\fixture.jsonl runs\fixture.json
+       git commit -m "Add fixture recording"
 
 8. **Build the viewer dataset** from that recording. Python owns all parsing;
    Unity only loads the two files this writes. See [FORMAT.md](FORMAT.md).

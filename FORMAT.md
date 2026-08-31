@@ -269,8 +269,8 @@ three.js is the same two files: `fetch` the bin as `ArrayBuffer`, wrap in
 
 ## What the real schema did that the prompt did not
 
-Written against `notes/schema.md` / `runs/fixture.jsonl`. No fallbacks for
-field names that are not in this recording.
+Written against `runs/fixture.jsonl`. No fallbacks for field names that are
+not in this recording.
 
 | Specified / guessed | Actual |
 |---|---|

@@ -13,7 +13,7 @@ Lines recording and the design write-up.
     FORMAT.md contract for the two files the 3D viewer loads
     notes/    brain-loop (the process), brain-goals (what to do next),
               brain-walkthrough (reading the brain), plus the audit
-              (provenance, code-map, fixture-findings), schema and decisions
+              (provenance, code-map, fixture-findings) and decisions
     runs/     simulator output (fixture jsonl/json/meta.json committed; .bin not)
     viewer/   3D visualiser for the recording
 
