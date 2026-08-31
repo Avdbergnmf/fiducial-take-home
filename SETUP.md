@@ -72,11 +72,14 @@ way:
 
        python tools\build_viewer_data.py runs\fixture.jsonl runs\fixture
        python tools\plot_fixture.py
+       powershell -ExecutionPolicy Bypass -File scripts\sync_viewer_data.ps1
 
    `runs\fixture_check.png` must show a clean 60 m ring of friendlies at
    y ≈ +30. If it does not, the parse is wrong — do not start the viewer.
-   Copy `runs\fixture.bin` and `runs\fixture.meta.json` into
-   `viewer\<project>\Assets\StreamingAssets\` when the Unity side is ready.
+   `sync_viewer_data.ps1` copies `fixture.bin` and `fixture.meta.json` into
+   `viewer\fiducial-swarm-viz\Assets\StreamingAssets\` (the viewer loads a
+   copy; skipping this is how those files go stale). Pass `-Rebuild` to run
+   the sidecar and copy in one step.
 
 9. **Paste in my own sources**, then build and run them:
 

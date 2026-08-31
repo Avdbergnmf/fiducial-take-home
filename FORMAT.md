@@ -14,6 +14,7 @@ Generate:
 ```
 python tools/build_viewer_data.py runs/fixture.jsonl runs/fixture
 python tools/plot_fixture.py
+powershell -ExecutionPolicy Bypass -File scripts\sync_viewer_data.ps1
 ```
 
 That writes `runs/fixture.bin`, `runs/fixture.meta.json`, and
@@ -58,6 +59,8 @@ Everything sparse or non-uniform. Field order is the order below.
 | `format_version` | `1` |
 | `source` | basename of the `.jsonl` |
 | `scenario` | scenario id (`s1`, `x1-…`) |
+| `sim_version` | simulator banner from the header (`swarm_sim 0.6.0`) |
+| `brain` | path of the shared library that produced the trace |
 | `dt` | simulator step, seconds (0.01) |
 | `trace_hz` | recorded frames per second (10) |
 | `frame_count` | number of `frame` records |
@@ -66,7 +69,9 @@ Everything sparse or non-uniform. Field order is the order below.
 | `duration` | time of the last recorded frame, seconds |
 | `arena.min/max` | axis-aligned box, **already in viewer coordinates** |
 | `asset.position/radius` | same |
+| `kill_radius` | metres; copied from the trace header. Same for every airframe. |
 | `fleet_size` | friendly count at boot (`header.fleet_size`) |
+| `provenance` | see below |
 | `entities[]` | see below |
 | `events[]` | derived; sorted by `t` |
 | `links[]` | radio-link **intervals**, not deltas |
@@ -74,6 +79,43 @@ Everything sparse or non-uniform. Field order is the order below.
 | `logs[]` | `t`, `drone`, `text` |
 | `telemetry[]` | `t`, `drone`, `bytes_sent`, `budget_remaining` |
 | `report` | the trace's final `report` record, verbatim |
+
+Readers **must tolerate missing fields**. Older `*.meta.json` files omit
+`provenance`, `sim_version`, `brain`, and even `kill_radius`. Treat a missing
+number as “unknown”, not as zero in a way that would look like a real limit.
+
+### `provenance`
+
+So six runs from now the `.bin` is still attributable.
+
+| field | meaning |
+|---|---|
+| `trace` | absolute path of the `.jsonl` this was built from |
+| `scenario` | copy of `header.scenario` |
+| `brain` | copy of `header.brain` (may be a full local path) |
+| `sim_version` | copy of `header.sim_version` |
+| `header_schema` | `header.schema` (integer) |
+| `generated_at` | UTC timestamp, `YYYY-MM-DDTHH:MM:SSZ`, when the sidecar ran |
+
+### What the header does **not** carry
+
+These exist in `SwBootInfo` / `pkg/scenarios/*.json` / `--dump-params` for
+**fixed** ids (`s0`–`s5`). They are **not** in the trace header, so they are
+**not** in `run.meta.json` and must not be invented:
+
+- `sense.radius` / `comm.radius`
+- `drone.max_speed`
+- spawn radii / altitudes (`spawn.friendly_radius`, …)
+
+`--dump-params` is refused for generated `x<tier>-<token>` ids. Drawing a
+sensor disc or judging radio coverage from hardcoded 60 / 90 would be a lie
+on those runs. If you need those numbers, they have to be measured in flight
+or read from a dump you actually have.
+
+`scripts/sync_viewer_data.ps1` copies `runs/<stem>.bin` and `.meta.json` into
+`viewer/fiducial-swarm-viz/Assets/StreamingAssets/`. The viewer loads that
+**copy**; forgetting the copy is how the size check fails. `-Rebuild` runs the
+sidecar first. `-Stem last` syncs a different run.
 
 ### `entities[]`
 
@@ -188,8 +230,7 @@ Arena `min`/`max` are converted corner-wise and then re-sorted, because NED
 
 ## How to load this in Unity
 
-No Unity code lives in this repo yet. The viewer should do this and nothing
-more:
+The viewer in `viewer/fiducial-swarm-viz/` does this and nothing more:
 
 1. Drop `run.bin` and `run.meta.json` in `Assets/StreamingAssets/` (or load
    from an absolute path in the editor). `StreamingAssets` is the one folder
@@ -209,11 +250,13 @@ more:
    rotation = (data[i+6], data[i+7], data[i+8], data[i+9])   // Quaternion(x,y,z,w)
    ```
 
-6. Draw the rest from the meta: arena box, asset sphere, `events` on a
+6. Draw the rest from the meta: arena box, asset sphere, `kill_radius` (same
+   for every airframe; omit-safe — older files lack the field), `events` on a
    timeline, `links` as line segments between the two drones' current
-   positions while `t_start <= t <= t_end`, `logs`/`telemetry` on the
+   positions while `t_start <= t < t_end`, `logs`/`telemetry` on the
    selected drone, `beliefs` as a per-observer overlay, `compromised_from`
-   as ground truth.
+   as ground truth. Group `events[]` by `slots[]` in the viewer; that index
+   is not a third file.
 
 Playback rate is `trace_hz` (10), not `dt` (the sim's 100 Hz). Default view:
 arena + asset + aircraft coloured by `kind`, trails on, everything else

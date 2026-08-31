@@ -21,6 +21,7 @@ import json
 import math
 import os
 import sys
+from datetime import datetime, timezone
 
 import numpy as np
 
@@ -390,10 +391,15 @@ def main(argv):
     report = data["report"]["report"] if data["report"] else None
     events = derive_events(arr, times, entities, header, report)
 
+    generated_at = datetime.now(timezone.utc).replace(microsecond=0).strftime(
+        "%Y-%m-%dT%H:%M:%SZ")
+
     meta = {
         "format_version": FORMAT_VERSION,
         "source": os.path.basename(args.trace),
         "scenario": header["scenario"],
+        "sim_version": header.get("sim_version"),
+        "brain": header.get("brain"),
         "dt": header["dt"],
         "trace_hz": header["trace_hz"],
         "frame_count": len(frames),
@@ -408,7 +414,16 @@ def main(argv):
             "position": list(ned_to_unity_vec3(*header["asset"]["position"])),
             "radius": header["asset"]["radius"],
         },
+        "kill_radius": header["kill_radius"],
         "fleet_size": header["fleet_size"],
+        "provenance": {
+            "trace": os.path.abspath(args.trace),
+            "scenario": header.get("scenario"),
+            "brain": header.get("brain"),
+            "sim_version": header.get("sim_version"),
+            "header_schema": header.get("schema"),
+            "generated_at": generated_at,
+        },
         "entities": entities,
         "events": events,
         "links": expand_links(data["links"], times[-1]),
@@ -442,6 +457,8 @@ def main(argv):
     for e in entities:
         kinds[e["kind"]] = kinds.get(e["kind"], 0) + 1
     print("wrote %s (%d bytes) and %s" % (bin_path, actual, meta_path))
+    print("  provenance: %s" % meta["provenance"]["generated_at"])
+    print("  brain: %s" % (meta.get("brain") or "(unknown)"))
     print("  entity_columns: %s" % header["entity_columns"])
     print("  frames %d over %.2f s, slots %d  %s"
           % (len(frames), times[-1], len(entities), kinds))

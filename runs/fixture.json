@@ -23,9 +23,9 @@
   },
   "compute": {
     "budget_us": 2000,
-    "mean_tick_us": 0.3,
+    "mean_tick_us": 0.4,
     "overruns": 0,
-    "p99_tick_us": 1.3
+    "p99_tick_us": 1.5
   },
   "events": [
     {
@@ -81,7 +81,7 @@
     "wreckage_spawned": 0
   },
   "outcome": "asset_lost",
-  "realtime_factor": 66.6,
+  "realtime_factor": 60.6,
   "scenario": "s1",
   "schema": 2,
   "score": {
@@ -94,5 +94,5 @@
   "sim_time_s": 88.96,
   "sim_version": "swarm_sim 0.6.0",
   "ticks": 8896,
-  "wall_time_s": 1.3355
+  "wall_time_s": 1.4678
 }
