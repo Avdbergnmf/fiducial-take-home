@@ -36,7 +36,7 @@ public:
 
     /// Report what we currently believe. Scored once a second on the MOST
     /// RECENT declaration per aircraft: correct +1, wrong -2, unknown 0.
-    /// Only local tracks, and only classes we would bet at 2:1 (D9).
+    /// Local tracks only (D9). Friendly and Hostile; everything else UNKNOWN.
     void Declare(const swarm::Host& host, const TrackStore& store) const;
 
     /// Queue whatever is worth saying this tick. One broadcast per tick, so

@@ -100,7 +100,7 @@ the real finding: **the margin and the ring geometry have to be designed togethe
 
 | file:line | name | value | category | source | defensible? |
 |---|---|---|---|---|---|
-| policy.cpp:24 | `PublishedClass` | Friendly only | **DERIVED** | G2 2:1 scoring hook (D9). Hostile/wreckage/unknown → UNKNOWN. | Yes — x1-b ENEMY publishes were 549 wrong. Intercept still uses `belief`. |
+| policy.cpp:24 | `PublishedClass` | Friendly + Hostile | **DERIVED** | D9. Local only. Wreckage/unknown → UNKNOWN. ENEMY restored: the viewer has no other channel. | x1-b still pays −2 on AimedAtAsset FPs. |
 | policy.cpp:9 | `kCommitMaxRange` | 120.0 m | **GUESS** | none | Exceeds `sense_radius` (60) — so it only ever binds on hearsay tracks, never on our own sensor tracks. Effectively dead code on s1. |
 | policy.cpp:10 | `kAbortAfter` | 25.0 s | **GUESS** | none | Hostiles spawn every 14 s (`s1.json`), so a 25 s pursuit spans two arrivals. *Too high:* a drone is committed to a lost cause while the next hostile transits unopposed. *Too low:* aborting a converging intercept. |
 | policy.cpp:11 | `kClaimHold` | 6.0 s | **GUESS** | none | Nothing reads claims yet (`brain.cpp:105` is a TODO), so this is inert. |

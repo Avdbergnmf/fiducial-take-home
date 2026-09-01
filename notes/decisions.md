@@ -263,6 +263,8 @@ So: the gate is met. s1 sits above the 20–40 band because 16 mates are in view
 
 The three remaining wrongs (s1 and x1-a) are the 8 m heartbeat gate picking the nearer of two close aircraft — a mate's ping stuck on a neighbour. x1-b's 549 wrongs were ENEMY labels on civilians; they went to zero when we stopped publishing ENEMY. s1 lost about 1 awareness point because we also stopped taking +1 on true hostiles; x1-a and x1-b went *up* because dropping those −2s was worth more than the lost +1s.
 
+**Revisit:** friends-only made the overlay lie. `declare_track` is the only channel the viewer has for "this drone called enemy," so hostiles went grey even while we still committed to them. ENEMY is back on the hook for local Hostile tracks. Hearsay still skipped. The 549 x1-b wrongs are a classification problem (D2/D7), not a reason to hide the call.
+
 ---
 
 ## D10 — The asset is a vertical cylinder, not a sphere

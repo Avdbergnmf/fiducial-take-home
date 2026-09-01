@@ -18,13 +18,16 @@ constexpr uint8_t kPrioTrack = 3;
 constexpr uint8_t kPrioClaim = 4;
 constexpr uint8_t kPrioAccuse = 5;
 
-/// Scoring hook only. Intercept still uses Track.belief. Wrong is −2 and
-/// right is +1, so we only publish what is 2:1 today: a heartbeat-matched
-/// mate. Aimed dashes still drive commit; they are not yet that sure on
-/// generated layouts (x1-b was 549 wrong ENEMY calls).
+/// Scoring hook, and the only channel the viewer has for "this drone called
+/// enemy." Intercept still uses Track.belief. Local Friendly and Hostile
+/// only — hearsay is skipped at the call site (track_id 0). Wreckage and
+/// quiet stay UNKNOWN (naming wreckage anything is −2, measured).
 SwClass PublishedClass(const Track& t) {
-    if (t.belief == Belief::Friendly) return SW_CLASS_FRIENDLY;
-    return SW_CLASS_UNKNOWN;
+    switch (t.belief) {
+        case Belief::Friendly: return SW_CLASS_FRIENDLY;
+        case Belief::Hostile:  return SW_CLASS_ENEMY;
+        default:               return SW_CLASS_UNKNOWN;
+    }
 }
 
 }  // namespace
@@ -148,12 +151,10 @@ Vec3 Policy::DesiredPosition(const swarm::Observation& obs) const {
 }
 
 void Policy::Declare(const swarm::Host& host, const TrackStore& store) const {
-    // G2 / D9: only local tracks, only 2:1 calls. track_id is observer-local;
-    // a hearsay row sits at id 0 and would be scored against whoever our
-    // sensors labelled 0. Unknown/wreckage publish UNKNOWN so a stale ENEMY
-    // does not linger into the 1 Hz sample. Friendlies are the free block:
-    // a heartbeat-matched track is a mate, and naming a compromised one
-    // "friendly" is incomplete rather than wrong.
+    // G2 / D9: local tracks only. track_id is observer-local; a hearsay row
+    // sits at id 0 and would be scored against whoever our sensors labelled 0.
+    // Friends and hostiles we actually see get published so the viewer (and
+    // the awareness term) can see the call. Unknown/wreckage stay UNKNOWN.
     for (const Track& t : store.tracks()) {
         if (!t.has_local_id) continue;
         host.DeclareTrack(t.track_id, PublishedClass(t));
