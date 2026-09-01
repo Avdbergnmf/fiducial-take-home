@@ -108,8 +108,10 @@ closing, so a 16-drone ring of radius 75 (neighbours 29 m) still fits. A static
 | policy.cpp:44 | `ring_radius_` | `asset_radius + comm_radius·0.5` = **75 m** | **DERIVED** (weakly) | `s1.json` `_fleet`: "the ring is what the radio and the sensors say it is" | Half-justified. At r=75 with 16 drones the neighbour chord is 2·75·sin(π/16) = **29.3 m**, inside both `sense_radius` 60 and `comm_radius` 90 — so the *intent* is met. But the `0.5` is a guess, and 75 m puts the ring well inside the 150 m civilian spawn ring, i.e. in the traffic. |
 | policy.cpp:45 | `ring_altitude_` | 30.0 m | **SCENARIO** | `s1.json` `spawn.friendly_altitude = 30.0` | Yes — matches spawn altitude, so no climb is needed. Note civilians fly at 50 m and hostiles at 40 m (`s1.json`), so the ring sits *below* both. |
 | policy.cpp:slot | slot-reached radius | 8.0 m | **GUESS** | none | Low-risk. |
-| policy.cpp:OwnsInbound | ring-slot owner | facing slot, ±1 if owner silent 1.5 s | **DERIVED** | Same angle as `RingSlot`. Heartbeat liveness (D11). | Unique while live; neighbours cover a spent sector. |
-| policy.cpp:ShouldCommit | commit gate | local, fresh Hostile, owner, in-sense, `closing ≥ 1`, cruise-catch vs cylinder | **DERIVED** | Replaces `closing > −2 \|\| ttg < 12`. D11. | Hearsay, ghosts, and stern chases refused. |
+| policy.cpp:OwnsInbound | ring-slot owner | facing slot, then first live clockwise | **DERIVED** | Same angle as `RingSlot`. Heartbeat liveness (D11/D15). | Unique always. D11's ±1 both-neighbours was the two-on-one. |
+| policy.cpp:ShouldCommit | commit gate | local, fresh Hostile, unique owner, no closer chaser, in-sense, `closing ≥ 1`, cruise-catch vs cylinder | **DERIVED** | Replaces `closing > −2 \|\| ttg < 12`. D11/D15. | Hearsay, ghosts, stern chases, and stacked intercepts refused. |
+| policy.cpp | `kChasingToward` | 5.0 m/s | **DERIVED** | Below cruise 14, above picket station-keeping. D15. | A mate flying at the hostile is the interceptor. |
+| policy.cpp | corridor yield | `friendly_margin` off owner-slot → hostile | **DERIVED** | D15. Neighbours at 29 m on s1 do not move. | Pickets on the line step aside so ProNav is not the traffic. |
 | policy.cpp:AbortReason | non-closing abort | after 6.0 s, `closing < 1.0` | **GUESS** | D11. Immediate receding abort dropped an interceptor 5 m out on a weave. | |
 | policy.cpp:confidence | confidence encode | `>2.0 ? 255 : score·120` | **GUESS** | none | `score·120` saturates the `uint8_t` at score 2.125, and the branch caps at 2.0, so the mapping is continuous by luck rather than by construction. |
 | policy.cpp:outbox | outbox max age | 2.0 s | **GUESS** | none | Sensible. |
@@ -127,7 +129,7 @@ closing, so a 16-drone ring of radius 75 (neighbours 29 m) still fits. A static
 | flight.cpp:42 | `stopping` | `√(2·lateral_limit·range)` | **DERIVED** | Kinematics, using the correct limit | Yes. Uses `lateral_limit`, not `max_accel` — the same distinction the brief flags. |
 | flight.cpp:47 | cruise velocity gain | 2.0 | **GUESS** | none | Low-risk. |
 | flight.cpp:69 | closing floor / boost | `12.0 m/s`, `lateral·0.6` | **GUESS** | none | Adds line-of-sight thrust when closing < 12 m/s. *Too high:* a permanent pursuit bias that spoils the ProNav geometry. |
-| flight.cpp:95/97 | avoidance strength | `closing·0.15`, `·lateral·2.0` (unknown) / `·2.5` (mate) | **GUESS** | none | Unknown traffic is still a blend (D8). Mates cancel the closing component of the command first; the `·2.5` is extra repulsion, not the guarantee — the cancel is. |
+| flight.cpp:95/97 | avoidance strength | `closing·0.15`, `·lateral·2.0` (unknown) / `·2.5` (mate) | **GUESS** | none | Unknown traffic is still a blend (D8). Pickets cancel closing against a mate; interceptors do not (D15). The `·2.5` is extra repulsion. |
 | flight.cpp:98 | mate panic radius | `3 · kill_radius` = 3 m | **GUESS** | D8 hard override | Inside this, intercept is abandoned and we accelerate away. *Too high:* abandon a real intercept because a mate is nearby. *Too low:* still closing at 1 m. |
 | flight.cpp:111 | `kEdge` | 20.0 m | **GUESS** | none | Arena is ±200 m (`fixture.jsonl` header `arena.min/max`), so this is a 10% border. Nothing left the arena in either run. |
 | flight.cpp:115-116 | arena gains | 0.5, 0.8 | **GUESS** | none | Low-risk. |

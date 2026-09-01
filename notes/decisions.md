@@ -383,6 +383,31 @@ Neighbours on the ring are not closing, so they stay on the 4 m floor and the ri
 
 **Measured:** s1 6/6, civ 0, total **+130.0**, comms 35.5, 694 log lines (4 m gate was 2245 lines / comms 25.9). s2 1/6 → **2/6**, −902 → **−700**, civ 0. One extra fused intercept, not a new guidance trick.
 
+---
+
+## D15 — One drone per hostile, and the others get off the line (G4)
+
+**The leak:** two drones still go for one inbound. D11's backup was "if the facing slot is silent, *both* neighbours may go." That is the brief's named failure mode (§9.2): three-on-one intercepts well and then the spare two kill each other and the debris. Even without a ram, a picket on the line of sight **cancels the interceptor's ProNav** (D8 mate-avoidance zeroes the closing component). The second drone is not extra firepower; it is traffic.
+
+Claims were the half-built answer (`ClaimMsg` is on the wire format). D11 already measured why not to finish them: unread Claims won the one frame per tick, interceptors went silent, neighbours treated the owner as dead and stacked.
+
+**Options considered**
+
+1. Honour `ClaimMsg`. Stickiness across a sector-boundary weave, but it is a radio fact. A dropped claim is two owners; composing it is how D11's heartbeats died. Not until identity has a channel that cannot starve.
+2. Keep both neighbours as the spent-sector backup. Covers hostile_4/5 when the facing drone is gone; pays two interceptors and a spoiled ProNav whenever the facing drone is merely quiet.
+3. Radio-free unique owner: facing slot, then the **first live drone clockwise** — one successor, not both. Do not start (and abort if already committed) when a Friendly is already flying at this hostile and is closer. Pickets whose ring slot sits inside `friendly_margin` of the owner's corridor step off it. The interceptor keeps the D8 arrest blend and the 3-kill-radius panic, but does **not** cancel ProNav toward a mate; the picket is the one that yields.
+
+**Chosen:** 3.
+
+**Cost accepted:** a dead facing picket leaves a hole until 1.5 s of silence, then only the clockwise neighbour covers — the counter-clockwise one stays. A radio dropout that looks like death still hands the intercept to +1, not to both. Two drones with disagreeing `heard_[]` (packet loss) can still both think they are UniqueOwner; the closer-chaser abort is the backstop, and it needs the other to be visibly flying at the target (~5 m/s along LOS). Claims remain defined and unread.
+
+**Measured, s1:** 6/6, civ 0, wasted 0, total **+130.0** (identical to D14). Six `commit` lines, six different drones, **zero** `abort`. The previous both-neighbours backup was not firing on this layout; the unique rule did not give a kill back.
+
+**Measured, 8 named scenarios:** `pair_friendly` **0** on all eight. s2 2/6 → **3/6** (−700 → −502). x1-a still 4/4 with the same t≈1.1 civilian losses plus one `pair_neutral` and one wasted — not a stacked intercept.
+
+**Measured, `-Tier 1 -Count 6`:** 6/6 completed. `pair_friendly` **0**, wasted 0. Three layouts full clear (best +163.5). Three leaked one. Mean −26 on this draw (D11's +76 was six different tokens; kills did not drop on the fixtures we can compare).
+
+
 
 
 

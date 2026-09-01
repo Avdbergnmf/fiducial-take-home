@@ -59,11 +59,14 @@ bound cannot win.
 Commit used to ignore that. `closing > -2 || ttg < 12` spent drones on
 outbound geometry ProNav cannot fly, and hearsay `track_id` 0 left them
 "committed" on the ring with a null target. The rule now is: a *fresh* local
-Hostile, the facing ring slot (neighbours only if that drone's heartbeat is
-gone), relative closing ≥ 1 m/s, and arrive before the cylinder. ProNav
-itself is not the leak — the first s1 intercept finished. A 6 s-old Hostile
-latch is wreckage; chasing those is how a spent sector missed the next
-inbound. Raising classifier sensitivity is the remaining knob, and it is the
+Hostile, the unique facing ring slot (first live drone clockwise if that
+slot's heartbeat is gone — one successor, not both neighbours), relative
+closing ≥ 1 m/s, and arrive before the cylinder. A Friendly already flying
+at that hostile is the interceptor; the farther drone aborts. Pickets step
+off the owner's corridor, and the interceptor does not cancel ProNav to
+dodge them. ProNav itself is not the leak — the first s1 intercept finished.
+A 6 s-old Hostile latch is wreckage; chasing those is how a spent sector
+missed the next inbound. Raising classifier sensitivity is the remaining knob, and it is the
 expensive one. Every 0.1 s taken off `kEvidenceForCall` is 1.6 m more
 intercept window and a civilian chord that looks 0.1 s more like a dash. That
 is not a tuning detail. It is the brief's own contradiction — telling a

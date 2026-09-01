@@ -66,9 +66,9 @@ target_include_directories(test_protocol PRIVATE
 )
 add_test(NAME protocol COMMAND test_protocol)
 
-add_executable(test_belief tests/test_belief.cpp src/belief.cpp)
-target_include_directories(test_belief PRIVATE
+add_executable(test_policy tests/test_policy.cpp src/policy.cpp src/belief.cpp src/flight.cpp)
+target_include_directories(test_policy PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../pkg/sdk/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
-add_test(NAME belief COMMAND test_belief)
+add_test(NAME policy COMMAND test_policy)

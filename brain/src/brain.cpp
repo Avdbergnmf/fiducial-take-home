@@ -122,9 +122,8 @@ private:
                     sw::ClaimMsg m;
                     m.Read(r);
                     if (!r.ok()) break;
-                    // TODO(B3): honour peer claims so two drones do not spend
-                    // themselves on one target. Claims expire; never wait on an
-                    // acknowledgement a dead drone will not send.
+                    // Allocation is UniqueOwner (D15), not claims. Composing
+                    // these starved heartbeats (D11) and neighbours stacked.
                     break;
                 }
                 case sw::MsgType::Accuse:
@@ -166,7 +165,9 @@ private:
         // Constraints last, and in this order: separation over everything
         // (a friendly-friendly collision costs two drones), then the arena.
         accel = sw::flight::EnforceSeparation(accel, position, velocity,
-                                              store_.tracks(), cfg_, target);
+                                              store_.tracks(), cfg_, target,
+                                              policy_.stance() == sw::Stance::Committed
+                                                  && target != nullptr);
         accel = sw::flight::EnforceArena(accel, position, velocity, cfg_);
 
         LogProximity(obs, target);

@@ -18,6 +18,11 @@ constexpr float kCruise = 14.0f;            // must match Fly() in brain.cpp
 constexpr float kFreshHostile = 6.0f;       // s; older Hostile calls are latch-ghosts
 constexpr float kRecommitHold = 2.0f;       // s; do not re-chase a track we just aborted
 
+constexpr float kChasingToward = 5.0f;     // m/s along LOS; pickets sit below this
+constexpr float kCloserBy = 2.0f;          // m; farther duplicate aborts
+constexpr float kOwnerSilent = 1.5f;       // s; three missed 2 Hz heartbeats
+constexpr float kNeverHeard = -1.0e8f;
+
 constexpr uint8_t kPrioTrack = 3;
 constexpr uint8_t kPrioHeartbeat = 5;       // identity first: claims/reports starved this and neighbours stole intercepts
 
@@ -46,6 +51,8 @@ void Policy::Configure(const Config& cfg, Rng rng) {
     // says the late arrivals are where fleets leak.
     ring_radius_ = cfg.asset_radius + cfg.comm_radius * 0.5f;
     ring_altitude_ = 30.0f;
+    picket_goal_ = flight::RingSlot(cfg.drone_id, cfg.fleet_size, cfg.asset,
+                                    ring_radius_, ring_altitude_);
     for (uint32_t i = 0; i < kMaxFleet; ++i) heard_[i] = -1.0e9f;
 }
 
@@ -70,11 +77,12 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
         const char* why = nullptr;
         if (!target_)
             why = "lost";
+        else if (CloserChaser(*target_, store, obs))
+            why = "duplicate";
         else
             why = AbortReason(*target_, obs);
         if (why) {
-            std::snprintf(last_log_, sizeof(last_log_), "abort trk=%u %s",
-                          target_id_, why);
+            LogAbort(why, target_id_, target_, obs);
             last_abort_id_ = target_id_;
             last_abort_at_ = now;
             target_ = nullptr;
@@ -88,6 +96,7 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
         float best_key = 1.0e6f;
         for (Track& t : store.tracks()) {
             if (!ShouldCommit(t, obs)) continue;
+            if (CloserChaser(t, store, obs)) continue;
             const float ttg = TimeToCylinder(t.position, t.velocity, cfg_.asset,
                                              cfg_.asset_radius);
             const float d = swarm::Distance(t.position, obs.position());
@@ -121,34 +130,117 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
             std::snprintf(last_log_, sizeof(last_log_), "picket");
         }
     }
+
+    if (stance_ != Stance::Committed)
+        picket_goal_ = PicketGoal(store, now);
 }
 
-bool Policy::OwnerAlive(uint32_t drone_id, float now) const {
-    if (drone_id == cfg_.drone_id) return true;
-    if (drone_id >= kMaxFleet) return false;
+uint32_t FacingSlot(const Vec3& position, const Vec3& asset, uint32_t fleet_size) {
+    const uint32_t n = fleet_size > 0 ? fleet_size : 1;
+    const float hx = position.x - asset.x;
+    const float hy = position.y - asset.y;
+    if (hx * hx + hy * hy < 1e-8f) return 0;
+    float u = std::atan2(hy, hx);
+    if (u < 0.0f) u += 2.0f * kPi;
+    return static_cast<uint32_t>(
+        std::lround(u * static_cast<float>(n) / (2.0f * kPi))) % n;
+}
+
+bool SlotAlive(uint32_t drone_id, uint32_t self_id, const float* heard, float now) {
+    if (drone_id == self_id) return true;
+    if (drone_id >= kMaxFleet || heard == nullptr) return false;
     // Never heard: assume alive so we do not steal a sector at boot before
-    // the first heartbeat. Neighbours of the facing slot are inside
-    // comm_radius; after that, 1.5 s of silence is three missed 2 Hz beats.
-    if (heard_[drone_id] < -1.0e8f) return true;
-    return now - heard_[drone_id] < 1.5f;
+    // the first heartbeat. After that, 1.5 s of silence is three missed beats.
+    if (heard[drone_id] < kNeverHeard) return true;
+    return now - heard[drone_id] < kOwnerSilent;
+}
+
+uint32_t UniqueOwner(uint32_t facing, uint32_t fleet_size, uint32_t self_id,
+                     const float* heard, float now) {
+    const uint32_t n = fleet_size > 0 ? fleet_size : 1;
+    for (uint32_t i = 0; i < n; ++i) {
+        const uint32_t id = (facing + i) % n;
+        if (SlotAlive(id, self_id, heard, now)) return id;
+    }
+    return facing % n;
 }
 
 bool Policy::OwnsInbound(const Track& t, float now) const {
-    // Facing ring slot. Same angle as RingSlot. If that drone's heartbeat is
-    // gone, it is spent (or out of comms) and the two neighbours may go —
-    // unique owner plus silent death was s1 hostile_4/5. D11.
-    const float hx = t.position.x - cfg_.asset.x;
-    const float hy = t.position.y - cfg_.asset.y;
-    if (hx * hx + hy * hy < 1e-8f) return true;
-    float u = std::atan2(hy, hx);
-    if (u < 0.0f) u += 2.0f * kPi;
-    const uint32_t n = cfg_.fleet_size > 0 ? cfg_.fleet_size : 1;
-    const uint32_t slot = static_cast<uint32_t>(
-        std::lround(u * static_cast<float>(n) / (2.0f * kPi))) % n;
-    if (slot == cfg_.drone_id) return true;
-    if (OwnerAlive(slot, now)) return false;
-    const uint32_t d = (slot + n - cfg_.drone_id) % n;
-    return d <= 1 || d >= n - 1;
+    const uint32_t facing = FacingSlot(t.position, cfg_.asset, cfg_.fleet_size);
+    return UniqueOwner(facing, cfg_.fleet_size, cfg_.drone_id, heard_, now)
+           == cfg_.drone_id;
+}
+
+bool Policy::CloserChaser(const Track& hostile, const TrackStore& store,
+                          const swarm::Observation& obs) const {
+    // A Friendly already flying at this hostile is the interceptor. Do not
+    // stack. Picket station-keeping is a few m/s; cruise is 14.
+    const float us_range = swarm::Distance(obs.position(), hostile.position);
+    for (const Track& t : store.tracks()) {
+        if (t.belief != Belief::Friendly) continue;
+        if (t.has_local_id && hostile.has_local_id && t.track_id == hostile.track_id)
+            continue;
+        const Vec3 los(hostile.position.x - t.position.x,
+                       hostile.position.y - t.position.y, 0.0f);
+        const float range_h = swarm::Length(los);
+        if (range_h < 1.0f) continue;
+        const float toward = swarm::Dot(
+            Vec3(t.velocity.x, t.velocity.y, 0.0f), los / range_h);
+        if (toward < kChasingToward) continue;
+        const float closing = ClosingSpeed(t.position, t.velocity,
+                                           hostile.position, hostile.velocity);
+        if (closing < kMinClosing) continue;
+        const float d = swarm::Distance(t.position, hostile.position);
+        if (d < us_range - kCloserBy) return true;
+    }
+    return false;
+}
+
+namespace {
+
+Vec3 YieldOffCorridor(const Vec3& goal, const Vec3& a, const Vec3& b, float clear) {
+    const Vec3 ab(b.x - a.x, b.y - a.y, 0.0f);
+    const float ab2 = ab.x * ab.x + ab.y * ab.y;
+    if (ab2 < 1e-4f || clear <= 0.0f) return goal;
+    const Vec3 ap(goal.x - a.x, goal.y - a.y, 0.0f);
+    float t = (ap.x * ab.x + ap.y * ab.y) / ab2;
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+    const float cx = a.x + t * ab.x;
+    const float cy = a.y + t * ab.y;
+    Vec3 off(goal.x - cx, goal.y - cy, 0.0f);
+    const float dist = std::sqrt(off.x * off.x + off.y * off.y);
+    if (dist >= clear) return goal;
+    Vec3 dir = off;
+    if (dist < 1e-3f) dir = Vec3(-ab.y, ab.x, 0.0f);
+    const float len = std::sqrt(dir.x * dir.x + dir.y * dir.y);
+    if (len < 1e-6f) return goal;
+    const float need = (dist < 1e-3f) ? clear : (clear - dist);
+    return Vec3(goal.x + dir.x / len * need,
+                goal.y + dir.y / len * need,
+                goal.z);
+}
+
+}  // namespace
+
+Vec3 Policy::PicketGoal(const TrackStore& store, float now) const {
+    // Hold the ring, but step off anyone else's intercept corridor so we
+    // are not the traffic that spoils ProNav. Owner slot → hostile; neighbours
+    // on a 16-drone 75 m ring sit 29 m off that line and do not move.
+    Vec3 goal = flight::RingSlot(cfg_.drone_id, cfg_.fleet_size, cfg_.asset,
+                                 ring_radius_, ring_altitude_);
+    for (const Track& t : store.tracks()) {
+        if (t.belief != Belief::Hostile) continue;
+        if (!t.has_local_id) continue;
+        if (OwnsInbound(t, now)) continue;
+        const uint32_t facing = FacingSlot(t.position, cfg_.asset, cfg_.fleet_size);
+        const uint32_t owner = UniqueOwner(facing, cfg_.fleet_size, cfg_.drone_id,
+                                           heard_, now);
+        const Vec3 from = flight::RingSlot(owner, cfg_.fleet_size, cfg_.asset,
+                                           ring_radius_, ring_altitude_);
+        goal = YieldOffCorridor(goal, from, t.position, cfg_.friendly_margin);
+    }
+    return goal;
 }
 
 bool Policy::ShouldCommit(const Track& t, const swarm::Observation& obs) const {
@@ -208,6 +300,24 @@ const char* Policy::AbortReason(const Track& t, const swarm::Observation& obs) c
     return nullptr;
 }
 
+void Policy::LogAbort(const char* why, uint32_t trk, const Track* t,
+                      const swarm::Observation& obs) {
+    const float held = obs.time() - committed_at_;
+    if (!t) {
+        std::snprintf(last_log_, sizeof(last_log_),
+                      "abort trk=%u %s held=%.1f", trk, why, held);
+        return;
+    }
+    const float rng = swarm::Distance(t->position, obs.position());
+    const float closing = ClosingSpeed(obs.position(), obs.velocity(),
+                                       t->position, t->velocity);
+    const float ttg = TimeToCylinder(t->position, t->velocity, cfg_.asset,
+                                     cfg_.asset_radius);
+    std::snprintf(last_log_, sizeof(last_log_),
+                  "abort trk=%u %s close=%.1f rng=%.0f ttg=%.1f held=%.1f now=%s",
+                  trk, why, closing, rng, ttg, held, BeliefName(t->belief));
+}
+
 Vec3 Policy::DesiredPosition(const swarm::Observation& obs) const {
     switch (stance_) {
         case Stance::Committed:
@@ -219,8 +329,7 @@ Vec3 Policy::DesiredPosition(const swarm::Observation& obs) const {
             break;
     }
     (void)obs;
-    return flight::RingSlot(cfg_.drone_id, cfg_.fleet_size, cfg_.asset,
-                            ring_radius_, ring_altitude_);
+    return picket_goal_;
 }
 
 void Policy::Declare(const swarm::Host& host, const TrackStore& store) const {
@@ -296,10 +405,11 @@ void Policy::Compose(Outbox<24>& outbox, TrackStore& store,
         }
     }
 
-    // Claims are unread (brain.cpp B3 TODO) and they used to win the one
-    // frame/tick over heartbeats. Interceptors went silent, MarkFriendly
-    // expired, neighbours treated the owner as dead and stacked the intercept.
-    // Allocation is the ring-slot owner plus heartbeat-silence backup (D11).
+    // Claims stay off the wire. D11: unread Claims won the one frame/tick,
+    // interceptors went silent, neighbours stacked. G4 allocation is
+    // UniqueOwner (facing slot, then first live clockwise) plus a closer
+    // chaser abort — radio-free, so two drones cannot disagree on a dropped
+    // Claim. Heartbeat remains the highest priority.
 
     outbox.Expire(now, 2.0f);
 }

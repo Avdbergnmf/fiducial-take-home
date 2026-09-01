@@ -260,6 +260,12 @@ def derive_events(arr, times, entities, header, report):
     kill_radius = header["kill_radius"]
     frame_dt = (times[-1] - times[0]) / max(1, len(times) - 1)
 
+    def ent_label(ent):
+        """Same names as the viewer aircraft list: brain id for friendlies."""
+        if ent.get("kind") == "friendly" and int(ent.get("drone_id", -1)) >= 0:
+            return "drone %d" % ent["drone_id"]
+        return "%s %d" % (ent["kind"], ent["trace_id"])
+
     # --- spawn / death, from alive transitions -----------------------------
     last_frame = len(times) - 1
     deaths = {}  # frame index -> [slot, ...]
@@ -267,7 +273,7 @@ def derive_events(arr, times, entities, header, report):
         s, f0, f1 = ent["slot"], ent["first_frame"], ent["last_frame"]
         events.append({"t": times[f0], "frame": f0, "kind": "spawn",
                        "severity": SEV_INFO, "slots": [s],
-                       "text": "%s %d appears" % (ent["kind"], ent["trace_id"])})
+                       "text": "%s appears" % ent_label(ent)})
         if f1 < last_frame:
             deaths.setdefault(f1 + 1, []).append(s)
 
@@ -301,9 +307,9 @@ def derive_events(arr, times, entities, header, report):
                     sev, label = SEV_LOSS_EXPECTED, "collision"
                 events.append({"t": times[f_idx], "frame": f_idx, "kind": label,
                                "severity": sev, "slots": [a, b],
-                               "text": "%s: %s %d x %s %d" % (
-                                   label, ka, entities[a]["trace_id"],
-                                   kb, entities[b]["trace_id"])})
+                               "text": "%s: %s x %s" % (
+                                   label, ent_label(entities[a]),
+                                   ent_label(entities[b]))})
                 paired.add(a)
                 paired.add(b)
 
@@ -315,7 +321,7 @@ def derive_events(arr, times, entities, header, report):
             sev = SEV_INFO if ent["kind"] == "wreckage" else SEV_LOSS_EXPECTED
             events.append({"t": times[f_idx], "frame": f_idx, "kind": "death",
                            "severity": sev, "slots": [s],
-                           "text": "%s %d gone" % (ent["kind"], ent["trace_id"])})
+                           "text": "%s gone" % ent_label(ent)})
 
     # --- report events: authoritative -------------------------------------
     by_drone = {e["drone_id"]: e["slot"] for e in entities

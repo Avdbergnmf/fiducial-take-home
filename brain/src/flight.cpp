@@ -79,7 +79,7 @@ Vec3 ProNav(const Vec3& self_position, const Vec3& self_velocity,
 
 Vec3 EnforceSeparation(const Vec3& desired, const Vec3& position, const Vec3& velocity,
                        const FixedVec<Track, kMaxTracks>& tracks,
-                       const Config& cfg, const Track* exempt) {
+                       const Config& cfg, const Track* exempt, bool intercepting) {
     Vec3 avoid;
     Vec3 panic;
     bool any = false;
@@ -121,7 +121,7 @@ Vec3 EnforceSeparation(const Vec3& desired, const Vec3& position, const Vec3& ve
         avoid += away * (strength * cfg.lateral_limit * (mate ? 2.5f : 2.0f));
         any = true;
 
-        if (mate) {
+        if (mate && !intercepting) {
             const float closing_cmd = -swarm::Dot(desired, away);
             if (closing_cmd > 0.0f)
                 avoid += away * closing_cmd;

@@ -18,6 +18,19 @@ enum class Stance : uint8_t {
     Committed,    // running an intercept on a specific track
 };
 
+/// Facing ring slot for a world position. Same angle convention as RingSlot.
+uint32_t FacingSlot(const Vec3& position, const Vec3& asset, uint32_t fleet_size);
+
+/// True if this slot is still treated as on station. Self is always alive.
+/// Never-heard is assumed alive so we do not steal sectors before the first
+/// heartbeat. 1.5 s of silence (three missed 2 Hz beats) is death.
+bool SlotAlive(uint32_t drone_id, uint32_t self_id, const float* heard, float now);
+
+/// First live drone clockwise from `facing`, including facing. One owner,
+/// not both neighbours (D15 / G4).
+uint32_t UniqueOwner(uint32_t facing, uint32_t fleet_size, uint32_t self_id,
+                     const float* heard, float now);
+
 class Policy {
 public:
     void Configure(const Config& cfg, Rng rng);
@@ -49,15 +62,19 @@ public:
     /// Send at most one frame, respecting the remaining byte budget.
     void Pump(const swarm::Host& host, Outbox<24>& outbox, const swarm::Observation& obs);
 
-    /// A heartbeat from this origin. Neighbours of a spent owner use silence
-    /// as death: claims are unread, and a dead drone will not send one.
+    /// A heartbeat from this origin. UniqueOwner treats 1.5 s of silence as
+    /// death and walks clockwise to the next live slot.
     void NoteAlive(uint8_t drone_id, float now);
 
 private:
     bool ShouldCommit(const Track& t, const swarm::Observation& obs) const;
     bool OwnsInbound(const Track& t, float now) const;
-    bool OwnerAlive(uint32_t drone_id, float now) const;
+    bool CloserChaser(const Track& hostile, const TrackStore& store,
+                      const swarm::Observation& obs) const;
+    Vec3 PicketGoal(const TrackStore& store, float now) const;
     const char* AbortReason(const Track& t, const swarm::Observation& obs) const;
+    void LogAbort(const char* why, uint32_t trk, const Track* t,
+                  const swarm::Observation& obs);
 
     Config cfg_;
     Rng rng_;                 // unused today; the hook for jittering send times
@@ -74,6 +91,7 @@ private:
     float last_heartbeat_ = -1.0e9f;
     float ring_radius_ = 60.0f;
     float ring_altitude_ = 30.0f;
+    Vec3 picket_goal_{};
     float heard_[kMaxFleet]{};
 };
 

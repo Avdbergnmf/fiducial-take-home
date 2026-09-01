@@ -43,9 +43,12 @@ Vec3 ProNav(const Vec3& self_position, const Vec3& self_velocity,
 /// friendly-civilian, and wreckage.
 ///
 /// Known friendlies (heartbeat-matched tracks) use at least `friendly_margin`,
-/// or v_close²/(2a)+4·kill when closing faster than cruise. The closing
-/// component of the command is cancelled. Inside 3 kill-radii the intercept
-/// is abandoned and we accelerate away.
+/// or v_close²/(2a)+4·kill when closing faster than cruise. A *picket*
+/// cancels the closing component of its command against a mate, and panics
+/// inside 3 kill-radii. An *interceptor* (`intercepting`) does not cancel:
+/// that was ProNav being overwritten by a picket on the line of sight (D15).
+/// The arrest blend and the panic still fire, so we curve around rather
+/// than ram.
 ///
 /// Unknown / civilian / wreckage use the same arrest distance when closing
 /// (D12). The 4 m `separation_margin` is the floor for tracks that are not
@@ -54,7 +57,8 @@ Vec3 ProNav(const Vec3& self_position, const Vec3& self_velocity,
 /// allowed to ram it. `exempt` is that track. A mate is never exempt.
 Vec3 EnforceSeparation(const Vec3& desired, const Vec3& position, const Vec3& velocity,
                        const FixedVec<Track, kMaxTracks>& tracks,
-                       const Config& cfg, const Track* exempt);
+                       const Config& cfg, const Track* exempt,
+                       bool intercepting = false);
 
 /// Keep inside the arena. Leaving it is charged as a wasted loss.
 Vec3 EnforceArena(const Vec3& desired, const Vec3& position, const Vec3& velocity,
