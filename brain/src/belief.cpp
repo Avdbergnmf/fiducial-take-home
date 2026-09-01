@@ -37,8 +37,8 @@ float ApproachAlignment(const Vec3& position, const Vec3& velocity, const Vec3& 
 
 float ClosestApproachDistance(const Vec3& position, const Vec3& velocity,
                               const Vec3& target) {
-    const Vec3 offset = Flat(position - target);
-    const Vec3 v = Flat(velocity);
+    const Vec3 offset = position - target;
+    const Vec3 v = velocity;
     const float speed_sq = swarm::LengthSq(v);
     if (speed_sq < 0.25f) return swarm::Length(offset);   // not going anywhere
 
@@ -142,15 +142,13 @@ void TrackStore::Classify(Track& t, float now, float dt) {
 
     // --- hostile: sustained, deliberate approach to the asset ---------------
     //
-    // v0 DISCRIMINANT. The three classes are physically identical, so the only
-    // evidence is behaviour. On s1 a hostile dashes at the asset from 170 m and
-    // a civilian crosses on a straight line at a similar speed -- so the signal
-    // is closing GEOMETRY, not speed.
-    //
-    // Evidence is integrated over time rather than tested per tick, because a
-    // civilian whose straight line happens to point at the asset for a moment
-    // is exactly the false positive that costs -2. The 24 m gate (asset_radius
-    // * 0.8) called those chords hostile; AimedAtAsset is sure-hit or shrink.
+    // Alignment and closing are horizontal: a dive from 40 m is still aimed
+    // in the plane that scores, and 3D alignment would dilute it. Miss is 3D.
+    // A civilian whose ground track goes through the origin still flies tens
+    // of metres over it (level, vz ~ 0); a hostile dives, so 3D miss shrinks
+    // toward the origin. Horizontal miss called those overflights — drone 2
+    // on x1-a, ground miss 5.2 m, 30 m up. 3D miss is ~altitude and does not
+    // shrink, so AimedAtAsset stays false. See D7.
     const float alignment = ApproachAlignment(t.position, t.velocity, cfg_.asset);
     const float closing = -RangeRate(t.position, t.velocity, cfg_.asset);
     const float miss = ClosestApproachDistance(t.position, t.velocity, cfg_.asset);

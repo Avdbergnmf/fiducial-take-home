@@ -80,7 +80,7 @@ the real finding: **the margin and the ring geometry have to be designed togethe
 | belief.cpp:127 | ballistic accrual / clamp | `+dt·2.0`, clamp [0, 1.5] | **GUESS** | none | Reaches the 0.4 threshold in 0.2 s. Fast, but the test is specific. |
 | belief.cpp:129 | ballistic decay clamp | [0, **3.0**] | **GUESS** | none | **Inconsistent with :127**, which clamps the same variable to 1.5. The 3.0 upper bound is unreachable. Harmless today, confusing to read. |
 | belief.cpp:131 | wreckage threshold | 0.4 | **GUESS** | none | *Too high:* fly into debris. *Too low:* a descending friendly is called wreckage. |
-| belief.cpp:9–10 | `kSureHit` / `kShrink` | 5 m / 3 m | **GUESS**, G1a | `fix_sigma=0.35`; 5 m is well above it; 3 m is meant to beat position noise | Replaced `asset_radius · 0.8` (24 m). Sure-hit catches the aimed dash; shrink catches a turn toward the disk. Residual FPs: chords with miss ≲ 5 m, and noisy `miss_at_first` when `asset_radius` is small. See D2. |
+| belief.cpp:9–10 | `kSureHit` / `kShrink` | 5 m / 3 m | **GUESS**, G1a then D7 | `fix_sigma=0.35`; 5 m is well above it; 3 m is meant to beat position noise | Miss is 3D (D7). Horizontal sure-hit was the leftover FP: a 5.2 m ground chord at 30 m altitude. 3D miss is ~altitude and the 2D shrink damps to ~1.5 m. |
 | belief.cpp:159 | alignment threshold | 0.8 | **GUESS** | none | cos⁻¹(0.8) = 37°. A civilian on a chord holds this easily. |
 | belief.cpp:159 | closing threshold | 4.0 m/s | **GUESS** | none | Civilians cross at ~16 m/s, so this excludes almost nothing. |
 | belief.cpp:160/162 | closing_score clamps | [−2, **3**] and [−2, **4**] | **GUESS** | none | **Inconsistent**: the accrual caps at 3.0 so the 4.0 decay bound is unreachable. Same class of sloppiness as :129. |
@@ -149,13 +149,10 @@ the real finding: **the margin and the ring geometry have to be designed togethe
 ## Ranked guesses
 
 Tune in this order. Guess #1 (24 m miss gate) is **addressed** — `AimedAtAsset`
-(sure-hit 5 m or a 3 m shrink). s1 `pair_neutral` is gone; residual rams remain
-on some generated layouts (D2).
+plus 3D miss (D2, D7). Horizontal leftover chords were the D7 case.
 
-1. ~~**`belief.cpp:157` `asset_radius · 0.8` (24 m miss gate)**~~ **Done (D2).**
-   Replaced by `AimedAtAsset`. s1 civilians_lost 0; 6/8 sweep scenarios have
-   no `pair_neutral`. Leftover: miss ≲ 5 m chords, and shrink firing on noisy
-   first-sight CPA when `asset_radius` is small (x2-a).
+1. ~~**`belief.cpp:157` `asset_radius · 0.8` (24 m miss gate)**~~ **Done (D2, D7).**
+   Replaced by `AimedAtAsset`. Horizontal miss ≲ 5 m at altitude is D7 (3D miss).
 2. **`world.h:162` `kill_radius · 4.0` (4 m separation margin)** — the last line of defence,
    and ~5× too small for the closing speeds involved. Cannot simply be raised to 19 m
    without re-designing the 75 m ring; that trade is the DESIGN.md discussion.

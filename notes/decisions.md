@@ -82,3 +82,102 @@ ever need them, expect to spend time revalidating them.
 - **What this is not:** it does not fix remaining civilian rams, and it does not record commanded accel (the trace stride has no command column; kinematic Δv is a viewer-side stand-in).
 
 ---
+
+## D4 — Log lines stay terse on the wire; the viewer reads them back into English
+
+**Options considered**
+
+1. Write readable sentences from the brain: `host->log("track 14 called hostile, passes 5.2 m from the asset, closing 7.7 m/s")`.
+2. Structure the wire format — JSON or key/value per line — and render from the fields.
+3. Keep `verb trk=N k=v k=v` as written, and expand it at display time in the viewer. `LogPhrase.Humanize` in the viewer; `Raw` toggle on the Logs window; raw text plus a field key in the row tooltip.
+
+**Chosen:** 3.
+
+**Why:** the terse format is unreadable — that is the whole complaint, and it is fair. `drop trk=15 unknown miss=155.2 first=138.4 score=-0.13 align=-0.98 close=-2.6` is nine numbers and no sentence. But the fix belongs on the display side, for three reasons.
+
+The wire format has other readers. `--verbose` puts these lines on stderr, where short and greppable beats prose, and `LogVerb` already drives the verb chips in the Logs window by splitting on the first space. Option 1 breaks both to fix one.
+
+Expansion needs context the brain does not have room to repeat. The worst ambiguity in the raw lines is that `close=` means three different things — closing on the *asset* in the belief lines, closing on *us* in `commit`, closing on *us* again in `near`/`ram` — and a reader cannot tell which from the line. Saying so costs nothing in the viewer and would be repeated on 1,184 lines on the wire.
+
+Option 2 is the principled version and it is what I would do with more time, but it moves the parse into `RunLoader` and buys nothing the split-on-space decoder does not already give, because the brain is the only writer and the grammar is nine verbs wide.
+
+**Measured, so the "is it costly" question has an answer rather than an opinion.** On the current run (s1, 77.3 s, 14 drones): 1,184 log records, 118 KB of a 1.48 MB trace, 8.0% of the file, no overflow marker. Breakdown by verb: `near` 674, `call` 404, `commit` 29, `wreck` 26, boot banner and `params` 14 each, `picket` 14, `ram` 5, `drop` 3, `abort` 1.
+
+- **Behaviour: zero.** `log` is a one-way host service and nothing reads it back. `logged_belief` and `near_band` exist only to decide *whether* a line is emitted; `Decide` and `Fly` never read them, and the log text is not an input to anything. The command bits are identical with logging on or off.
+- **Score: zero.** `log` is not a scoring term. The comms budget counts `broadcast` bytes, not log text. Tick cost is measured against 2000 µs and reported, but explicitly not scored.
+- **Simulation time: negligible, and flat in verbosity.** The per-tick cost is `LogProximity` walking `tracks()` at 100 Hz to maintain `near_band`, which is paid whether or not a line comes out. The `snprintf` fires only on a transition — 1,184 times across the whole run.
+- **Recording size: linear in text, and the only thing longer prose would actually cost.** Log records are the one record type the trace does not decimate. Doubling the text would take the log share from 8% to roughly 15% of the file.
+- **Log budget: the real constraint, and the reason this is not free.** Generous but finite; on overflow the file says so with a `log` record at `drone = -1` and takes no more, which means a late collision is exactly the line you lose. This run is nowhere near it, but a long generated run with more traffic is the case to worry about, and prose on 674 `near` lines is how you get there.
+
+**Cost accepted:**
+
+- **A second grammar to keep in step.** `LogPhrase` hard-codes the brain's format strings. Change a `Logf` in `brain.cpp` and the viewer silently falls back to printing the raw line — which is the right failure, but it is silent. The unknown-verb path returns the input unchanged and `Humanize` swallows exceptions, so a phrasing bug can never hide the line it was meant to explain.
+- **Rounding.** `passes 155 m from the asset` where the line said `155.2`. Display drops a digit above 100 m; the raw is in the tooltip and behind the `Raw` toggle.
+- **Wording is interpretation.** `align=-0.98` renders as "pointed away" against a fixed set of bands. The bands are a judgement about what is worth distinguishing, and someone reading closely should use `Raw`.
+- **Not fixed: volume.** `near` is 57% of all log lines and the least informative of them — three bands per track per close pass, mostly on craft that were never a threat. Readability is now a display problem; noise is still a brain problem, and the cheap fix if the budget ever bites is to drop the 12 m band.
+
+---
+
+## D5 — One component owns the floating windows
+
+**The bug:** the Cues button highlighted on hover and did nothing on click, and `C` did nothing either. Aircraft, Events and Logs — the same button, the same `FloatingPanel`, the same UXML — all worked.
+
+**What was wrong:** `CueOverlay` was a second component wiring its own buttons out of the same `UIDocument` that `SceneStateView` wires. Two components racing to query one UI tree, each with its own retry loop and its own idea of when the tree is ready. Whatever the proximate cause on any given frame, the failure is only reachable because that duplication exists: a panel that never opens and a panel whose wiring silently no-ops look identical from the outside, and neither leaves a trace, because a lookup that is never attempted logs nothing.
+
+**Chosen:** `SceneStateView` owns all four windows. `CueOverlay` keeps only what is genuinely its own — the line pool, the cue mask, and what each cue means — and exposes `Specs`, `Toggle`, `IsOn`, `Available`, `FooterText`. `PlaybackInput` owns `C`, next to the other dozen keys it already owns. The panel moved from `MainUI.uxml` into `SceneStateView.uxml` beside its three siblings. Net effect is about 70 lines deleted: `CueOverlay` lost `TryWireUi`, `BuildChips`, `OpenPanel`, `SetOpenButton`, `RefreshChips`, its `FloatingPanel`, its `Update`, and its copy of `IsAnyTextFieldFocused`.
+
+**Why this over finding the frame-level cause:** the wiring is not observable from outside the editor — a component that never runs and a component that runs and finds nothing produce the same evidence, which is none. Removing the second wiring path removes the class of bug rather than the instance, and it is the smaller program. The Cues panel is now built by the code that demonstrably builds the Logs panel, so if one works the other does.
+
+**Cost accepted:**
+
+- **`SceneStateView` grows a fourth responsibility.** It was already the windows file; a fifth window is the point at which the chip-and-panel pattern should be extracted rather than repeated a fifth time.
+- **The renderer is created on demand.** `SceneStateView.Cues` adds a `CueOverlay` if the scene has none, so the panel cannot be broken by a missing component. That is defensive, and in a codebase where the scene is under review rather than hand-edited it would just be a serialized reference.
+- **Stale serialized field.** The scene still carries `uiDocument` on the `CueOverlay` entry. Unity drops unknown fields on the next save; not worth hand-editing a scene the editor has open.
+
+---
+
+## D6 — Stance stays a reconstruction; do not publish it on a second channel
+
+**What "intent" was:** `Policy::stance_` — Forming, Picketing, or Committed. It is what this drone is doing with *itself*, not a belief about anyone else. The beliefs panel had labelled it Intent and filled it from the last log line that looked tactical.
+
+**Options considered**
+
+1. Keep scraping the last `commit` / `abort` / `picket` / `near` / `ram` line and print it raw.
+2. Add a per-tick or heartbeat stance field so the viewer can read the enum directly.
+3. Reconstruct stance from the three transition verbs the brain already writes (`commit`, `abort`, `picket`), and treat silence as Forming.
+
+**Chosen:** 3.
+
+**Why:** stance is piecewise constant. The brain already logs every change: `picket` when it arrives within 8 m of the slot, `commit` when it spends itself, `abort` when it returns to the ring. Between those lines nothing happens, so a periodic dump would be 14 drones × 100 Hz against the same finite log budget that already overflows by dropping the *late* collision. Putting it on the heartbeat would spend comms on a fact peers already infer from Claim / silence. A new trace record type is a FORMAT change for a value the existing verbs determine.
+
+Option 1 failed for a narrower reason: `near` is 57% of all log lines. The last "tactical" line is almost always a close-pass, so the panel was showing proximity and calling it intent.
+
+Forming has no verb. That is correct encoding — it is the default, not an event — and the viewer says so rather than inventing a boot line just to have a token.
+
+**Cost accepted:**
+
+- **A reconstruction can be wrong if a transition is lost.** Log overflow drops the newest lines. A drone that committed after the budget died will still read as picketing. That is the same failure a dedicated channel would have, because it would be a log record too.
+- **The wording is a gloss.** "On station" is not in the brain; `Stance::Picketing` is. The raw verbs stay in the Log section.
+
+---
+
+## D7 — Hostile miss is 3D; alignment stays horizontal
+
+**Options considered**
+
+1. Gate on altitude: civilians fly high, hostiles do not.
+2. Switch alignment and closing to 3D as well.
+3. Require a descent (`vz`) before a hostile call.
+4. Keep horizontal alignment/closing, but compute closest-approach miss in 3D.
+
+**Chosen:** 4.
+
+**Why:** Drone 2 on x1-a called civilian 28 at t=5.57 (`miss=5.2 first=10.7 align=1.00`) and rammed it. The ground track is a 5.2 m chord — inside D2's sure-hit/shrink gate. The craft was level at 30 m (`vy = 0`), the same height as the ring, so a "civilians stay high" cut (option 1) would have let it through. 3D alignment (option 2) is what `belief.h` already rejected: a dash from 40 m up reads 0.97 and dilutes the signal. A descent bit (option 3) would have worked on this recording — every hostile dives at ~2.9 m/s, every civilian is level — but it is a posture, not a miss, and a level hostile that still reaches the cylinder would go unnamed.
+
+3D miss is the same geometry AimedAtAsset already wanted. A level overflight's miss is ~altitude and does not shrink (noisy 2D 10.7→5.2 becomes 32→30.5, below `kShrink`). A hostile diving at the origin has miss ~0. Horizontal alignment still fires on both, which is correct: the plane that scores is the ground plane; the discriminant is whether the trajectory actually goes there.
+
+**Cost accepted:**
+
+- A hostile that approaches *level* at an altitude greater than `asset_radius` will not be called. Not observed on x1-a (they arrive at ~10 m as they enter the cylinder). If a later scenario flies level attacks, this is the first thing to revisit.
+- `miss=` in the log is now the 3D figure. Old reads of "passes 5 m from the asset" on a 30 m overflight were the bug, not a format to preserve.
+

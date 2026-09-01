@@ -63,22 +63,21 @@ float ApproachAlignment(const Vec3& position, const Vec3& velocity, const Vec3& 
 /// Seconds to reach the target at current closing speed; large if not closing.
 float TimeToTarget(const Vec3& position, const Vec3& velocity, const Vec3& target);
 
-/// How close this thing will pass to the target if it does not turn. Horizontal.
+/// How close this thing will pass to the target if it does not turn. 3D.
 ///
-/// THE discriminant. Alignment alone cannot separate a hostile from a civilian
-/// on a chord that happens to point near the asset -- both read as closing and
-/// well aimed. But a hostile's miss distance goes to zero and a civilian's does
-/// not, because the hostile is steering and the civilian is not.
+/// Alignment and closing stay horizontal. Miss cannot: a civilian whose
+/// ground track is radial still flies at constant altitude, and a hostile
+/// dives at the origin. Horizontal miss called those overflights (D7).
 float ClosestApproachDistance(const Vec3& position, const Vec3& velocity,
                               const Vec3& target);
 
-/// True if this miss looks like a dash at the asset, not a constant-miss chord.
+/// True if this miss looks like a dash at the asset, not a constant-miss flyby.
 ///
-/// A civilian's closest-approach distance is constant. An s1 hostile aimed at
-/// the origin is already inside kSureHit from first sight. A hostile that
-/// started off-axis and is turning toward the disk will shrink miss by more
-/// than kShrink (above sensor noise) while still on course to enter the
-/// asset cylinder (`miss < asset_radius`).
+/// A civilian's 3D closest-approach is ~its altitude and does not shrink.
+/// An s1 hostile aimed at the origin is already inside kSureHit once it
+/// dives. A hostile that started off-axis and is turning toward the origin
+/// will shrink miss by more than kShrink (above sensor noise) while still
+/// on course to enter the asset sphere (`miss < asset_radius`).
 bool AimedAtAsset(float miss, float miss_at_first, float asset_radius);
 
 /// Wreckage is in unpowered ballistic flight, so its acceleration is g downward

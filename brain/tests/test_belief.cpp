@@ -76,6 +76,13 @@ static void TestBallistic() {
     CHECK(!LooksBallistic(Vec3(16, 3, 2.0f), Vec3(16, 0, 0), dt));
 }
 
+static Vec3 Toward(const Vec3& from, const Vec3& to, float speed) {
+    const Vec3 d = to - from;
+    const float n = swarm::Length(d);
+    CHECK(n > 1.0f);
+    return d * (speed / n);
+}
+
 // ---------------------------------------------------------------------------
 // The case that decides the tier-1 awareness score. A civilian on a chord that
 // happens to point near the asset for a while is the expensive false positive:
@@ -83,25 +90,26 @@ static void TestBallistic() {
 // ---------------------------------------------------------------------------
 
 static void TestMissDistanceSeparatesTheHardCase() {
-    std::printf("miss distance separates a chord-crossing civilian from a dash\n");
+    std::printf("miss distance separates a level overflight from a dive\n");
 
-    // A civilian crossing on a straight line that passes 40 m from the asset.
+    // A civilian crossing on a straight line that passes 40 m from the asset,
+    // level at 50 m. Ground miss is 40 m; 3D miss is dominated by altitude.
     const Vec3 civ_p(150.0f, 40.0f, -50.0f);
     const Vec3 civ_v(-16.0f, 0.0f, 0.0f);
 
-    // A hostile dashing in from a similar bearing.
+    // A hostile diving at the origin from a similar bearing.
     const Vec3 hos_p(170.0f, 0.0f, -40.0f);
-    const Vec3 hos_v(-16.0f, 0.0f, 0.0f);
+    const Vec3 hos_v = Toward(hos_p, kAsset, 16.0f);
 
-    // Alignment CANNOT tell them apart -- both read as closing and well aimed.
-    // This is exactly the -2 that a naive classifier pays.
+    // Alignment CANNOT tell them apart -- both read as closing and well aimed
+    // in the horizontal plane. This is exactly the -2 that a naive classifier
+    // pays, and why miss is 3D while alignment stays flat.
     CHECK(ApproachAlignment(civ_p, civ_v, kAsset) > 0.9f);
     CHECK(ApproachAlignment(hos_p, hos_v, kAsset) > 0.9f);
 
-    // Miss distance does.
     const float civ_miss = ClosestApproachDistance(civ_p, civ_v, kAsset);
     const float hos_miss = ClosestApproachDistance(hos_p, hos_v, kAsset);
-    CHECK(civ_miss > 35.0f);
+    CHECK(civ_miss > 60.0f);
     CHECK(hos_miss < 1.0f);
 
     std::printf("    civilian misses by %.1f m, hostile by %.1f m\n",
@@ -113,30 +121,28 @@ static void TestMissDistanceIgnoresThePast() {
     // Past the asset and running: closest approach is behind it, so the miss
     // distance must be the range now, not a negative-time extrapolation.
     const float miss = ClosestApproachDistance(Vec3(50, 0, -40), Vec3(16, 0, 0), kAsset);
-    CHECK(miss > 49.0f && miss < 51.0f);
+    CHECK(miss > 63.0f && miss < 65.0f);
 }
 
 // ---------------------------------------------------------------------------
-// AimedAtAsset is the gate Classify actually uses. The 40 m civilian above
-// never entered the old 24 m gate, so that test could not catch G1a.
+// AimedAtAsset is the gate Classify actually uses.
 // ---------------------------------------------------------------------------
 
 static void TestAimedAtAssetRejectsTheG1aChord() {
-    std::printf("AimedAtAsset rejects a 20 m chord that alignment would call hostile\n");
+    std::printf("AimedAtAsset rejects a 20 m ground chord that alignment would call hostile\n");
     const float asset_radius = 30.0f;
 
-    // G1a: civilian on a chord that passes 20 m from the origin. Alignment and
-    // closing look like a dash; the old 24 m gate called this enemy before t=8.
+    // G1a: civilian on a chord that passes 20 m from the origin, level at 50 m.
     const Vec3 civ_p(150.0f, 20.0f, -50.0f);
     const Vec3 civ_v(-16.0f, 0.0f, 0.0f);
     CHECK(ApproachAlignment(civ_p, civ_v, kAsset) > 0.9f);
     const float civ_miss = ClosestApproachDistance(civ_p, civ_v, kAsset);
-    CHECK(civ_miss > 19.0f && civ_miss < 21.0f);
+    CHECK(civ_miss > 50.0f);
     CHECK(!AimedAtAsset(civ_miss, civ_miss, asset_radius));
 
-    // s1 hostile dashing at the origin: CPA miss ~0 from first sight.
+    // s1 hostile diving at the origin: 3D miss ~0 from first sight.
     const Vec3 hos_p(170.0f, 0.0f, -40.0f);
-    const Vec3 hos_v(-16.0f, 0.0f, 0.0f);
+    const Vec3 hos_v = Toward(hos_p, kAsset, 16.0f);
     const float hos_miss = ClosestApproachDistance(hos_p, hos_v, kAsset);
     CHECK(hos_miss < 1.0f);
     CHECK(AimedAtAsset(hos_miss, hos_miss, asset_radius));
@@ -149,6 +155,34 @@ static void TestAimedAtAssetShrinkVsNoise() {
     CHECK(!AimedAtAsset(19.7f, 20.0f, asset_radius));
 }
 
+static void TestLevelOverflightIsNotAimed() {
+    std::printf("AimedAtAsset rejects a radial level overflight (x1-a drone 2)\n");
+    const float asset_radius = 38.1f;
+
+    // Recorded civilian 28 at t=5.57 when drone 2 called it: ground miss 5.2 m
+    // (inside kSureHit / shrink), altitude 30 m, vz = 0. Horizontal miss shrank
+    // from a noisy first sight (10.7 -> 5.2) and fired. 3D miss is ~altitude
+    // and the drop is ~1.5 m, below kShrink.
+    const Vec3 p(-17.0f, 89.8f, -30.1f);
+    const Vec3 v(1.9f, -7.6f, 0.0f);
+    CHECK(ApproachAlignment(p, v, kAsset) > 0.95f);
+    const float miss = ClosestApproachDistance(p, v, kAsset);
+    CHECK(miss > 29.0f && miss < 32.0f);
+    CHECK(!AimedAtAsset(miss, miss, asset_radius));
+    // The 2D first-sight was 10.7 m; in 3D that is hypot(10.7, 30.1) ≈ 32 m,
+    // a 1.5 m drop, below kShrink.
+    CHECK(!AimedAtAsset(miss, 32.0f, asset_radius));
+}
+
+static void TestLevelDashIsNotAHit() {
+    std::printf("a level dash at 40 m misses in 3D by its altitude\n");
+    const Vec3 p(170.0f, 0.0f, -40.0f);
+    const Vec3 v(-16.0f, 0.0f, 0.0f);
+    const float miss = ClosestApproachDistance(p, v, kAsset);
+    CHECK(miss > 39.0f && miss < 41.0f);
+    CHECK(!AimedAtAsset(miss, miss, 30.0f));
+}
+
 int main() {
     TestRangeRate();
     TestApproachAlignment();
@@ -158,6 +192,8 @@ int main() {
     TestMissDistanceIgnoresThePast();
     TestAimedAtAssetRejectsTheG1aChord();
     TestAimedAtAssetShrinkVsNoise();
+    TestLevelOverflightIsNotAimed();
+    TestLevelDashIsNotAHit();
 
     if (g_failures == 0) {
         std::printf("belief: all passed\n");
