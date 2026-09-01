@@ -217,3 +217,69 @@ Tick order is load-bearing: `Update` (Classify) → `ConsumeFrames` (`MarkFriend
 
 **Measured:** 8-scenario sweep after this: no `pair_friendly` on s1, s2, x1-a, x2-b. s1 total −947 (bar −1170). `civilians_lost == 0` on s0, s1, x1-b, x1-c. x1-a still reports 2, both at t=1.1 with no `friendly_lost` — the same two events as the pre-D8 baseline; the third civilian on that baseline was our `pair_neutral`, now gone. Leftover `pair_friendly` on x1-c (one pair at t=43.81) and on 1 of 6 fresh tier-1 draws. x1-b's pair is gone.
 
+---
+
+## D9 — Declare only local 2:1 calls (G2)
+
+**The term:** `score.awareness` is `declare_track` only, sampled once a second, most recent declaration per aircraft. Correct +1, wrong −2, unknown or undeclared 0, averaged and clamped to `[0, 60]`. The clamp is why a 1:6 brain scores the same 0 as a silent one. Friendlies are 16 of 24 entities on s1.
+
+**Options considered**
+
+1. Keep publishing every row in the track store, including hearsay, via `ToSwClass`. D8 already latched mates `Friendly`, so s1 went from 0 to ~53 as a side effect — but a peer-reported hostile sits at `track_id = 0` and is scored against whoever our sensors labelled 0.
+2. Declare nothing. Zero forever. Same as today's clamp, no upside.
+3. Publish only local tracks, and only classes we would bet at 2:1. After D8 that is heartbeat-matched `Friendly`. `AimedAtAsset` `Hostile` still drives intercept, but on x1-b it was 549 wrong ENEMY calls against the scoring hook — below 2:1. Everything else `UNKNOWN` (wreckage included — naming it anything is −2, measured).
+
+**Chosen:** 3, and Hostile stays off the hook until the discriminant is that sure.
+
+Intercept and scoring are separate on purpose. `Classify` / `ShouldCommit` still spend a drone on a Hostile the moment the evidence bar is met. `Declare` skips `!has_local_id`, publishes `FRIENDLY` for a heartbeat-matched mate, and `UNKNOWN` otherwise so a stale ENEMY does not linger into the sample. Calling a compromised friendly "friendly" is incomplete rather than wrong, so the heartbeat latch is not a trap.
+
+This is G2's two moves in order: stay quiet unless confident, then spend the free block we already have from D8.
+
+**Cost accepted:**
+
+- True hostiles are undeclared, so we leave +1 on the table for every sample they are in view. On s1 that is small next to 16 friendlies held for the whole run.
+- The inspector's "calls on this craft" is this hook, so hostiles and hearsay no longer colour it. Internal `call` log lines still fire.
+- Putting ENEMY back on the hook is the first thing to do if a later discriminant actually clears 2:1.
+
+**Measured**
+
+G2 asked: awareness > 0 on s1, and more than twice as many correct declarations as wrong ones. Target 20–40 points. Test on s1, then x1-a, then x1-b.
+
+How: `scripts\iterate.ps1` on those three ids, same brain, read `score.awareness` and `correct_declarations` / `wrong_declarations` out of the report JSON. Those counts are what the sim scored, not something we inferred.
+
+What we compared against:
+
+- The G2 brief (and our own earlier runs, before D8 named mates): awareness **0** everywhere. On x1-b the raw mix was 172 correct / 1016 wrong — worse than silence, then clamped to 0.
+- After D8 we already declared friendlies *and* hostiles. That flipped the sign (s1 ~53). x1-b still had **549 wrong** ENEMY calls — the discriminant is not 2:1 on generated layouts.
+- This patch (D9): declare **friends only**, and only on local sensor tracks. Intercept is unchanged (`score.mission` on all three runs was identical to the friends+enemies declare, which is how we know `declare_track` does not steer).
+
+| scenario | awareness now | correct : wrong | vs the brief |
+|---|---|---|---|
+| s1 | **51.9** | 4146 : 3 | was 0 |
+| x1-a | **38.1** | 3910 : 3 | — |
+| x1-b | **47.3** | 4409 : 0 | was 172 : 1016 |
+
+So: the gate is met. s1 sits above the 20–40 band because 16 mates are in view for the whole run; that is the free block, not a new intercept trick.
+
+The three remaining wrongs (s1 and x1-a) are the 8 m heartbeat gate picking the nearer of two close aircraft — a mate's ping stuck on a neighbour. x1-b's 549 wrongs were ENEMY labels on civilians; they went to zero when we stopped publishing ENEMY. s1 lost about 1 awareness point because we also stopped taking +1 on true hostiles; x1-a and x1-b went *up* because dropping those −2s was worth more than the lost +1s.
+
+---
+
+## D10 — The asset is a vertical cylinder, not a sphere
+
+**The question:** `AimedAtAsset` said `miss < asset_radius` meant "on course to enter the asset sphere." CHALLENGE.md §2 only says an asset sits at the centre and a hostile that *reaches* it is a loss. `SwBootInfo` and `--dump-params` publish `asset.position` and `asset.radius` — no height, no shape word. FORMAT.md and the viewer prefab called it a sphere; the prefab's live child is a Unity cylinder planted as a 2 m disc at y = 1.
+
+**Measured, s1, five breaches** (viewer y-up, last 10 Hz sample while alive, then the `breach` event):
+
+| hostile slot | last pose horiz | alt | 3D range | event − last sample |
+|---|---|---|---|---|
+| 26–30 | 30.75–30.82 m | **6.75 m** | 31.5 m | **0.06 s** |
+
+Closing ~15 m/s horizontally. 0.06 s more puts ground range on 30 m while 3D range is still ~30.7 m. A sphere of radius 30 at the origin would be crossed ~0.10 s later, at ~6.4 m altitude. The event matches the cylinder, not the sphere. Slot 24 is the intercept, still 66 m out.
+
+The y = 1 m "hit" was the viewer's marker: EnvironmentView scaled the 2 m-tall cylinder to height 2 m and sat it at y = 1. Hostiles vanished at 7 m on the r = 30 wall, above the hat.
+
+**Chosen:** treat `asset_radius` as the **horizontal** radius of a vertical cylinder from the ground to the arena ceiling. Classification (D7) still uses 3D miss so a level civilian chord is not a dash. That gate is *stricter* than the breach test: a level hostile above `asset_radius` would still score a breach and would not be called. Not seen on s1.
+
+**Cost accepted:** the viewer cylinder is now floor-to-ceiling, which is honest and can occlude whatever flies inside the radius (civilians). The inscribed-sphere comment is gone; `AimedAtAsset` is not the physics.
+

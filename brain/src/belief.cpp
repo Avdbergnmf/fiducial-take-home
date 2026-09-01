@@ -170,7 +170,8 @@ void TrackStore::Classify(Track& t, float now, float dt) {
     // of metres over it (level, vz ~ 0); a hostile dives, so 3D miss shrinks
     // toward the origin. Horizontal miss called those overflights — drone 2
     // on x1-a, ground miss 5.2 m, 30 m up. 3D miss is ~altitude and does not
-    // shrink, so AimedAtAsset stays false. See D7.
+    // shrink, so AimedAtAsset stays false. The *breach* is still a cylinder
+    // (D10): ground range ≤ asset_radius, any altitude. See D7.
     const float alignment = ApproachAlignment(t.position, t.velocity, cfg_.asset);
     const float closing = -RangeRate(t.position, t.velocity, cfg_.asset);
     const float miss = ClosestApproachDistance(t.position, t.velocity, cfg_.asset);
@@ -191,10 +192,10 @@ void TrackStore::Classify(Track& t, float now, float dt) {
 
     // --- otherwise: say nothing ---------------------------------------------
     //
-    // Wrong costs -2, unknown costs 0. Staying quiet until the evidence is
-    // there is cheap. But note the term is clamped at zero, so a brain that
-    // never declares anything scores the same as one that guesses badly: the
-    // goal is confident calls, not silence.
+    // Wrong declarations cost -2, unknown 0. Classify may still hold Hostile
+    // for intercept; Policy::Declare is what the awareness term reads, and
+    // it only publishes 2:1 calls (D9). This reset is so a decaying dash
+    // does not stay Hostile in the store after the geometry has gone.
     if (t.belief != Belief::Unknown && t.belief != Belief::Friendly &&
         t.closing_score < 0.2f) {
         t.belief = Belief::Unknown;

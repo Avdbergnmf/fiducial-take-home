@@ -40,7 +40,7 @@ loss, latency and track-drop times on purpose — but two of the guesses are cur
 | world.h:120 | `max_accel` default | 15.0 | MEASURED | `--dump-params`: `drone.max_accel=15` | Yes. |
 | world.h:121 | `max_tilt` default | 0.6 | MEASURED | `--dump-params`: `drone.max_tilt=0.6` | Yes. |
 | world.h:122 | `kill_radius` default | ~~3.0~~ → 1.0 | MEASURED | `--dump-params`: `drone.kill_radius=1`; `fixture.jsonl` header `"kill_radius": 1.0` | **Was wrong — fixed.** Every other default in this block is the s1 value; this one was 3× too large. Overwritten by `From()` so it never reached flight, but it is the number a reader checks the margin against. |
-| world.h:125 | `asset_radius` default | 30.0 | SCENARIO | `s1.json` `params.asset.radius = 30.0` | Yes. |
+| world.h:125 | `asset_radius` | 30.0 | SCENARIO value, **MEASURED shape: cylinder** | `s1.json` `params.asset.radius = 30`; `--dump-params` has no height/shape. s1 breaches: last pose horiz 30.8 m, alt 6.75 m, 3D 31.5 m; event 0.06 s later (cylinder crossing), not 0.10 s (sphere). D10. | Radius yes. Treating it as a sphere is wrong. |
 | world.h:132 | `lateral_limit` default | 6.7 | DERIVED | 9.81 · tan(0.6) = 6.7117 | Yes. |
 | world.h:161 | `lateral_limit` computed | `9.81 · tan(max_tilt)` | SPEC | CHALLENGE.md §5.4: "bounded by `g·tan(max_tilt)` — around 6.7 m/s² where `max_accel` reads 15". Independently restated in `s1.json` `_evasion`: "g*tan(max_tilt) = 6.7 m/s^2 and not max_accel" | **Yes — the best-sourced constant in the brain.** Cited in two places and used correctly everywhere. |
 | world.h:167 | `separation_margin` | `kill_radius · 4.0` = **4.0 m** | **GUESS** | Unknown/civilian blend only (D8). The `4.0` has no source. | Still too small to arrest traffic; left small *because* 19 m around every track collapses the ring. See below. |
@@ -100,7 +100,7 @@ the real finding: **the margin and the ring geometry have to be designed togethe
 
 | file:line | name | value | category | source | defensible? |
 |---|---|---|---|---|---|
-| policy.cpp:8 | `kHeartbeatHz` | 2.0 Hz | **GUESS**, matches example | `hover_relay_brain.cpp` header: "broadcasts a heartbeat naming itself, twice a second" | Reasonable. Measured cost: `bytes_per_drone_per_s = 704.1` → comms score 40·(1 − 704.1/4096) = **33.1**, confirmed in both reports. |
+| policy.cpp:24 | `PublishedClass` | Friendly only | **DERIVED** | G2 2:1 scoring hook (D9). Hostile/wreckage/unknown → UNKNOWN. | Yes — x1-b ENEMY publishes were 549 wrong. Intercept still uses `belief`. |
 | policy.cpp:9 | `kCommitMaxRange` | 120.0 m | **GUESS** | none | Exceeds `sense_radius` (60) — so it only ever binds on hearsay tracks, never on our own sensor tracks. Effectively dead code on s1. |
 | policy.cpp:10 | `kAbortAfter` | 25.0 s | **GUESS** | none | Hostiles spawn every 14 s (`s1.json`), so a 25 s pursuit spans two arrivals. *Too high:* a drone is committed to a lost cause while the next hostile transits unopposed. *Too low:* aborting a converging intercept. |
 | policy.cpp:11 | `kClaimHold` | 6.0 s | **GUESS** | none | Nothing reads claims yet (`brain.cpp:105` is a TODO), so this is inert. |

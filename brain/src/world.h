@@ -122,6 +122,9 @@ struct Config {
     float kill_radius = 1.0f;   // s1 value; --dump-params drone.kill_radius=1
 
     Vec3 asset{};
+    /// Horizontal radius of the defended *cylinder*, not a sphere. A hostile
+    /// breaches when its ground range to `asset` drops to this, at whatever
+    /// altitude it is flying (D10). dump-params only publishes a radius.
     float asset_radius = 30.0f;
     Vec3 arena_min{}, arena_max{};
 
@@ -186,7 +189,7 @@ enum class Belief : uint8_t {
     Friendly = 1,
     Hostile = 2,
     Civilian = 3,
-    Wreckage = 4,     // ours only; declared as NEUTRAL, it is not an aircraft
+    Wreckage = 4,     // ours only; scored as UNKNOWN — it is not an aircraft
 };
 
 inline SwClass ToSwClass(Belief b) {

@@ -175,6 +175,8 @@ static void TestLevelOverflightIsNotAimed() {
 }
 
 static void TestLevelDashIsNotAHit() {
+    // Classification only. A level dash at 40 m *would* breach the cylinder
+    // (ground miss 0); 3D miss is the altitude, so AimedAtAsset stays false (D7, D10).
     std::printf("a level dash at 40 m misses in 3D by its altitude\n");
     const Vec3 p(170.0f, 0.0f, -40.0f);
     const Vec3 v(-16.0f, 0.0f, 0.0f);

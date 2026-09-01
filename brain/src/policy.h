@@ -36,7 +36,7 @@ public:
 
     /// Report what we currently believe. Scored once a second on the MOST
     /// RECENT declaration per aircraft: correct +1, wrong -2, unknown 0.
-    /// Cheap to call every tick and there is no reason not to.
+    /// Only local tracks, and only classes we would bet at 2:1 (D9).
     void Declare(const swarm::Host& host, const TrackStore& store) const;
 
     /// Queue whatever is worth saying this tick. One broadcast per tick, so

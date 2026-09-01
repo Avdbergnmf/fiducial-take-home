@@ -75,6 +75,10 @@ float TimeToTarget(const Vec3& position, const Vec3& velocity, const Vec3& targe
 /// Alignment and closing stay horizontal. Miss cannot: a civilian whose
 /// ground track is radial still flies at constant altitude, and a hostile
 /// dives at the origin. Horizontal miss called those overflights (D7).
+///
+/// This is a classification number, not the breach test. The asset is a
+/// vertical cylinder of radius `asset_radius` (D10); a hostile is lost
+/// when ground range hits that radius, even if 3D CPA is its altitude.
 float ClosestApproachDistance(const Vec3& position, const Vec3& velocity,
                               const Vec3& target);
 
@@ -84,7 +88,10 @@ float ClosestApproachDistance(const Vec3& position, const Vec3& velocity,
 /// An s1 hostile aimed at the origin is already inside kSureHit once it
 /// dives. A hostile that started off-axis and is turning toward the origin
 /// will shrink miss by more than kShrink (above sensor noise) while still
-/// on course to enter the asset sphere (`miss < asset_radius`).
+/// on course to enter the cylinder (`miss < asset_radius` on the 3D CPA —
+/// sufficient for a dive, stricter than the actual breach test, which is
+/// ground range). A level attack above `asset_radius` would still breach
+/// and would not be called; not observed on s1 (they arrive at ~7 m).
 bool AimedAtAsset(float miss, float miss_at_first, float asset_radius);
 
 /// Wreckage is in unpowered ballistic flight, so its acceleration is g downward

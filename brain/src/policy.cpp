@@ -18,6 +18,15 @@ constexpr uint8_t kPrioTrack = 3;
 constexpr uint8_t kPrioClaim = 4;
 constexpr uint8_t kPrioAccuse = 5;
 
+/// Scoring hook only. Intercept still uses Track.belief. Wrong is −2 and
+/// right is +1, so we only publish what is 2:1 today: a heartbeat-matched
+/// mate. Aimed dashes still drive commit; they are not yet that sure on
+/// generated layouts (x1-b was 549 wrong ENEMY calls).
+SwClass PublishedClass(const Track& t) {
+    if (t.belief == Belief::Friendly) return SW_CLASS_FRIENDLY;
+    return SW_CLASS_UNKNOWN;
+}
+
 }  // namespace
 
 void Policy::Configure(const Config& cfg, Rng rng) {
@@ -139,8 +148,15 @@ Vec3 Policy::DesiredPosition(const swarm::Observation& obs) const {
 }
 
 void Policy::Declare(const swarm::Host& host, const TrackStore& store) const {
+    // G2 / D9: only local tracks, only 2:1 calls. track_id is observer-local;
+    // a hearsay row sits at id 0 and would be scored against whoever our
+    // sensors labelled 0. Unknown/wreckage publish UNKNOWN so a stale ENEMY
+    // does not linger into the 1 Hz sample. Friendlies are the free block:
+    // a heartbeat-matched track is a mate, and naming a compromised one
+    // "friendly" is incomplete rather than wrong.
     for (const Track& t : store.tracks()) {
-        host.DeclareTrack(t.track_id, ToSwClass(t.belief));
+        if (!t.has_local_id) continue;
+        host.DeclareTrack(t.track_id, PublishedClass(t));
     }
     // TODO(tier 5): declare_identity is a SEPARATE hook and the two are not
     // interchangeable -- an insider only counts if named by key. Naming an

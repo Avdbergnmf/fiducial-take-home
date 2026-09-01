@@ -250,7 +250,8 @@ The viewer in `viewer/fiducial-swarm-viz/` does this and nothing more:
    rotation = (data[i+6], data[i+7], data[i+8], data[i+9])   // Quaternion(x,y,z,w)
    ```
 
-6. Draw the rest from the meta: arena box, asset sphere, `kill_radius` (same
+6. Draw the rest from the meta: arena box, asset **cylinder** (vertical,
+   radius `asset.radius`, floor to arena ceiling — not a sphere), `kill_radius` (same
    for every airframe; omit-safe — older files lack the field), `events` on a
    timeline, `links` as line segments between the two drones' current
    positions while `t_start <= t < t_end`, `logs`/`telemetry` on the
