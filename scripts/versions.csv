@@ -1,0 +1,12 @@
+version,commit,label,min,mean,max,worst
+V0,5589171,"skeleton (untested draft)",-1546.9,-895.3,39.6,s1
+V1,80c589e,"D2 aimed-at-asset + CPA discriminant",-1093.5,-687.6,39.6,x1-a
+V2,33f8984,"D3/D4 diagnostic logging",-1093.5,-687.6,39.6,x1-a
+V3,ad2cc9f,"D7 miss distance becomes 3D",-1037.9,-611.0,39.6,s2
+V4,dd447fe,"D8 friendly ID from heartbeats",-947.2,-537.1,99.4,s1
+V5,8ab1263,"D10 asset is a cylinder",-948.2,-536.1,99.4,s1
+V6,917346a,"fix: hostile calling restored",-947.2,-537.1,99.4,s1
+V7,2522c14,"D11 commit only a catchable intercept",-521.2,-134.7,158.6,x2-b
+V8,2d75837,"D13 local tracks die with sensor picture",-700.0,-211.4,158.4,s2
+V9,8664314,"D15 one owner per hostile + yield",-524.6,-136.4,158.4,x2-b
+V10,366fd4d,"current (viewer-side; brain matches V9)",-524.6,-136.4,158.4,x2-b

@@ -132,3 +132,17 @@ are bit-identical across machines, so runs from either side compare directly.
 - **Scores are bit-identical across machines and thread counts.** A score is
   comparable no matter where it was produced, so numbers recorded tonight stay
   valid all week and there is no need to re-run everything on a different box.
+
+---
+
+## Replaying a RESULTS.md version
+
+The ladder in RESULTS.md is `scripts\versions.csv`. To rebuild one commit's
+brain and the eight-id sweep (without checking out that commit):
+
+    powershell -ExecutionPolicy Bypass -File scripts\ablation.ps1 -List
+    powershell -ExecutionPolicy Bypass -File scripts\ablation.ps1 -Version V7
+    powershell -ExecutionPolicy Bypass -File scripts\ablation.ps1 -Version V7 -Trace
+
+Reports, a log, and optional viewer sidecars land in `runs\ablation\V7\`.
+Gitignored. See RESULTS.md "Reproducing the ladder".

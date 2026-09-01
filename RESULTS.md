@@ -179,15 +179,15 @@ same root cause showing up in a second metric.
 the viewer sidecar, left in place — nothing is copied into StreamingAssets.
 
 ```
-runs/ablation/index.json            version → commit, label, min/mean/max
-runs/ablation/V{0–10}_worst_<id>.{json,jsonl,bin,meta.json}
-runs/ablation/current/<id>.{json,jsonl,bin,meta.json}
+scripts/versions.csv                version → commit, expected min/mean/max, worst
+runs/ablation/<ver>/                rebuilt reports (summary.csv, log.txt, meta.json, *.json)
+runs/ablation/<ver>/<id>.{jsonl,bin,meta.json}   if you passed -Trace / -TraceAll
 ```
 
 `.json` is the score report, `.jsonl` is `--trace`, `.bin` + `.meta.json` are
-what the viewer loads. Re-record with `--trace` and
-`python tools/build_viewer_data.py <trace> <stem>` if you need them on another
-clone.
+what the viewer loads. Rebuild any ladder row with `scripts\ablation.ps1`
+(see below). Point the viewer's extra-run folder at `runs\ablation\` or a
+version subfolder. Do not copy into StreamingAssets.
 
 `runs/history.csv` holds the 27 live runs recorded during development by
 `scripts\iterate.ps1`. It is incomplete — several runs were not committed — which
@@ -197,16 +197,21 @@ is why the ladder above was rebuilt from git rather than read out of it.
 
 ## Reproducing the ladder
 
-Versions were rebuilt from git and compiled directly, to avoid `CMakeLists.txt`
-drift between commits:
+The table is `scripts\versions.csv` (version key, commit, expected min/mean/max,
+worst id). Rebuild one row without checking out that commit — only `brain/src`
+is archived into a scratch tree and compiled against today's SDK:
 
-```bash
-git archive <commit> brain/src | tar -x -C <dir>
-g++ -shared -fPIC -std=c++17 -O2 -I pkg/sdk/include -I <dir>/brain/src \
-    <dir>/brain/src/*.cpp -o <dir>/brain.so
-cd pkg && ./bin/swarm_sim --sweep --scenarios s0,s1,s2,x1-a,x1-b,x1-c,x2-a,x2-b \
-    --brain <dir>/brain.so --report-dir <dir>/reports --jobs 4
+```
+powershell -ExecutionPolicy Bypass -File scripts\ablation.ps1 -List
+powershell -ExecutionPolicy Bypass -File scripts\ablation.ps1 -Version V7
+powershell -ExecutionPolicy Bypass -File scripts\ablation.ps1 -Version V7 -Trace
+powershell -ExecutionPolicy Bypass -File scripts\ablation.ps1 -All
 ```
 
-Sanity check: the direct build of HEAD reproduces s1 = 130.0, matching the
-`scripts\iterate.ps1` run recorded in `runs/history.csv`.
+Output is `runs\ablation\<ver>\`: per-id `*.json` reports, `summary.csv`,
+`log.txt`, `meta.json`. `-Trace` adds jsonl + viewer `.bin`/`.meta.json` for
+the worst id. That folder is gitignored; point the viewer's extra-run folder
+at it if you want to look. A drift warning means the live score is more than
+0.15 off the CSV (RESULTS.md's table).
+
+Sanity check: V10 (HEAD-era brain) should still print s1 = 130.0.
