@@ -690,3 +690,57 @@ next thing and is untested.
 including `TestLeadIntercept`, which pins the closed form (including that it
 correctly refuses an equal-speed perpendicular crossing) and the standstill case
 that was the original bug.
+---
+
+## D23 — Rotating and counter-rotating pickets: measured, rejected
+
+Tested on the D22 baseline (sweep mean **+99.1**) because "rotating ring webs"
+is a recurring suggestion for this problem: drones fly interlocking,
+counter-rotating circular paths so that when a hostile pierces one spot,
+another drone rotating into that sector closes the gap.
+
+**Option 1 — uniform rotation.** Every station sweeps the ring at a constant
+rate; radius unchanged, so it composes with D21's bisection instead of
+replacing it. Ownership has to rotate with the stations or an inbound is
+handed to a drone no longer facing it, so `FacingSlot` de-spins the bearing
+before quantising.
+
+| rate | tangential speed at R≈86 | sweep mean | min |
+|---|---|---|---|
+| baseline | 0 | **+99.1** | −246.8 |
+| 0.02 rad/s | 1.7 m/s | −5.3 | −677.2 |
+| 0.05 rad/s | 4.3 m/s | +51.9 | −222.2 |
+| 0.10 rad/s | 8.6 m/s | −0.1 | −293.3 |
+
+Worse at every rate, and x2-b falls 3/3 → 2/3 at all three.
+
+**Option 2 — counter-rotating interlocking rings.** Even ids on an inner ring
+turning one way, odd ids on an outer ring turning the other, radii separated by
+24 m so the two never fight `EnforceSeparation`. Mean **−412.9**, min −908.7,
+every single scenario worse.
+
+**Rejected, both.**
+
+**Why, and it is not a tuning failure.** Three measured reasons:
+
+1. **Coverage was never the bottleneck.** Awareness scores 52–58 of 60 — we
+   already detect essentially everything. Rotation buys sensing we do not need
+   and pays for it in velocity.
+2. **A rotating picket always carries tangential velocity across the inbound
+   corridor**, which the interceptor's velocity servo must null before it can
+   close. That is the same budget D22 just bought back.
+3. **Splitting into two rings halves each ring's density**, and D21 already
+   measured density loss as the thing that breaks tier-2 layouts. The dual-ring
+   collapse is that result again, larger.
+
+**The deeper reason, worth saying out loud:** s2's spawner enters "on the
+bearing furthest from any defender". Against an adversary that attacks your
+weakest bearing, **uniform spacing is the maximin strategy** — any
+concentration is exploitable, and we measured that directly in D21 when
+redistribution schemes moved the gap instead of closing it. Rotation preserves
+uniformity, so it cannot improve the distribution; it can only add cost. The
+useful half of the "rotating web" intuition is that a hole must close, and D21
+closes it locally and for free, without anyone having to fly a circle.
+
+**Nothing committed but this entry.** The experiment scripts are scratch; the
+numbers above are the deliverable.
