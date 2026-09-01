@@ -138,6 +138,69 @@ static void TestLiveRingRespaces() {
     CHECK(Horiz(new14, at[15]) < 8.0f);
 }
 
+static void TestStationBisectsTheGap() {
+    std::printf("station bisects the gap a run of deaths leaves\n");
+    // The s2 leak, in numbers. Ring 70 m, 16 drones, comm 75. Slots 0, 1 and 2
+    // died to rams in sequence; the next hostile came in at bearing 20 deg,
+    // the centre of the arc they left. Measured on the trace: the survivors
+    // held 335 deg and 68 deg and never closed the 93 deg hole, because the
+    // old rank/CountLive re-space needs a roster nobody has -- at this radius
+    // only +/-2 neighbours are inside comm_radius.
+    float heard[kMaxFleet];
+    Vec3 at[kMaxFleet];
+    InitHeard(heard);
+    const uint32_t n0 = 16;
+    const float now = 70.0f;
+    const float comm = 75.0f;
+    const Vec3 asset(0, 0, 0);
+    for (uint32_t i = 0; i < n0; ++i)
+        at[i] = flight::RingSlot(i, n0, asset, 70.0f, 30.0f);
+    const float step = 2.0f * 3.14159265358979f / 16.0f;
+
+    // Full strength is a fixed point: nobody abandons their own sector.
+    for (uint32_t id = 0; id < n0; ++id) {
+        const float b = StationBearing(id, n0, id, heard, at, at[id], comm, now);
+        CHECK(std::fabs(b - step * static_cast<float>(id)) < 1e-4f);
+    }
+
+    heard[0] = now - 3.0f;
+    heard[1] = now - 3.0f;
+    heard[2] = now - 3.0f;
+
+    // How far the death signal reaches is RingAlive's business, and it is
+    // shorter than the radio: silence only counts as a death inside
+    // comm - cruise*silent - 10 = 44 m. On this ring the slot chords are 27 m,
+    // 54 m, 80 m, so drone 3 registers 2 as dead and still believes in 1.
+    CHECK(RingAlive(2, 3, heard, at, at[3], comm, now) == false);
+    CHECK(RingAlive(1, 3, heard, at, at[3], comm, now) == true);
+
+    // So each lip of the hole sees one empty slot on that side and one full
+    // slot on the other, and bisects: half a slot inward.
+    const float b3 = StationBearing(3, n0, 3, heard, at, at[3], comm, now);
+    CHECK(std::fabs(b3 - (step * 3.0f - 0.5f * step)) < 1e-4f);
+
+    const float b15 = StationBearing(15, n0, 15, heard, at, at[15], comm, now);
+    CHECK(std::fabs(b15 - (step * 15.0f + 0.5f * step)) < 1e-4f);
+
+    // Which is the point: the 90 deg hole closes by a slot from the two
+    // drones that can see it, without anyone needing the full roster.
+    const float two_pi = 2.0f * 3.14159265358979f;
+    const float before = step * 3.0f - step * 15.0f + two_pi;
+    const float after = b3 - b15 + two_pi;
+    CHECK(after < before - 0.9f * step);
+
+    // Far from the hole, nothing moves: this is local, not a global reshuffle.
+    const float b8 = StationBearing(8, n0, 8, heard, at, at[8], comm, now);
+    CHECK(std::fabs(b8 - step * 8.0f) < 1e-4f);
+
+    // Whatever it believes, a picket never walks off its own sector: the
+    // shift is capped at two slots. Reachable only on a wider ring, where
+    // more than one neighbour falls inside the death radius.
+    for (uint32_t id = 0; id < 13; ++id) heard[id] = now - 3.0f;
+    const float b14 = StationBearing(14, n0, 14, heard, at, at[14], comm, now);
+    CHECK(std::fabs(b14 - step * 14.0f) <= 2.0f * step + 1e-4f);
+}
+
 static void TestYieldHorizonIsRemainingFlight() {
     std::printf("yield corridor is remaining flight, not the full chord\n");
     // s1-like: picket on the 75 m ring, hostile 95 m further inbound at 16 m/s.
@@ -178,6 +241,7 @@ int main() {
     TestFacingSlotMatchesRing();
     TestUniqueOwnerIsOneDrone();
     TestLiveRingRespaces();
+    TestStationBisectsTheGap();
     TestYieldHorizonIsRemainingFlight();
 
     if (g_failures == 0) {

@@ -51,6 +51,16 @@ uint32_t LiveId(uint32_t rank, uint32_t fleet_size, uint32_t self_id,
                 const float* heard, const Vec3* heard_at, const Vec3& self_pos,
                 float comm_radius, float now);
 
+/// Bearing drone `id` should hold, bisecting the gap between the nearest
+/// drones either side of it that WE still believe are flying (D21). A fixed
+/// point at full strength; slides toward a hole as neighbours fall silent.
+float StationBearing(uint32_t id, uint32_t fleet_size, uint32_t self_id,
+                     const float* heard, const Vec3* heard_at,
+                     const Vec3& self_pos, float comm_radius, float now);
+
+/// Ring point at a bearing, rather than at a slot index. NED, so -altitude.
+Vec3 StationAt(float bearing, const Vec3& centre, float radius, float altitude);
+
 /// First live drone clockwise from `facing` on the *original* id ring,
 /// including facing. Kept so the G4 tests still pin the old walk. Allocation
 /// and stations use the live ring (D19).

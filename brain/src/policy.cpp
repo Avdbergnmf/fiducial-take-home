@@ -46,10 +46,20 @@ void Policy::Configure(const Config& cfg, Rng rng) {
 
     // Ring sizing: neighbours must be able to hear each other, so spacing is
     // driven by comm_radius, and the ring must sit outside the asset radius.
-    // Survivors re-space in place when a *nearby* heartbeat goes silent
-    // (D19). Opposite-side radio loss is not a death. Radius stays; the
-    // hole in bearing is what leaked late arrivals.
-    ring_radius_ = cfg.asset_radius + cfg.comm_radius * 0.5f;
+    // Survivors bisect the gap left by a neighbour that falls silent (D21).
+    //
+    // The standoff and the gap rule are ONE decision, not two. Meeting a
+    // hostile further out is paid straight into the score -- W_kill scales
+    // with (1 - t_engage/t_free) -- but every metre of radius also widens
+    // the hole a death leaves, because the gap between two slots is
+    // 2*R*sin(pi/n). Pushed out on its own, 0.75 lost more to leaks than it
+    // won in reward (sweep mean -30.5 -> -30.9). With the gap closing behind
+    // each loss it stops being a leak and starts being reward: 0.625 beats
+    // the old 0.5 on all eight fixed scenarios and on 20 unseen ids
+    // (mean -52.5 -> -20.8). Past ~0.75 the ring outruns its own recovery --
+    // a leaker at that range cannot be run down, since a hostile has our
+    // lateral limit -- and tier-2 layouts collapse. See notes/decisions.md.
+    ring_radius_ = cfg.asset_radius + cfg.comm_radius * 0.625f;
     ring_altitude_ = 30.0f;
     picket_goal_ = flight::RingSlot(cfg.drone_id, cfg.fleet_size, cfg.asset,
                                     ring_radius_, ring_altitude_);
@@ -124,14 +134,14 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
     }
 
     if (stance_ == Stance::Forming) {
-        const uint32_t n = CountLive(cfg_.fleet_size, cfg_.drone_id, heard_,
-                                     heard_at_, obs.position(), cfg_.comm_radius,
-                                     now);
-        const uint32_t rank = LiveRank(cfg_.drone_id, cfg_.fleet_size,
-                                       cfg_.drone_id, heard_, heard_at_,
-                                       obs.position(), cfg_.comm_radius, now);
-        const Vec3 slot = flight::RingSlot(rank, n, cfg_.asset,
-                                           ring_radius_, ring_altitude_);
+        // The same station function PicketGoal flies to. They agree at boot,
+        // when nobody has died; they would not after a loss, and a drone that
+        // re-forms would call itself on picket at a slot it is not holding.
+        const Vec3 slot = StationAt(
+            StationBearing(cfg_.drone_id, cfg_.fleet_size, cfg_.drone_id,
+                           heard_, heard_at_, obs.position(), cfg_.comm_radius,
+                           now),
+            cfg_.asset, ring_radius_, ring_altitude_);
         if (swarm::Distance(obs.position(), slot) < 8.0f) {
             stance_ = Stance::Picketing;
             std::snprintf(last_log_, sizeof(last_log_), "picket");
@@ -222,6 +232,52 @@ uint32_t LiveId(uint32_t rank, uint32_t fleet_size, uint32_t self_id,
         ++i;
     }
     return self_id;
+}
+
+/// Where drone `id` should stand, in bearing, given only who WE can hear.
+///
+/// D19 re-spaced by global rank: index among the live, spread over CountLive
+/// slots. That needs a liveness vector no drone has. On s2 the ring chord puts
+/// only +/-2 neighbours inside comm_radius and max_hops_observed is 1, so each
+/// drone re-indexes against a different, mostly-stale roster; measured, the
+/// survivors rotate a couple of degrees and a 93 deg hole stays open (three
+/// adjacent slots died to rams, the next hostile came in at its centre).
+///
+/// Bisect instead. Walk out from our own slot in both directions to the first
+/// drone we still believe is flying, and stand at the midpoint of that gap.
+/// Uses nothing beyond the neighbours we can actually hear, is a pure function
+/// of the liveness bitmap so it cannot oscillate, and is a fixed point when
+/// nobody has died. Neighbours of the hole slide in, their neighbours follow,
+/// and the ring closes by diffusion rather than by consensus.
+float StationBearing(uint32_t id, uint32_t fleet_size, uint32_t self_id,
+                     const float* heard, const Vec3* heard_at,
+                     const Vec3& self_pos, float comm_radius, float now) {
+    const uint32_t n = fleet_size > 0 ? fleet_size : 1;
+    const float step = 2.0f * kPi / static_cast<float>(n);
+    const float base = step * static_cast<float>(id % n);
+    if (n < 3) return base;
+
+    uint32_t up = 1, down = 1;
+    while (up < n && !RingAlive((id + up) % n, self_id, heard, heard_at,
+                                self_pos, comm_radius, now)) ++up;
+    while (down < n && !RingAlive((id + n - down) % n, self_id, heard,
+                                  heard_at, self_pos, comm_radius, now)) ++down;
+    // Alone, or the two searches met on the same drone: no gap to bisect.
+    if (up >= n || down >= n || up + down >= n) return base;
+
+    float shift = 0.5f * (static_cast<float>(up) - static_cast<float>(down)) * step;
+    // A picket that walks further than two slots has stopped covering its own
+    // sector to cover someone else's.
+    const float cap = 2.0f * step;
+    if (shift > cap) shift = cap;
+    if (shift < -cap) shift = -cap;
+    return base + shift;
+}
+
+Vec3 StationAt(float bearing, const Vec3& centre, float radius, float altitude) {
+    return Vec3(centre.x + radius * std::cos(bearing),
+                centre.y + radius * std::sin(bearing),
+                -altitude);
 }
 
 uint32_t UniqueOwner(uint32_t facing, uint32_t fleet_size, uint32_t self_id,
@@ -336,25 +392,20 @@ Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) 
     // survivors take evenly spaced stations (D19); yield uses those stations.
     // Past the predicted ram they do not move (D17).
     const float now = obs.time();
-    const uint32_t n = CountLive(cfg_.fleet_size, cfg_.drone_id, heard_,
-                                 heard_at_, obs.position(), cfg_.comm_radius,
-                                 now);
-    const uint32_t rank = LiveRank(cfg_.drone_id, cfg_.fleet_size,
-                                   cfg_.drone_id, heard_, heard_at_,
-                                   obs.position(), cfg_.comm_radius, now);
-    Vec3 goal = flight::RingSlot(rank, n, cfg_.asset,
-                                 ring_radius_, ring_altitude_);
+    Vec3 goal = StationAt(StationBearing(cfg_.drone_id, cfg_.fleet_size,
+                                        cfg_.drone_id, heard_, heard_at_,
+                                        obs.position(), cfg_.comm_radius, now),
+                          cfg_.asset, ring_radius_, ring_altitude_);
     for (const Track& t : store.tracks()) {
         if (t.belief != Belief::Hostile) continue;
         if (OwnsInbound(t, obs)) continue;
         const uint32_t facing = FacingSlot(t.position, cfg_.asset, cfg_.fleet_size);
         const uint32_t owner = UniqueOwner(facing, cfg_.fleet_size, cfg_.drone_id,
                                            heard_, now);
-        const uint32_t owner_rank = LiveRank(owner, cfg_.fleet_size, cfg_.drone_id,
-                                             heard_, heard_at_, obs.position(),
-                                             cfg_.comm_radius, now);
-        const Vec3 slot = flight::RingSlot(owner_rank, n, cfg_.asset,
-                                           ring_radius_, ring_altitude_);
+        const Vec3 slot = StationAt(
+            StationBearing(owner, cfg_.fleet_size, cfg_.drone_id, heard_,
+                           heard_at_, obs.position(), cfg_.comm_radius, now),
+            cfg_.asset, ring_radius_, ring_altitude_);
         const Vec3 from = CorridorOrigin(store, t, slot);
         const Vec3 end = CorridorHorizon(from, t.position, t.velocity);
         goal = YieldOffCorridor(goal, from, end, cfg_.friendly_margin);

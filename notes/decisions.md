@@ -501,3 +501,94 @@ Claims were the half-built answer (`ClaimMsg` is on the wire format). D11 alread
 
 
 
+---
+
+## D21 — Stations bisect the local gap; standoff and gap close as one decision
+
+**The leak, measured rather than guessed.** s2 was 4/6 with two breaches and no
+mechanism I trusted. Tracing it (`--trace`, log records) settled it in one run:
+
+| hostile | window | outcome | nearest friendly at the end |
+|---|---|---|---|
+| 27 | 10–24 s | killed | 2.0 m — **and a drone dies** (16→15) |
+| 29 | 26–40 s | killed | 1.1 m — **drone dies** (15→14) |
+| 31 | 42–58 s | killed | 1.6 m — **drone dies** (14→13) |
+| **32** | 58–75 s | **breach** | 57.7 m |
+| **34** | 74–91 s | **breach** | 25.3 m |
+| 35 | 90–103 s | killed | 1.5 m |
+
+Hostiles arrive one at a time on bearings −10°, 0°, 10°, **20°, 20°**, 30°, and
+`s2.json` says the spawner picks the bearing furthest from any defender. Every
+kill is a mutual ram (`losses_by_cause: {pair_hostile: 4}`) that costs the drone
+*in that sector*. Three kills emptied a contiguous arc and the next two hostiles
+walked through it. **Only 5 commits in the whole run, and none at all between
+t=58.1 and t=87.1** — a 29 s window covering both breaches. At t=70 and t=85 the
+arc from d15@335° to d3@68° — **93°** — was empty, with the survivors still on
+their original bearings.
+
+**Why D19 did not close it.** D19 re-spaces by *global* rank: index among the
+live, spread over `CountLive` slots. That needs a liveness vector no drone has.
+At ring 67.5 m the slot chords are 27 m, 54 m, 80 m, so only ±2 neighbours are
+inside `comm_radius` 75, and `comms.max_hops_observed` is **1** — heartbeats are
+not relayed. Each drone re-indexes against a different, mostly-stale roster, so
+the ring rotates a couple of degrees instead of closing.
+
+**Options measured** (8 fixed scenarios × radius fraction F, plus 20 fresh
+`--new-token` ids). Sweep mean, baseline **−30.5**:
+
+1. **Station-occupancy liveness** (treat a station-distant silence as a death, so
+   far-side deaths register). Mechanically worked, but worse at *every* radius:
+   F0.5 mean **−55.1**, and it made s2 itself worse (4/6 → 3/6). More drones
+   counted dead → more station churn than hole closed.
+2. **Radius contraction on loss** (hold the full-fleet chord: `R(n) = R_full ·
+   sin(π/N)/sin(π/n)`, so the ring pulls in as it thins). Also worse: F0.75 mean
+   **−55.7** vs **−30.9** without it, and it broke x2-a (4/4 → 3/4). A single
+   death translates the whole ring inward and everyone re-stations at once.
+3. **Radius alone.** F0.75 mean **−30.9** — a wash. It splits the tiers rather
+   than helping: big gains on wide-radio layouts, matching losses on tight ones.
+4. **Local gap bisection.** Walk out from our own slot both ways to the first
+   drone we still believe is flying; stand at the midpoint. **Chosen.**
+
+**Chosen:** 4, at F = 0.625.
+
+**Why:** bisection uses nothing beyond the neighbours we can actually hear, so it
+needs no consensus and no relay. It is a pure function of the liveness bitmap, so
+it cannot oscillate, and it is a fixed point at full strength — nobody abandons a
+sector while the ring is whole. The hole closes by diffusion: its two lips slide
+in, their neighbours follow.
+
+**Why the radius moved in the same commit.** They are one decision. Meeting a
+hostile further out is paid straight into the score (`W_kill·(1 − t_engage/t_free)`),
+but every metre of radius also widens the hole a death leaves, since slot spacing
+is `2R·sin(π/n)`. Pushed out on its own, F0.75 was a wash. With the gap closing
+behind each loss, the same push becomes reward. Past ~0.75 the ring outruns its
+own recovery — a leaker at that range cannot be run down, because a hostile has
+our lateral limit — and tier-2 layouts collapse (F1.0 mean **−233**).
+
+**Rejected as scenario-fitting:** a radius scaled by `comm/sense`. It looked
+principled and scored well, but `comm/sense` is 1.0–1.33 across *every* generated
+scenario; only s1 (1.5) and s2 (1.25) are outliers, so the rule was keying on the
+two named scenarios and did nothing on fresh ids.
+
+**Cost accepted:** the death signal is shorter than the radio. `RingAlive` counts
+silence as death only inside `comm_radius − cruise·1.5 s − 10 m` = 44 m, and the
+slot chords are 27/54/80 m, so only the *immediate* neighbour registers. Each lip
+of the hole therefore slides half a slot, not a full one — the 93° hole closes by
+22.5°, not 45°. Widening that radius is the obvious follow-up and is untested.
+The two-slot shift cap is unreachable at this ring size.
+
+**Measured, 8 fixed scenarios:** improves **every one**. min **−511.1 → −303.8**,
+mean **−30.5 → +16.3**, max **151.9 → 191.9**. s1 147.2 → 190.3 (6/6), x2-b
+0/3 → 1/3, x1-b 151.9 → 191.9. Civilians 2 and wasted 0, both unchanged.
+
+**Measured, 20 fresh `--new-token` ids** (never used while tuning): mean
+**−52.5 → −20.8**, kills 51/65 → 52/65, breaches 14 → 13. tier-1 mean
+**31.4 → 85.7** (29/31 → 30/31 kills, 2 → 1 breaches); tier-2 mean −136.4 →
+−127.3. Floor −307.6 → −315.8, i.e. 8 points worse — the one regression.
+
+**Not achieved:** s2 stays 4/6. Bisection at F0.5 does reach **5/6 (−82.0)**, but
+costs x1-c and x2-a and drops the sweep mean to −55.2. The 5/6 is real; it is not
+worth the mean.
+
+**Determinism:** `--replay` clean on s1, s2, x1-a, x2-b. All three test suites
+pass, including a new `TestStationBisectsTheGap` pinning the geometry above.
