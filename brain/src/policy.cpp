@@ -2,6 +2,8 @@
 
 #include "flight.h"
 
+#include <cstdio>
+
 namespace sw {
 namespace {
 
@@ -33,13 +35,21 @@ void Policy::Configure(const Config& cfg, Rng rng) {
 
 void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
     const float now = obs.time();
+    last_log_[0] = '\0';
 
     // Re-resolve the target pointer every tick: the store's storage moves as
     // tracks are erased, so a pointer held across a tick is a dangling read.
     target_ = nullptr;
     if (stance_ == Stance::Committed && target_id_ != 0) {
         target_ = store.Find(target_id_);
-        if (!target_ || ShouldAbort(*target_, obs)) {
+        const char* why = nullptr;
+        if (!target_)
+            why = "lost";
+        else
+            why = AbortReason(*target_, obs);
+        if (why) {
+            std::snprintf(last_log_, sizeof(last_log_), "abort trk=%u %s",
+                          target_id_, why);
             target_ = nullptr;
             target_id_ = 0;
             stance_ = Stance::Picketing;
@@ -53,13 +63,27 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
             target_id_ = candidate->track_id;
             committed_at_ = now;
             stance_ = Stance::Committed;
+            const float rng = swarm::Distance(candidate->position, obs.position());
+            const float closing = -RangeRate(candidate->position, candidate->velocity,
+                                             obs.position());
+            const float miss = ClosestApproachDistance(candidate->position,
+                                                       candidate->velocity, cfg_.asset);
+            const float ttg = TimeToTarget(candidate->position, candidate->velocity,
+                                           cfg_.asset);
+            std::snprintf(last_log_, sizeof(last_log_),
+                          "commit trk=%u score=%.2f miss=%.1f rng=%.0f close=%.1f ttg=%.1f",
+                          candidate->track_id, candidate->closing_score, miss, rng,
+                          closing, ttg);
         }
     }
 
     if (stance_ == Stance::Forming) {
         const Vec3 slot = flight::RingSlot(cfg_.drone_id, cfg_.fleet_size, cfg_.asset,
                                            ring_radius_, ring_altitude_);
-        if (swarm::Distance(obs.position(), slot) < 8.0f) stance_ = Stance::Picketing;
+        if (swarm::Distance(obs.position(), slot) < 8.0f) {
+            stance_ = Stance::Picketing;
+            std::snprintf(last_log_, sizeof(last_log_), "picket");
+        }
     }
 }
 
@@ -86,17 +110,17 @@ bool Policy::ShouldCommit(const Track& t, const swarm::Observation& obs) const {
     return closing > -2.0f || ttg < 12.0f;
 }
 
-bool Policy::ShouldAbort(const Track& t, const swarm::Observation& obs) const {
+const char* Policy::AbortReason(const Track& t, const swarm::Observation& obs) const {
     const float now = obs.time();
-    if (now - committed_at_ > kAbortAfter) return true;
-    if (t.belief != Belief::Hostile) return true;
+    if (now - committed_at_ > kAbortAfter) return "timeout";
+    if (t.belief != Belief::Hostile) return "not-hostile";
 
     // Not converging: range not shrinking after a fair chance to close.
     if (now - committed_at_ > 6.0f) {
         const float closing = -RangeRate(t.position, t.velocity, obs.position());
-        if (closing < 1.0f) return true;
+        if (closing < 1.0f) return "not-closing";
     }
-    return false;
+    return nullptr;
 }
 
 Vec3 Policy::DesiredPosition(const swarm::Observation& obs) const {

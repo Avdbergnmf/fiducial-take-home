@@ -195,6 +195,16 @@ inline SwClass ToSwClass(Belief b) {
     }
 }
 
+inline const char* BeliefName(Belief b) {
+    switch (b) {
+        case Belief::Friendly: return "friendly";
+        case Belief::Hostile:  return "hostile";
+        case Belief::Civilian: return "civilian";
+        case Belief::Wreckage: return "wreck";
+        default:               return "unknown";
+    }
+}
+
 struct Track {
     uint32_t track_id = 0;
 
@@ -221,6 +231,8 @@ struct Track {
 
     Belief belief = Belief::Unknown;
     float belief_since = 0.0f;
+    Belief logged_belief = Belief::Unknown;  // last class we wrote to host->log
+    uint8_t near_band = 0;                   // 0 far, 1 <12 m, 2 <6 m, 3 <3 m
 
     /// Last time we put this on the radio. Without it, Compose queues a report
     /// every tick for a second, which is 100 duplicates at 100 Hz.

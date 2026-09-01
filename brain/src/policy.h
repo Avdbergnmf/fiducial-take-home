@@ -30,6 +30,9 @@ public:
 
     Stance stance() const { return stance_; }
     const Track* target() const { return target_; }
+    const char* last_log() const { return last_log_; }
+    float ring_radius() const { return ring_radius_; }
+    float ring_altitude() const { return ring_altitude_; }
 
     /// Report what we currently believe. Scored once a second on the MOST
     /// RECENT declaration per aircraft: correct +1, wrong -2, unknown 0.
@@ -48,7 +51,7 @@ public:
 
 private:
     bool ShouldCommit(const Track& t, const swarm::Observation& obs) const;
-    bool ShouldAbort(const Track& t, const swarm::Observation& obs) const;
+    const char* AbortReason(const Track& t, const swarm::Observation& obs) const;
 
     Config cfg_;
     Rng rng_;                 // unused today; the hook for jittering send times
@@ -57,6 +60,7 @@ private:
     Track* target_ = nullptr;
     uint32_t target_id_ = 0;
     float committed_at_ = 0.0f;
+    char last_log_[192]{};
 
     uint16_t next_seq_ = 0;
     float last_heartbeat_ = -1.0e9f;

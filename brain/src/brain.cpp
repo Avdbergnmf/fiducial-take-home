@@ -33,9 +33,12 @@ public:
 
         // 2. INBOUND: what did we hear, folded in on top
         ConsumeFrames(obs);
+        LogBeliefChanges(obs);
 
         // 3. POLICY: what should we do about it
         policy_.Decide(store_, obs);
+        if (policy_.last_log()[0] != '\0')
+            host().Log(policy_.last_log());
         policy_.Declare(host(), store_);
 
         // 4. OUTBOUND: what is worth saying, then say at most one thing
@@ -53,6 +56,10 @@ private:
         host().Logf("drone %u/%u up, lateral limit %.2f m/s^2, kill r %.1f, tier %u",
                     cfg_.drone_id, cfg_.fleet_size, cfg_.lateral_limit,
                     cfg_.kill_radius, cfg_.tier);
+        host().Logf("params sense=%.1f comm=%.1f maxv=%.1f maxa=%.1f tilt=%.2f lat=%.1f sep=%.1f ring=%.1f alt=%.1f",
+                    cfg_.sense_radius, cfg_.comm_radius, cfg_.max_speed, cfg_.max_accel,
+                    cfg_.max_tilt, cfg_.lateral_limit, cfg_.separation_margin,
+                    policy_.ring_radius(), policy_.ring_altitude());
         (void)obs;
     }
 
@@ -148,12 +155,74 @@ private:
                                               store_.tracks(), cfg_, target);
         accel = sw::flight::EnforceArena(accel, position, velocity, cfg_);
 
+        LogProximity(obs, target);
+
         // Face where we are going: yaw is free and it makes the recording
         // readable in the viewer.
         float yaw = 0.0f;
         if (swarm::LengthSq(velocity) > 1.0f) yaw = std::atan2(velocity.y, velocity.x);
 
         return swarm::Command::Acceleration(accel, yaw);
+    }
+
+    static int NearBand(float range) {
+        if (range < 3.0f) return 3;
+        if (range < 6.0f) return 2;
+        if (range < 12.0f) return 1;
+        return 0;
+    }
+
+    void LogBeliefChanges(const swarm::Observation& obs) {
+        (void)obs;
+        for (sw::Track& t : store_.tracks()) {
+            if (t.belief == t.logged_belief) continue;
+            const float miss = sw::ClosestApproachDistance(t.position, t.velocity, cfg_.asset);
+            const float align = sw::ApproachAlignment(t.position, t.velocity, cfg_.asset);
+            const float closing = -sw::RangeRate(t.position, t.velocity, cfg_.asset);
+            const char* verb = "drop";
+            if (t.belief == sw::Belief::Wreckage) verb = "wreck";
+            else if (t.belief != sw::Belief::Unknown) verb = "call";
+            host().Logf("%s trk=%u %s miss=%.1f first=%.1f score=%.2f align=%.2f close=%.1f%s",
+                        verb,
+                        t.has_local_id ? t.track_id : 0,
+                        sw::BeliefName(t.belief),
+                        miss, t.miss_at_first < 0.0f ? miss : t.miss_at_first,
+                        t.closing_score, align, closing,
+                        t.has_local_id ? "" : " peer");
+            t.logged_belief = t.belief;
+        }
+    }
+
+    void LogProximity(const swarm::Observation& obs, const sw::Track* target) {
+        const sw::Vec3 position = obs.position();
+        const sw::Vec3 velocity = obs.velocity();
+        for (sw::Track& t : store_.tracks()) {
+            const float d = swarm::Distance(position, t.position);
+            const int band = NearBand(d);
+            if (band == 0) {
+                t.near_band = 0;
+                continue;
+            }
+            if (band <= t.near_band) continue;
+            t.near_band = static_cast<uint8_t>(band);
+
+            const sw::Vec3 offset = position - t.position;
+            float closing = 0.0f;
+            if (d > 1e-4f)
+                closing = -swarm::Dot(velocity - t.velocity, offset / d);
+
+            const bool intercept = target != nullptr &&
+                                   ((t.has_local_id && target->has_local_id &&
+                                     t.track_id == target->track_id) ||
+                                    target == &t);
+            // "ram" is reserved for the last metres of a committed intercept.
+            // A 12 m pass of a civilian we are trying not to hit is "near".
+            const char* verb = (intercept && band >= 3) ? "ram" : "near";
+            host().Logf("%s trk=%u class=%s rng=%.1f close=%.1f",
+                        verb,
+                        t.has_local_id ? t.track_id : 0,
+                        sw::BeliefName(t.belief), d, closing);
+        }
     }
 
     sw::Config cfg_;
