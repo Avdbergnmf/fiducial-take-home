@@ -64,9 +64,9 @@ Vec3 EnforceSeparation(const Vec3& desired, const Vec3& position, const Vec3& ve
 Vec3 EnforceArena(const Vec3& desired, const Vec3& position, const Vec3& velocity,
                   const Config& cfg);
 
-/// Evenly spaced ring slot, derived from drone_id alone. No negotiation, so it
-/// works before the radio does and cannot disagree between instances.
-Vec3 RingSlot(uint32_t drone_id, uint32_t fleet_size, const Vec3& centre,
+/// Evenly spaced ring station. `index` is the rank among `count` stations
+/// (drone_id on a full fleet; live rank after a death, D19). No negotiation.
+Vec3 RingSlot(uint32_t index, uint32_t count, const Vec3& centre,
               float radius, float altitude);
 
 }  // namespace flight

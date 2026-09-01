@@ -1,6 +1,7 @@
-// test_policy.cpp -- unique allocation and the yield corridor.
+// test_policy.cpp -- unique allocation, live-ring respacing, yield corridor.
 // G4: one drone per inbound, not both neighbours of a silent facing slot.
 // D17: yield is remaining flight to the predicted ram, not slot→hostile.
+// D19: survivors re-space on the live ring; ownership uses that ring.
 
 #include "flight.h"
 #include "policy.h"
@@ -66,10 +67,75 @@ static void TestUniqueOwnerIsOneDrone() {
     CHECK(UniqueOwner(15, n, 14, heard, now) == 0);
 }
 
+static void InitHeard(float* heard) {
+    for (uint32_t i = 0; i < kMaxFleet; ++i) heard[i] = -1.0e9f;
+}
+
 static float Horiz(const Vec3& a, const Vec3& b) {
     const float dx = a.x - b.x;
     const float dy = a.y - b.y;
     return std::sqrt(dx * dx + dy * dy);
+}
+
+static void FillStations(Vec3* at, const Vec3& asset, uint32_t n) {
+    for (uint32_t i = 0; i < n; ++i)
+        at[i] = flight::RingSlot(i, n, asset, 75.0f, 30.0f);
+}
+
+static void TestLiveRingRespaces() {
+    std::printf("live ring re-spaces a nearby death, ignores radio loss\n");
+    float heard[kMaxFleet];
+    Vec3 at[kMaxFleet];
+    InitHeard(heard);
+    const uint32_t n0 = 16;
+    const float now = 20.0f;
+    const float comm = 90.0f;
+    const Vec3 asset(0, 0, 0);
+    FillStations(at, asset, n0);
+    const Vec3 self0 = at[0];
+    const Vec3 self7 = at[7];
+    const Vec3 self9 = at[9];
+    const Vec3 self14 = at[14];
+
+    CHECK(CountLive(n0, 0, heard, at, self0, comm, now) == 16);
+    for (uint32_t id = 0; id < n0; ++id) {
+        CHECK(LiveRank(id, n0, id, heard, at, at[id], comm, now) == id);
+        CHECK(LiveId(id, n0, 0, heard, at, self0, comm, now) == id);
+        CHECK(FacingSlot(at[id], asset, n0) == id);
+    }
+
+    // Opposite-side silence is radio loss, not death. Slot 0 still counts 16.
+    heard[8] = now - 2.0f;
+    CHECK(SlotAlive(8, 0, heard, now) == false);
+    CHECK(RingAlive(8, 0, heard, at, self0, comm, now) == true);
+    CHECK(CountLive(n0, 0, heard, at, self0, comm, now) == 16);
+
+    // Neighbour of 8 sees a nearby death. 15 live; 9 slides toward the hole.
+    CHECK(RingAlive(8, 7, heard, at, self7, comm, now) == false);
+    CHECK(CountLive(n0, 7, heard, at, self7, comm, now) == 15);
+    CHECK(LiveRank(7, n0, 7, heard, at, self7, comm, now) == 7);
+    CHECK(LiveRank(9, n0, 9, heard, at, self9, comm, now) == 8);
+    CHECK(LiveId(8, n0, 7, heard, at, self7, comm, now) == 9);
+
+    const Vec3 new9 = flight::RingSlot(
+        LiveRank(9, n0, 9, heard, at, self9, comm, now), 15, asset, 75.0f, 30.0f);
+    CHECK(Horiz(new9, at[8]) + 1.0f < Horiz(at[9], at[8]));
+
+    const uint32_t facing = FacingSlot(at[8], asset, 15);
+    CHECK(LiveId(facing, n0, 7, heard, at, self7, comm, now) == 9);
+
+    // Wrap: slot 15 dead, seen from 14. Live ring gives the inbound to 14.
+    InitHeard(heard);
+    FillStations(at, asset, n0);
+    heard[15] = now - 2.0f;
+    CHECK(CountLive(n0, 14, heard, at, self14, comm, now) == 15);
+    const uint32_t f15 = FacingSlot(at[15], asset, 15);
+    CHECK(LiveId(f15, n0, 14, heard, at, self14, comm, now) == 14);
+    CHECK(UniqueOwner(15, n0, 0, heard, now) == 0);
+
+    const Vec3 new14 = flight::RingSlot(
+        LiveRank(14, n0, 14, heard, at, self14, comm, now), 15, asset, 75.0f, 30.0f);
+    CHECK(Horiz(new14, at[15]) < 8.0f);
 }
 
 static void TestYieldHorizonIsRemainingFlight() {
@@ -111,6 +177,7 @@ static void TestYieldHorizonIsRemainingFlight() {
 int main() {
     TestFacingSlotMatchesRing();
     TestUniqueOwnerIsOneDrone();
+    TestLiveRingRespaces();
     TestYieldHorizonIsRemainingFlight();
 
     if (g_failures == 0) {

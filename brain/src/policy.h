@@ -19,15 +19,41 @@ enum class Stance : uint8_t {
 };
 
 /// Facing ring slot for a world position. Same angle convention as RingSlot.
-uint32_t FacingSlot(const Vec3& position, const Vec3& asset, uint32_t fleet_size);
+/// `count` is the number of stations (live fleet after D19, original size
+/// on a full ring).
+uint32_t FacingSlot(const Vec3& position, const Vec3& asset, uint32_t count);
 
-/// True if this slot is still treated as on station. Self is always alive.
+/// True if this id is still treated as on station. Self is always alive.
 /// Never-heard is assumed alive so we do not steal sectors before the first
 /// heartbeat. 1.5 s of silence (three missed 2 Hz beats) is death.
 bool SlotAlive(uint32_t drone_id, uint32_t self_id, const float* heard, float now);
 
-/// First live drone clockwise from `facing`, including facing. One owner,
-/// not both neighbours (D15 / G4).
+/// True if this id still holds a ring station. Self is always alive.
+/// Never-heard is alive (boot). Heard-then-silent is death only when their
+/// last pose was close enough that a live heartbeat would still reach us —
+/// opposite-side radio loss must not collapse the ring (D19).
+bool RingAlive(uint32_t drone_id, uint32_t self_id, const float* heard,
+               const Vec3* heard_at, const Vec3& self_pos, float comm_radius,
+               float now);
+
+/// Live drones in id order under RingAlive. At least 1 (self).
+uint32_t CountLive(uint32_t fleet_size, uint32_t self_id, const float* heard,
+                   const Vec3* heard_at, const Vec3& self_pos, float comm_radius,
+                   float now);
+
+/// Rank of `drone_id` among RingAlive ids (0 .. CountLive-1).
+uint32_t LiveRank(uint32_t drone_id, uint32_t fleet_size, uint32_t self_id,
+                  const float* heard, const Vec3* heard_at, const Vec3& self_pos,
+                  float comm_radius, float now);
+
+/// The `rank`-th RingAlive id. `rank` wraps CountLive.
+uint32_t LiveId(uint32_t rank, uint32_t fleet_size, uint32_t self_id,
+                const float* heard, const Vec3* heard_at, const Vec3& self_pos,
+                float comm_radius, float now);
+
+/// First live drone clockwise from `facing` on the *original* id ring,
+/// including facing. Kept so the G4 tests still pin the old walk. Allocation
+/// and stations use the live ring (D19).
 uint32_t UniqueOwner(uint32_t facing, uint32_t fleet_size, uint32_t self_id,
                      const float* heard, float now);
 
@@ -71,16 +97,16 @@ public:
     /// Send at most one frame, respecting the remaining byte budget.
     void Pump(const swarm::Host& host, Outbox<24>& outbox, const swarm::Observation& obs);
 
-    /// A heartbeat from this origin. UniqueOwner treats 1.5 s of silence as
-    /// death and walks clockwise to the next live slot.
-    void NoteAlive(uint8_t drone_id, float now);
+    /// A heartbeat from this origin, with the claimed pose. Nearby silence
+    /// drops that id off the live ring; radio-range silence does not (D19).
+    void NoteAlive(uint8_t drone_id, const Vec3& position, float now);
 
 private:
     bool ShouldCommit(const Track& t, const swarm::Observation& obs) const;
-    bool OwnsInbound(const Track& t, float now) const;
+    bool OwnsInbound(const Track& t, const swarm::Observation& obs) const;
     bool CloserChaser(const Track& hostile, const TrackStore& store,
                       const swarm::Observation& obs) const;
-    Vec3 PicketGoal(const TrackStore& store, float now) const;
+    Vec3 PicketGoal(const TrackStore& store, const swarm::Observation& obs) const;
     const char* AbortReason(const Track& t, const swarm::Observation& obs) const;
     void LogAbort(const char* why, uint32_t trk, const Track* t,
                   const swarm::Observation& obs);
@@ -107,6 +133,7 @@ private:
     float ring_altitude_ = 30.0f;
     Vec3 picket_goal_{};
     float heard_[kMaxFleet]{};
+    Vec3 heard_at_[kMaxFleet]{};
 };
 
 }  // namespace sw

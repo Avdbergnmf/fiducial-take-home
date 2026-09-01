@@ -4,12 +4,13 @@
 
 Every drone holds a picket slot and spends itself on at most one inbound it can
 catch before the asset cylinder. On eight named scenarios the worst score is
-**−511.1** (x2-b: 0 of 3 stopped, three breaches), the mean is **−108.2**, the
-best is **+160.3**. s1 — the layout we iterated on — is 6/6, **+134.3**,
-awareness 54.4 of 60, comms 39.3 of 40; detection is unused because
-`declare_identity` is never called. s2 is 3/6, **−495.2**,
-`comms.propagation_p95_s` **0.09** s (was `null`): TrackReports hop, and a
-drone out of sensor range can fuse the same aircraft the seer sees. The
+**−511.1** (x2-b: 0 of 3 stopped, three breaches), the mean is **−30.5**,
+the best is **+151.9**. s1 — the layout we iterated on — is 6/6, **+147.2**,
+awareness 53.5 of 60, comms 39.3 of 40; detection is unused because
+`declare_identity` is never called. s2 is 4/6, **−278.3** (was 3/6, −495):
+after a kill the neighbours slide into the hole instead of sitting off-axis
+for the next dash on the same bearing. TrackReports still hop
+(`propagation_p95_s` **0.09** s). The
 decision this document defends is the catchable-only commit rule: it turned s1
 from 1 kill and 5 breaches (−947) into 6/6, and it is also why x2-b still
 stands down. Classification is a 3D miss, mates are heartbeat-matched, and a
@@ -139,10 +140,13 @@ Hostile (call younger than 6 s) — local or fused from a TrackReport — the
 unique facing ring slot (first live drone clockwise if that slot's heartbeat
 is gone), relative closing ≥ 1 m/s, and arrive 0.5 s before the cylinder.
 Sense range is not a gate: on s2 the owner hears the inbound 100 m out.
-A Friendly already flying at that hostile is the interceptor; the farther
-drone aborts. Pickets step off the *remaining* intercept flight — cruise ×
-(time-to-meet + 0.5 s), capped at the 12 s abort — not the whole slot-to-hostile
-chord. A picket sitting past the predicted ram is not traffic. The interceptor
+After a *nearby* death the survivors re-space on the same radius so the
+next dash on that bearing is not met from a hole (D19). Opposite-side
+radio loss is not a death — treating it as one collapsed the ring to
+whoever we could still hear and s1 went to 4/6. A Friendly already flying
+at that hostile is the interceptor; the farther drone aborts. Pickets step off
+the *remaining* intercept flight — cruise × (time-to-meet + 0.5 s), capped at
+the 12 s abort — not the whole slot-to-hostile chord. A picket sitting past the predicted ram is not traffic. The interceptor
 does not cancel ProNav to dodge them. ProNav itself is not the leak — the first
 s1 intercept finished. A 6 s-old Hostile latch is wreckage; chasing those is how
 a spent sector missed the next inbound.
@@ -241,6 +245,7 @@ collision.
 - **`ctest`:** `test_protocol` (truncation, version, garbage, outbox
   priority/expiry, seen-set zero-collision, relay copy stamps hops and keeps
   origin/seq), `test_policy` (facing slot, unique owner is one drone clockwise,
+  live ring re-spaces a nearby death and ignores opposite-side radio loss,
   yield corridor is remaining flight not the full chord), and `test_belief`
   (classifier geometry plus peer-report association by pose, not track_id).
 - **Determinism:** `scripts\determinism.ps1` — `--threads 1 --record` then
@@ -271,11 +276,13 @@ collision.
 
 - **s3 will lie.** Hopped TrackReports are trusted. A replay with a plausible
   pose pulls UniqueOwner off the ring.
+- **s2 late pair.** 4/6 (was 3/6). Two dashes still arrive on spent bearings
+  after the local re-space; UniqueOwner does not hand those to a picket who
+  is on the hole but not the clockwise successor.
 - **x2-b never commits.** Strict catchable-fresh is a hole, not a
-  tuning miss. D18 does not lower the catchable bar.
-- **x1-a civilians.** 4/4 hostiles, 0 breaches, 2 civilians (−51.0). The
+  tuning miss. D19 does not lower the catchable bar.
+- **x1-a civilians.** 4/4 hostiles, 0 breaches, 2 civilians (−61.1). The
   discriminant still fires on a chord that passes very close to the asset.
-  Awareness is lowest here (36.0).
 - **No insider handling.** `declare_identity` unused; Accuse unused; a
   plausible heartbeat marks the sender Friendly.
 - **Claims unused.** UniqueOwner plus closer-chaser abort is the substitute.

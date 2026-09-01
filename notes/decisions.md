@@ -469,6 +469,31 @@ Claims were the half-built answer (`ClaimMsg` is on the wire format). D11 alread
 
 **Measured, 8 named scenarios:** worst **−511.1** (x2-b, was −524.6), mean **−108.2** (was −136.4), best **+160.3** (x1-b). x1-a 4/4 with 2 civilians (−51.0). x2-a still 2/4 (−297.9).
 
+---
+
+## D19 — Survivors re-space on a nearby death, not on radio loss
+
+**The leak:** a spent facing slot stays empty. The next hostile on that bearing meets the clockwise neighbour still sitting 29 m off-axis, who fails catchable until ~55 m. D18 named this on s2: drones 0–2 used, late breaches. The brief's own fleet note says the late arrivals are where fleets leak, and `policy.cpp` had a TODO to re-space.
+
+**Options considered**
+
+1. Do nothing. UniqueOwner already walks clockwise; the successor intercepts from their original station. Cheap. Leaves the hole.
+2. Re-space on any 1.5 s heartbeat silence, and assign ownership from the live ranks (`FacingSlot(n_live)`). Even coverage, one owner. Opposite-side drones leave comm range as the ring spreads — that silence looks like death, the live set collapses to whoever we can still hear, and everyone chases a moving 8–9 station ring. Measured: s1 4/6, **−269**, first inbound unowned while Forming never logged `picket`.
+3. Re-space stations on *nearby* death only. A mate is off the live ring iff they went silent *and* their last pose was inside `comm_radius − cruise·1.5 s − 10 m` (they could not have left radio). Never-heard stays alive. **Allocation stays UniqueOwner on the original id ring** (D15) so a ghost far-side silence cannot hand the inbound to nobody. Radius does not shrink.
+
+**Chosen:** 3.
+
+**Why:** the user request is redistributing picket coords when a friendly disappears. The hole is local. Neighbours can still hear the victim; opposite-side drones cannot, and must not re-plan the whole circle. Keeping UniqueOwner means the clockwise successor is the same drone who slides into the hole, not a remapped rank that can disagree across the radio horizon.
+
+**Cost accepted:** two drones with disagreeing `heard_[]` still compute different live rings (same class as UniqueOwner). A wrap-around hole is still owned by id 0 while id n−1 sits on it. Clustered deaths two-or-more slots away can look like radio loss to the next facing picket, who then does not slide far enough. x2-b is unchanged (never commits).
+
+**Measured, s1:** 6/6, civ 0, wasted 0, total **+147.2** (was +134.3).
+
+**Measured, s2:** 4/6, **−278.3** (was 3/6, −495.2). Two late breaches remain.
+
+**Measured, 8 named scenarios:** worst **−511.1** (x2-b, unchanged), mean **−30.5** (was −108.2), best **+151.9** (x1-b). x2-a 4/4 **+112.8** (was 2/4, −297.9). x1-a 4/4, 2 civilians (−61.1).
+
+
 
 
 

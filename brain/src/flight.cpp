@@ -157,10 +157,10 @@ Vec3 EnforceArena(const Vec3& desired, const Vec3& position, const Vec3& velocit
     return LimitAccel(desired + push, cfg);
 }
 
-Vec3 RingSlot(uint32_t drone_id, uint32_t fleet_size, const Vec3& centre,
+Vec3 RingSlot(uint32_t index, uint32_t count, const Vec3& centre,
               float radius, float altitude) {
-    const uint32_t n = fleet_size > 0 ? fleet_size : 1;
-    const float angle = (2.0f * kPi * static_cast<float>(drone_id)) / static_cast<float>(n);
+    const uint32_t n = count > 0 ? count : 1;
+    const float angle = (2.0f * kPi * static_cast<float>(index)) / static_cast<float>(n);
     return Vec3(centre.x + radius * std::cos(angle),
                 centre.y + radius * std::sin(angle),
                 -altitude);   // NED: altitude is -z

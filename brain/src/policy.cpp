@@ -46,9 +46,9 @@ void Policy::Configure(const Config& cfg, Rng rng) {
 
     // Ring sizing: neighbours must be able to hear each other, so spacing is
     // driven by comm_radius, and the ring must sit outside the asset radius.
-    // TODO(next): the ring shrinks as drones are spent. Decide whether the
-    // survivors re-space, and say why in DESIGN.md -- the brief's own note
-    // says the late arrivals are where fleets leak.
+    // Survivors re-space in place when a *nearby* heartbeat goes silent
+    // (D19). Opposite-side radio loss is not a death. Radius stays; the
+    // hole in bearing is what leaked late arrivals.
     ring_radius_ = cfg.asset_radius + cfg.comm_radius * 0.5f;
     ring_altitude_ = 30.0f;
     picket_goal_ = flight::RingSlot(cfg.drone_id, cfg.fleet_size, cfg.asset,
@@ -56,9 +56,10 @@ void Policy::Configure(const Config& cfg, Rng rng) {
     for (uint32_t i = 0; i < kMaxFleet; ++i) heard_[i] = -1.0e9f;
 }
 
-void Policy::NoteAlive(uint8_t drone_id, float now) {
+void Policy::NoteAlive(uint8_t drone_id, const Vec3& position, float now) {
     if (drone_id >= kMaxFleet) return;
     heard_[drone_id] = now;
+    heard_at_[drone_id] = position;
 }
 
 void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
@@ -123,7 +124,13 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
     }
 
     if (stance_ == Stance::Forming) {
-        const Vec3 slot = flight::RingSlot(cfg_.drone_id, cfg_.fleet_size, cfg_.asset,
+        const uint32_t n = CountLive(cfg_.fleet_size, cfg_.drone_id, heard_,
+                                     heard_at_, obs.position(), cfg_.comm_radius,
+                                     now);
+        const uint32_t rank = LiveRank(cfg_.drone_id, cfg_.fleet_size,
+                                       cfg_.drone_id, heard_, heard_at_,
+                                       obs.position(), cfg_.comm_radius, now);
+        const Vec3 slot = flight::RingSlot(rank, n, cfg_.asset,
                                            ring_radius_, ring_altitude_);
         if (swarm::Distance(obs.position(), slot) < 8.0f) {
             stance_ = Stance::Picketing;
@@ -132,11 +139,11 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
     }
 
     if (stance_ != Stance::Committed)
-        picket_goal_ = PicketGoal(store, now);
+        picket_goal_ = PicketGoal(store, obs);
 }
 
-uint32_t FacingSlot(const Vec3& position, const Vec3& asset, uint32_t fleet_size) {
-    const uint32_t n = fleet_size > 0 ? fleet_size : 1;
+uint32_t FacingSlot(const Vec3& position, const Vec3& asset, uint32_t count) {
+    const uint32_t n = count > 0 ? count : 1;
     const float hx = position.x - asset.x;
     const float hy = position.y - asset.y;
     if (hx * hx + hy * hy < 1e-8f) return 0;
@@ -155,6 +162,68 @@ bool SlotAlive(uint32_t drone_id, uint32_t self_id, const float* heard, float no
     return now - heard[drone_id] < kOwnerSilent;
 }
 
+bool RingAlive(uint32_t drone_id, uint32_t self_id, const float* heard,
+               const Vec3* heard_at, const Vec3& self_pos, float comm_radius,
+               float now) {
+    if (SlotAlive(drone_id, self_id, heard, now)) return true;
+    if (drone_id >= kMaxFleet || heard_at == nullptr) return false;
+    // Silent after a heartbeat. Neighbours cannot leave radio in 1.5 s, so
+    // that is a death. Opposite-side drones leave comm range as the ring
+    // spreads — keep their station or the live ring collapses to whoever
+    // we can still hear (D19).
+    const float dx = heard_at[drone_id].x - self_pos.x;
+    const float dy = heard_at[drone_id].y - self_pos.y;
+    const float d = std::sqrt(dx * dx + dy * dy);
+    const float keep = comm_radius - kCruise * kOwnerSilent - 10.0f;
+    return d > keep;
+}
+
+uint32_t CountLive(uint32_t fleet_size, uint32_t self_id, const float* heard,
+                   const Vec3* heard_at, const Vec3& self_pos, float comm_radius,
+                   float now) {
+    const uint32_t n = fleet_size > 0 ? fleet_size : 1;
+    const uint32_t cap = n < kMaxFleet ? n : kMaxFleet;
+    uint32_t live = 0;
+    for (uint32_t id = 0; id < cap; ++id) {
+        if (RingAlive(id, self_id, heard, heard_at, self_pos, comm_radius, now))
+            ++live;
+    }
+    return live > 0 ? live : 1;
+}
+
+uint32_t LiveRank(uint32_t drone_id, uint32_t fleet_size, uint32_t self_id,
+                  const float* heard, const Vec3* heard_at, const Vec3& self_pos,
+                  float comm_radius, float now) {
+    const uint32_t n = fleet_size > 0 ? fleet_size : 1;
+    const uint32_t cap = n < kMaxFleet ? n : kMaxFleet;
+    uint32_t rank = 0;
+    for (uint32_t id = 0; id < cap; ++id) {
+        if (!RingAlive(id, self_id, heard, heard_at, self_pos, comm_radius, now))
+            continue;
+        if (id == drone_id) return rank;
+        ++rank;
+    }
+    return 0;
+}
+
+uint32_t LiveId(uint32_t rank, uint32_t fleet_size, uint32_t self_id,
+                const float* heard, const Vec3* heard_at, const Vec3& self_pos,
+                float comm_radius, float now) {
+    const uint32_t live = CountLive(fleet_size, self_id, heard, heard_at,
+                                    self_pos, comm_radius, now);
+    const uint32_t want = rank % live;
+    const uint32_t n = fleet_size > 0 ? fleet_size : 1;
+    const uint32_t cap = n < kMaxFleet ? n : kMaxFleet;
+    uint32_t i = 0;
+    for (uint32_t id = 0; id < cap; ++id) {
+        if (!RingAlive(id, self_id, heard, heard_at, self_pos, comm_radius, now))
+            continue;
+        if (i == want) return id;
+        ++i;
+    }
+    return self_id;
+}
+
 uint32_t UniqueOwner(uint32_t facing, uint32_t fleet_size, uint32_t self_id,
                      const float* heard, float now) {
     const uint32_t n = fleet_size > 0 ? fleet_size : 1;
@@ -165,9 +234,12 @@ uint32_t UniqueOwner(uint32_t facing, uint32_t fleet_size, uint32_t self_id,
     return facing % n;
 }
 
-bool Policy::OwnsInbound(const Track& t, float now) const {
+bool Policy::OwnsInbound(const Track& t, const swarm::Observation& obs) const {
+    // Allocation stays on the original id ring: facing slot, then first
+    // live clockwise (D15). Stations re-space (D19); who may spend does not,
+    // so a ghost far-side silence cannot hand the inbound to nobody.
     const uint32_t facing = FacingSlot(t.position, cfg_.asset, cfg_.fleet_size);
-    return UniqueOwner(facing, cfg_.fleet_size, cfg_.drone_id, heard_, now)
+    return UniqueOwner(facing, cfg_.fleet_size, cfg_.drone_id, heard_, obs.time())
            == cfg_.drone_id;
 }
 
@@ -258,20 +330,30 @@ Vec3 YieldOffCorridor(const Vec3& goal, const Vec3& a, const Vec3& b, float clea
                 goal.z);
 }
 
-Vec3 Policy::PicketGoal(const TrackStore& store, float now) const {
-    // Hold the ring, but step off anyone else's *remaining* intercept so we
-    // are not the traffic that spoils ProNav. Neighbours on a 16-drone 75 m
-    // ring sit 29 m off that line and do not move. Past the predicted ram
-    // they also do not move (D17).
-    Vec3 goal = flight::RingSlot(cfg_.drone_id, cfg_.fleet_size, cfg_.asset,
+Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) const {
+    // Hold the live ring, but step off anyone else's *remaining* intercept so
+    // we are not the traffic that spoils ProNav. After a nearby death the
+    // survivors take evenly spaced stations (D19); yield uses those stations.
+    // Past the predicted ram they do not move (D17).
+    const float now = obs.time();
+    const uint32_t n = CountLive(cfg_.fleet_size, cfg_.drone_id, heard_,
+                                 heard_at_, obs.position(), cfg_.comm_radius,
+                                 now);
+    const uint32_t rank = LiveRank(cfg_.drone_id, cfg_.fleet_size,
+                                   cfg_.drone_id, heard_, heard_at_,
+                                   obs.position(), cfg_.comm_radius, now);
+    Vec3 goal = flight::RingSlot(rank, n, cfg_.asset,
                                  ring_radius_, ring_altitude_);
     for (const Track& t : store.tracks()) {
         if (t.belief != Belief::Hostile) continue;
-        if (OwnsInbound(t, now)) continue;
+        if (OwnsInbound(t, obs)) continue;
         const uint32_t facing = FacingSlot(t.position, cfg_.asset, cfg_.fleet_size);
         const uint32_t owner = UniqueOwner(facing, cfg_.fleet_size, cfg_.drone_id,
                                            heard_, now);
-        const Vec3 slot = flight::RingSlot(owner, cfg_.fleet_size, cfg_.asset,
+        const uint32_t owner_rank = LiveRank(owner, cfg_.fleet_size, cfg_.drone_id,
+                                             heard_, heard_at_, obs.position(),
+                                             cfg_.comm_radius, now);
+        const Vec3 slot = flight::RingSlot(owner_rank, n, cfg_.asset,
                                            ring_radius_, ring_altitude_);
         const Vec3 from = CorridorOrigin(store, t, slot);
         const Vec3 end = CorridorHorizon(from, t.position, t.velocity);
@@ -296,7 +378,7 @@ bool Policy::ShouldCommit(const Track& t, const swarm::Observation& obs) const {
         if (t.has_local_id && last_abort_id_ != 0 && t.track_id == last_abort_id_)
             return false;
     }
-    if (!OwnsInbound(t, obs.time())) return false;
+    if (!OwnsInbound(t, obs)) return false;
 
     const float range = swarm::Distance(t.position, obs.position());
     const float closing = ClosingSpeed(obs.position(), obs.velocity(),
@@ -306,8 +388,8 @@ bool Policy::ShouldCommit(const Track& t, const swarm::Observation& obs) const {
     if (closing < kMinClosing) return false;
 
     // Stationary t_meet (range/closing) is the picket waiting for them.
-    // Neighbours of a spent owner have to fly to the intercept; count the
-    // cruise we will add along the line of sight (same 14 m/s as Fly).
+    // After a death the live ring slides into the hole (D19); still count
+    // cruise along the line of sight if we are not yet on the new station.
     const Vec3 los = Vec3(t.position.x - obs.position().x,
                           t.position.y - obs.position().y, 0.0f);
     const float range_h = swarm::Length(los);
@@ -471,7 +553,8 @@ void Policy::Compose(Outbox<24>& outbox, TrackStore& store,
     // interceptors went silent, neighbours stacked. G4 allocation is
     // UniqueOwner (facing slot, then first live clockwise) plus a closer
     // chaser abort — radio-free, so two drones cannot disagree on a dropped
-    // Claim. Heartbeat remains the highest priority.
+    // Claim. Stations re-space on nearby death (D19). Heartbeat remains
+    // the highest priority.
 
     outbox.Expire(now, 2.0f);
 }
