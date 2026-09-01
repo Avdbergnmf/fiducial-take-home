@@ -80,7 +80,7 @@ the real finding: **the margin and the ring geometry have to be designed togethe
 | belief.cpp:127 | ballistic accrual / clamp | `+dt·2.0`, clamp [0, 1.5] | **GUESS** | none | Reaches the 0.4 threshold in 0.2 s. Fast, but the test is specific. |
 | belief.cpp:129 | ballistic decay clamp | [0, **3.0**] | **GUESS** | none | **Inconsistent with :127**, which clamps the same variable to 1.5. The 3.0 upper bound is unreachable. Harmless today, confusing to read. |
 | belief.cpp:131 | wreckage threshold | 0.4 | **GUESS** | none | *Too high:* fly into debris. *Too low:* a descending friendly is called wreckage. |
-| belief.cpp:157 | `aimed` miss gate | `asset_radius · 0.8` = **24 m** | **GUESS** | The `0.8` has no source | **No. This is finding #2.** A straight-line civilian through a 150 m-radius spawn circle passes within 24 m of the asset for roughly `24/150 ≈ 16%` of chords. With 8 civilians that predicts 1–2 false positives; **we observed exactly 2**. *Too high:* civilians called hostile. *Too low:* a hostile is only called once it is nearly on the asset, when `reward = W_kill·(1 − t_engage/t_free)` has decayed to almost nothing. |
+| belief.cpp:9–10 | `kSureHit` / `kShrink` | 5 m / 3 m | **GUESS**, G1a | `fix_sigma=0.35`; 5 m is well above it; 3 m is meant to beat position noise | Replaced `asset_radius · 0.8` (24 m). Sure-hit catches the aimed dash; shrink catches a turn toward the disk. Residual FPs: chords with miss ≲ 5 m, and noisy `miss_at_first` when `asset_radius` is small. See D2. |
 | belief.cpp:159 | alignment threshold | 0.8 | **GUESS** | none | cos⁻¹(0.8) = 37°. A civilian on a chord holds this easily. |
 | belief.cpp:159 | closing threshold | 4.0 m/s | **GUESS** | none | Civilians cross at ~16 m/s, so this excludes almost nothing. |
 | belief.cpp:160/162 | closing_score clamps | [−2, **3**] and [−2, **4**] | **GUESS** | none | **Inconsistent**: the accrual caps at 3.0 so the 4.0 decay bound is unreachable. Same class of sloppiness as :129. |
@@ -148,13 +148,14 @@ the real finding: **the margin and the ring geometry have to be designed togethe
 
 ## Ranked guesses
 
-Tune in this order. The first two are worth 380 points a run *today*.
+Tune in this order. Guess #1 (24 m miss gate) is **addressed** — `AimedAtAsset`
+(sure-hit 5 m or a 3 m shrink). s1 `pair_neutral` is gone; residual rams remain
+on some generated layouts (D2).
 
-1. **`belief.cpp:157` `asset_radius · 0.8` (24 m miss gate)** — root cause of both civilian
-   kills. Predicts ~16% false-positive rate on straight-line traffic; observed 2 of 8.
-   Tune **down**, and better, add the check the code's own TODO (belief.cpp:147-149) names:
-   a hostile's miss distance *shrinks over time* because it is steering; a civilian's is
-   constant. That is a derivative test, not a threshold, and it needs no new information.
+1. ~~**`belief.cpp:157` `asset_radius · 0.8` (24 m miss gate)**~~ **Done (D2).**
+   Replaced by `AimedAtAsset`. s1 civilians_lost 0; 6/8 sweep scenarios have
+   no `pair_neutral`. Leftover: miss ≲ 5 m chords, and shrink firing on noisy
+   first-sight CPA when `asset_radius` is small (x2-a).
 2. **`world.h:162` `kill_radius · 4.0` (4 m separation margin)** — the last line of defence,
    and ~5× too small for the closing speeds involved. Cannot simply be raised to 19 m
    without re-designing the 75 m ring; that trade is the DESIGN.md discussion.

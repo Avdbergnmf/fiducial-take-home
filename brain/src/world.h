@@ -217,6 +217,7 @@ struct Track {
     float closing_score = 0.0f;    // integrated approach toward the asset
     float ballistic_score = 0.0f;  // integrated "falling like wreckage"
     Vec3 last_velocity{};
+    float miss_at_first = -1.0f;   // CPA miss when first classified; -1 = unset
 
     Belief belief = Belief::Unknown;
     float belief_since = 0.0f;

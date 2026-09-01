@@ -72,6 +72,15 @@ float TimeToTarget(const Vec3& position, const Vec3& velocity, const Vec3& targe
 float ClosestApproachDistance(const Vec3& position, const Vec3& velocity,
                               const Vec3& target);
 
+/// True if this miss looks like a dash at the asset, not a constant-miss chord.
+///
+/// A civilian's closest-approach distance is constant. An s1 hostile aimed at
+/// the origin is already inside kSureHit from first sight. A hostile that
+/// started off-axis and is turning toward the disk will shrink miss by more
+/// than kShrink (above sensor noise) while still on course to enter the
+/// asset cylinder (`miss < asset_radius`).
+bool AimedAtAsset(float miss, float miss_at_first, float asset_radius);
+
 /// Wreckage is in unpowered ballistic flight, so its acceleration is g downward
 /// and it has no thrust. Nothing in the track marks it as debris, but the
 /// kinematics do. NED: +z is down, so falling means positive dz.

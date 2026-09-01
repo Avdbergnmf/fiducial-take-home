@@ -6,6 +6,8 @@ namespace {
 constexpr float kDropAfter = 3.0f;         // s without an update before we forget
 constexpr float kEvidenceForCall = 1.2f;   // integrated score needed to commit
 constexpr float kScoreDecay = 0.6f;        // per second, toward zero
+constexpr float kSureHit = 5.0f;           // m; aimed-dash CPA, well above fix_sigma 0.35
+constexpr float kShrink = 3.0f;            // m of miss drop since first sight → steering
 
 float Clamp(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
@@ -46,6 +48,11 @@ float ClosestApproachDistance(const Vec3& position, const Vec3& velocity,
     if (t < 0.0f) t = 0.0f;
 
     return swarm::Length(offset + v * t);
+}
+
+bool AimedAtAsset(float miss, float miss_at_first, float asset_radius) {
+    if (miss < kSureHit) return true;
+    return miss < asset_radius && miss < miss_at_first - kShrink;
 }
 
 float TimeToTarget(const Vec3& position, const Vec3& velocity, const Vec3& target) {
@@ -142,19 +149,14 @@ void TrackStore::Classify(Track& t, float now, float dt) {
     //
     // Evidence is integrated over time rather than tested per tick, because a
     // civilian whose straight line happens to point at the asset for a moment
-    // is exactly the false positive that costs -2.
-    //
-    // TODO(next): a civilian on a chord through the arena can hold alignment
-    // for several seconds. Distinguishing it needs either the miss distance at
-    // closest approach or corroboration from a second observer.
+    // is exactly the false positive that costs -2. The 24 m gate (asset_radius
+    // * 0.8) called those chords hostile; AimedAtAsset is sure-hit or shrink.
     const float alignment = ApproachAlignment(t.position, t.velocity, cfg_.asset);
     const float closing = -RangeRate(t.position, t.velocity, cfg_.asset);
     const float miss = ClosestApproachDistance(t.position, t.velocity, cfg_.asset);
+    if (t.miss_at_first < 0.0f) t.miss_at_first = miss;
 
-    // Miss distance carries the weight. A civilian crossing on a chord can hold
-    // high alignment for several seconds, so alignment alone would call it
-    // hostile and cost -2. Its miss distance stays bounded away from zero.
-    const bool aimed = miss < cfg_.asset_radius * 0.8f;
+    const bool aimed = AimedAtAsset(miss, t.miss_at_first, cfg_.asset_radius);
 
     if (aimed && alignment > 0.8f && closing > 4.0f) {
         t.closing_score = Clamp(t.closing_score + dt, -2.0f, 3.0f);

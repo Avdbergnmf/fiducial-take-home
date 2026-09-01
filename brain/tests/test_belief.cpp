@@ -116,6 +116,39 @@ static void TestMissDistanceIgnoresThePast() {
     CHECK(miss > 49.0f && miss < 51.0f);
 }
 
+// ---------------------------------------------------------------------------
+// AimedAtAsset is the gate Classify actually uses. The 40 m civilian above
+// never entered the old 24 m gate, so that test could not catch G1a.
+// ---------------------------------------------------------------------------
+
+static void TestAimedAtAssetRejectsTheG1aChord() {
+    std::printf("AimedAtAsset rejects a 20 m chord that alignment would call hostile\n");
+    const float asset_radius = 30.0f;
+
+    // G1a: civilian on a chord that passes 20 m from the origin. Alignment and
+    // closing look like a dash; the old 24 m gate called this enemy before t=8.
+    const Vec3 civ_p(150.0f, 20.0f, -50.0f);
+    const Vec3 civ_v(-16.0f, 0.0f, 0.0f);
+    CHECK(ApproachAlignment(civ_p, civ_v, kAsset) > 0.9f);
+    const float civ_miss = ClosestApproachDistance(civ_p, civ_v, kAsset);
+    CHECK(civ_miss > 19.0f && civ_miss < 21.0f);
+    CHECK(!AimedAtAsset(civ_miss, civ_miss, asset_radius));
+
+    // s1 hostile dashing at the origin: CPA miss ~0 from first sight.
+    const Vec3 hos_p(170.0f, 0.0f, -40.0f);
+    const Vec3 hos_v(-16.0f, 0.0f, 0.0f);
+    const float hos_miss = ClosestApproachDistance(hos_p, hos_v, kAsset);
+    CHECK(hos_miss < 1.0f);
+    CHECK(AimedAtAsset(hos_miss, hos_miss, asset_radius));
+}
+
+static void TestAimedAtAssetShrinkVsNoise() {
+    std::printf("AimedAtAsset treats a 5 m miss drop as steering, 0.3 m as noise\n");
+    const float asset_radius = 30.0f;
+    CHECK(AimedAtAsset(15.0f, 20.0f, asset_radius));
+    CHECK(!AimedAtAsset(19.7f, 20.0f, asset_radius));
+}
+
 int main() {
     TestRangeRate();
     TestApproachAlignment();
@@ -123,6 +156,8 @@ int main() {
     TestBallistic();
     TestMissDistanceSeparatesTheHardCase();
     TestMissDistanceIgnoresThePast();
+    TestAimedAtAssetRejectsTheG1aChord();
+    TestAimedAtAssetShrinkVsNoise();
 
     if (g_failures == 0) {
         std::printf("belief: all passed\n");
