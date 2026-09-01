@@ -285,3 +285,46 @@ The y = 1 m "hit" was the viewer's marker: EnvironmentView scaled the 2 m-tall c
 
 **Cost accepted:** the viewer cylinder is now floor-to-ceiling, which is honest and can occlude whatever flies inside the radius (civilians). The inscribed-sphere comment is gone; `AimedAtAsset` is not the physics.
 
+---
+
+## D11 — Commit only a catchable local intercept (G3)
+
+**The term:** `W_kill` 100, scaled by how early; `P_breach` −200. Converting a breach into an early kill is up to **300 points of swing**. After G1/G2, s1 was 1 kill / 5 breaches, total −947. The overlay was marking hostiles; the drones were not stopping them.
+
+**Step 1 — ProNav is not the leak.** `flight.cpp` ProNav is standard PN (N = 3.5) plus LOS thrust when closing < 12 m/s. `flight.h` already says a stern chase against the shared 6.7 m/s² bound does not converge. The first s1 intercept (hostile_0, t≈16.5) finished, so the guidance can kill when the geometry is a closing intercept. Watching a commit that never meets is a commit-rule failure, not a PN failure.
+
+**Step 2 — the commit rule was spending drones on things they cannot catch.** Three stacked bugs, not a tuning constant:
+
+1. **`|| ttg < 12`.** `ShouldCommit` was `closing > -2 || ttg < 12`. Anything already inside 12 s of the asset was a commit, including stern chases (`close=-14.5` in the s1 log). That is exactly the geometry `flight.h:31` refuses.
+2. **Hearsay `trk=0`.** `MostUrgentHostile` returned peer-reported Hostiles (`has_local_id` false, `track_id` 0). `Decide` then skipped re-resolve because `target_id_ != 0`. Stance stayed `Committed`, `target_` was null every later tick, `Fly` cruised the ring. Timeout 25 s, spawn interval 14 s: one ghost commit parked a picket through the next arrival.
+3. **Closing used only their velocity.** `RangeRate(hostile, hostile_vel, us)` ignores our motion. A picket that has started inward reads as closing on an outbound. ProNav flies *relative* velocity; commit must too.
+
+**Options considered**
+
+1. Leave the `||` and raise `kEvidenceForCall` so we "commit earlier" by calling earlier. Calls the same uncatchable geometry, just sooner, and re-opens G1 civilian FPs.
+2. Drop the `||`, require relative closing, only local tracks, and arrive before the cylinder — still let every drone that can see it go. Fixes stern/hearsay; re-introduces three-on-one (pair_friendly / two interceptors panicking at 3 kill-radii and both missing).
+3. Same geometry gate as (2), plus a radio-free allocation: the facing ring slot (same angle as `RingSlot`) is the only drone allowed to spend itself.
+
+**Chosen:** 3.
+
+- Local Hostile only, and only if the call is younger than 6 s. Older latches were wreckage or a mate we failed to ID; neighbours of a spent owner chased them for the 12 s abort timeout and missed s1 hostile_4, which they had already called. A track we just aborted is not re-chased for 2 s (stops the Hostile/Unknown flicker loop).
+- Evidence bar is the call. `kEvidenceForCall` moved 1.2 → 0.6 after the commit rule was spending the facing drone: 0.6 s of aimed geometry, 3 wrong declarations on s1 (same as 1.2), `civilians_lost == 0`.
+- `ClosingSpeed` (both velocities, horizontal) ≥ 1 m/s. Evasion can flip the sign for a beat; receding abort waits 6 s, not immediate.
+- Catchable: fly at cruise (14 m/s, same as `Fly`) along the line of sight, arrive 0.5 s before `TimeToCylinder`. Stationary `range/closing` is the picket waiting; a neighbour of a dead owner has to fly.
+- Owner is `round(bearing / 2π · n) % n` while that drone's heartbeat is live. If the owner has been silent 1.5 s (three missed 2 Hz beats), the two neighbouring slots may go. Heartbeats must actually be on the wire: unread Claims used to win the one-frame-per-tick, interceptors went silent, neighbours stacked, MarkFriendly expired. Claims are not composed until something reads them; heartbeat is the highest priority. Never-heard is assumed alive so we do not steal sectors at boot.
+- Abort timeout 12 s, derived from `enemy_spawn_interval` 14 s.
+
+**Step 3 — classifier sensitivity is the remaining tension, not the first knob.** G1 made `AimedAtAsset` conservative so civilians stay unknown. Every extra 0.1 s of evidence is 1.6 m of hostile dash and a later intercept, which is how `W_kill` decays and how `P_breach` appears. Lowering the call bar recovers intercepts and re-opens civilian rams. That trade *is* tier 1: the same airframe is the weapon and the liability, and the discriminant is a 3D miss on craft that look identical in the horizontal plane. The commit rule moved first (local, relative closing, catchable, one owner, no ghost latches). Then `kEvidenceForCall` 1.2 → 0.6. On s1 that did not cost a civilian; the sixth kill was the fresh-Hostile gate, not the 0.6 s.
+
+**Cost accepted:**
+
+- A dead facing picket still leaves a hole until neighbours notice 1.5 s of silence. Two neighbours may both go; D8 keep-out is what stops them ramming.
+- Catchable is not a full PN intercept solve. A beam shot with tiny closing is rejected even if a lead pursuit would work.
+- A Hostile call that is genuinely 6 s old and still the right target is refused. Not seen: real intercepts finish in ~4 s of Hostile.
+- `kEvidenceForCall` 0.6 is still a guess. Generated layouts with tighter civilian chords are where it will show.
+
+**Measured, s1:** 6/6 hostiles, 0 breaches, `civilians_lost == 0`, wasted 0, 3 wrong declarations, mission +40.6, total **+130.9**, `asset_survived`. Was 1/6 and −947. Each converted breach is the 300-point swing the brief named; the extra was not chasing ghosts in spent sectors.
+
+**Measured, `-Tier 1 -Count 6`:** 6/6 completed. 0 civilians, 0 wasted, 0 `pair_friendly` on all six. Four layouts 3/3 or 4/4 and positive (best +215). Two leaked one (2/3 and 3/4, worst −110). Mean +76. The over-fit failure mode would have been s1-perfect and generated-zero; this is not that.
+
+

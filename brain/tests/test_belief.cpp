@@ -60,6 +60,34 @@ static void TestTimeToTarget() {
     CHECK(TimeToTarget(Vec3(160, 0, 0), Vec3(0, 16, 0), kAsset) > 1000.0f);
 }
 
+static void TestTimeToCylinder() {
+    std::printf("time to cylinder is ground range minus radius\n");
+    // 160 m out, r = 30, 16 m/s: 130/16 = 8.125 s. TimeToTarget would be 10.
+    const float ttg = TimeToCylinder(Vec3(160, 0, -40), Vec3(-16, 0, 0), kAsset, 30.0f);
+    CHECK(ttg > 8.0f && ttg < 8.3f);
+
+    CHECK(TimeToCylinder(Vec3(20, 0, -10), Vec3(-16, 0, 0), kAsset, 30.0f) == 0.0f);
+    CHECK(TimeToCylinder(Vec3(160, 0, 0), Vec3(0, 16, 0), kAsset, 30.0f) > 1000.0f);
+}
+
+static void TestClosingSpeed() {
+    std::printf("relative closing uses both velocities\n");
+    const Vec3 us(75, 0, -30);
+    const Vec3 still(0, 0, 0);
+    const Vec3 them(135, 0, -40);
+    const Vec3 inbound(-16, 0, 0);
+
+    // Head-on onto a picket: they close at 16 m/s.
+    CHECK(ClosingSpeed(us, still, them, inbound) > 15.0f);
+
+    // Stern chase: we sit behind them on the same ray, they pull away.
+    const Vec3 behind(150, 0, -30);
+    CHECK(ClosingSpeed(behind, still, them, inbound) < -15.0f);
+
+    // Matching velocity on the same course: relative closing is zero.
+    CHECK(std::fabs(ClosingSpeed(us, inbound, them, inbound)) < 0.5f);
+}
+
 static void TestBallistic() {
     std::printf("wreckage is identifiable from kinematics alone\n");
     const float dt = 0.1f;
@@ -202,6 +230,8 @@ int main() {
     TestRangeRate();
     TestApproachAlignment();
     TestTimeToTarget();
+    TestTimeToCylinder();
+    TestClosingSpeed();
     TestBallistic();
     TestMissDistanceSeparatesTheHardCase();
     TestMissDistanceIgnoresThePast();

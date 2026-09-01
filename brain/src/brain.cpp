@@ -136,6 +136,7 @@ private:
         if (drone_id >= sw::kMaxFleet) return;
         peer_position_[drone_id] = position;
         peer_last_heard_[drone_id] = now;
+        policy_.NoteAlive(drone_id, now);
     }
 
     swarm::Command Fly(const swarm::Observation& obs) {

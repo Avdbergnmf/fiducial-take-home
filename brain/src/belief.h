@@ -70,6 +70,20 @@ float ApproachAlignment(const Vec3& position, const Vec3& velocity, const Vec3& 
 /// Seconds to reach the target at current closing speed; large if not closing.
 float TimeToTarget(const Vec3& position, const Vec3& velocity, const Vec3& target);
 
+/// Seconds until ground range hits the asset cylinder. This is the breach
+/// clock (D10), not 3D range to the origin. Zero if already inside; large
+/// if not closing in the horizontal plane.
+float TimeToCylinder(const Vec3& position, const Vec3& velocity,
+                     const Vec3& centre, float radius);
+
+/// Horizontal closing speed of `target` on `observer`, using both
+/// velocities. Positive means the range is shrinking. RangeRate only sees
+/// the target's velocity, so a picket chasing an outbound looks "closing"
+/// when the interceptor is the one moving. ProNav flies the relative
+/// geometry; commit has to as well (D11).
+float ClosingSpeed(const Vec3& observer_p, const Vec3& observer_v,
+                   const Vec3& target_p, const Vec3& target_v);
+
 /// How close this thing will pass to the target if it does not turn. 3D.
 ///
 /// Alignment and closing stay horizontal. Miss cannot: a civilian whose

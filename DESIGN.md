@@ -29,10 +29,46 @@ as heavily as the code, so it gets real time, not the last hour.
 
 ## How I decide what an aircraft is
 
-- What evidence goes into the classification, and how is it weighted?
-- What is the cost of a false positive versus a false negative here, and does the
-  decision rule reflect that asymmetry?
-- How long does a classification persist, and what revises it?
+Classification is a 3D miss, not a heading. Alignment and closing in the
+horizontal plane look the same for a dash at the origin and a civilian chord
+that happens to point that way; the discriminant is whether closest-approach
+to the origin is a sure hit (< 5 m) or has shrunk by more than sensor noise
+while still inside `asset_radius`. A level overflight's miss is its altitude
+and does not shrink. A hostile dive's miss goes to zero. That is G1, and it
+is deliberately conservative: a false Hostile is a drone spent on a
+bystander (−150) plus a hole in the ring for the next real inbound.
+
+A heartbeat that matches a local sensor track latches `Friendly` so an
+interceptor on the way in — same alignment, same closing, same miss — is not
+re-classified as the thing we are defending against.
+
+## When I spend a drone
+
+The classification bar and the commit rule pull in opposite directions, and
+that tension is the whole of tier 1.
+
+`W_kill` is 100, scaled by how early the intercept is; `P_breach` is −200; a
+civilian ram is −150. The same airframe is the weapon and the liability. G1
+requires 0.6 s of aimed geometry before we even *name* a Hostile. That 0.6 s
+is 10 m of dash. On s1 the first look is at ~60 m of sense when the inbound
+is still ~6 s from the cylinder; waiting 0.6 s still leaves a facing picket a
+closing intercept. Waiting until they are inside the ring does not: relative
+closing flips sign and we are in the stern chase both airframes' 6.7 m/s²
+bound cannot win.
+
+Commit used to ignore that. `closing > -2 || ttg < 12` spent drones on
+outbound geometry ProNav cannot fly, and hearsay `track_id` 0 left them
+"committed" on the ring with a null target. The rule now is: a *fresh* local
+Hostile, the facing ring slot (neighbours only if that drone's heartbeat is
+gone), relative closing ≥ 1 m/s, and arrive before the cylinder. ProNav
+itself is not the leak — the first s1 intercept finished. A 6 s-old Hostile
+latch is wreckage; chasing those is how a spent sector missed the next
+inbound. Raising classifier sensitivity is the remaining knob, and it is the
+expensive one. Every 0.1 s taken off `kEvidenceForCall` is 1.6 m more
+intercept window and a civilian chord that looks 0.1 s more like a dash. That
+is not a tuning detail. It is the brief's own contradiction — telling a
+threat from a bystander, and paying one drone per kill and not two — written
+as a number.
 
 ## How I treat a peer I cannot verify
 

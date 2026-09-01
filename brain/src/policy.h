@@ -49,8 +49,14 @@ public:
     /// Send at most one frame, respecting the remaining byte budget.
     void Pump(const swarm::Host& host, Outbox<24>& outbox, const swarm::Observation& obs);
 
+    /// A heartbeat from this origin. Neighbours of a spent owner use silence
+    /// as death: claims are unread, and a dead drone will not send one.
+    void NoteAlive(uint8_t drone_id, float now);
+
 private:
     bool ShouldCommit(const Track& t, const swarm::Observation& obs) const;
+    bool OwnsInbound(const Track& t, float now) const;
+    bool OwnerAlive(uint32_t drone_id, float now) const;
     const char* AbortReason(const Track& t, const swarm::Observation& obs) const;
 
     Config cfg_;
@@ -60,12 +66,15 @@ private:
     Track* target_ = nullptr;
     uint32_t target_id_ = 0;
     float committed_at_ = 0.0f;
+    uint32_t last_abort_id_ = 0;
+    float last_abort_at_ = -1.0e9f;
     char last_log_[192]{};
 
     uint16_t next_seq_ = 0;
     float last_heartbeat_ = -1.0e9f;
     float ring_radius_ = 60.0f;
     float ring_altitude_ = 30.0f;
+    float heard_[kMaxFleet]{};
 };
 
 }  // namespace sw

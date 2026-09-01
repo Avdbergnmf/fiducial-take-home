@@ -4,7 +4,7 @@ namespace sw {
 namespace {
 
 constexpr float kDropAfter = 3.0f;         // s without an update before we forget
-constexpr float kEvidenceForCall = 1.2f;   // integrated score needed to commit
+constexpr float kEvidenceForCall = 0.6f;   // s of aimed geometry to name Hostile
 constexpr float kScoreDecay = 0.6f;        // per second, toward zero
 constexpr float kSureHit = 5.0f;           // m; aimed-dash CPA, well above fix_sigma 0.35
 constexpr float kShrink = 3.0f;            // m of miss drop since first sight → steering
@@ -62,6 +62,25 @@ float TimeToTarget(const Vec3& position, const Vec3& velocity, const Vec3& targe
     const float closing = -RangeRate(position, velocity, target);
     if (closing <= 0.1f) return 1.0e6f;
     return range / closing;
+}
+
+float TimeToCylinder(const Vec3& position, const Vec3& velocity,
+                     const Vec3& centre, float radius) {
+    const Vec3 flat = Flat(position - centre);
+    const float ground = swarm::Length(flat);
+    if (ground <= radius) return 0.0f;
+    const float closing = -RangeRate(position, velocity, centre);
+    if (closing <= 0.1f) return 1.0e6f;
+    return (ground - radius) / closing;
+}
+
+float ClosingSpeed(const Vec3& observer_p, const Vec3& observer_v,
+                   const Vec3& target_p, const Vec3& target_v) {
+    const Vec3 los = Flat(target_p - observer_p);
+    const float range = swarm::Length(los);
+    if (range < 1e-3f) return 0.0f;
+    const Vec3 rel = Flat(target_v - observer_v);
+    return -swarm::Dot(rel, los / range);
 }
 
 bool LooksBallistic(const Vec3& velocity, const Vec3& prev_velocity, float dt) {
@@ -264,7 +283,9 @@ Track* TrackStore::MostUrgentHostile(const Vec3& self_position, float now) {
 
     for (Track& t : tracks_) {
         if (t.belief != Belief::Hostile) continue;
-        const float ttg = TimeToTarget(t.position, t.velocity, cfg_.asset);
+        if (!t.has_local_id) continue;    // cannot intercept hearsay (D11)
+        const float ttg = TimeToCylinder(t.position, t.velocity, cfg_.asset,
+                                         cfg_.asset_radius);
         // Weighted sum, NOT a lexicographic order, and track_id is not
         // consulted: range is worth 1 s of time-to-go per 1000 m, so it only
         // separates near-ties. An exact tie still resolves by iteration order,

@@ -71,11 +71,13 @@ the real finding: **the margin and the ring geometry have to be designed togethe
 | file:line | name | value | category | source | defensible? |
 |---|---|---|---|---|---|
 | belief.cpp:6 | `kDropAfter` | 3.0 s | **GUESS** | Sim's own value is `sense.track_drop_time=2.0` (`--dump-params`, `s1.json`) | Arguable, and inconsistent with the sim. We hold a track 1 s after the simulator retired it. The brief (§3) says the drop time is "not published" and varies — but on s1 it is measurable and it is 2.0. *Too high:* acting on tracks that no longer exist, and a reacquired entity arrives under a **new** `track_id` and becomes a duplicate. *Too low:* losing a track through a momentary dropout and re-learning its class from zero. |
-| belief.cpp:7 | `kEvidenceForCall` | 1.2 | **GUESS** | none | Units are seconds-of-sustained-evidence (score integrates at `+dt`), so this is "1.2 s of continuous approach geometry". *Too high:* hostiles called late, less time to intercept. *Too low:* civilians called hostile — **currently happening**. |
+| belief.cpp:7 | `kEvidenceForCall` | 0.6 | **GUESS**, G3 | Was 1.2. Units are seconds of aimed geometry. D11: moved after the commit rule was spending the facing drone. | s1: 6/6, civ 0, 3 wrong (same as 1.2). *Too low:* civilian FPs on generated chords. |
 | belief.cpp:8 | `kScoreDecay` | 0.6 /s | **GUESS** | none | Asymmetric with the +1.0/s accrual, so evidence builds ~1.7× faster than it decays. That bias is toward false positives. *Too high:* flickering beliefs. *Too low:* a stale hostile call never clears. |
 | belief.cpp:29 | alignment speed deadband | 0.5 m/s | **GUESS** | none | Low-risk. Prevents a divide-by-noise on a hovering track. |
 | belief.cpp:41 | closest-approach deadband | 0.25 (=0.5 m/s)² | **GUESS** | none | Low-risk, same reason. |
 | belief.cpp:54 | `TimeToTarget` closing floor | 0.1 m/s | **GUESS** | none | Low-risk sentinel. |
+| belief.cpp:67 | `TimeToCylinder` | `(ground − radius) / closing` | **DERIVED** | D10: breach is the cylinder, not 3D range to the origin. | Yes — this is the clock `P_breach` actually uses. |
+| belief.cpp:79 | `ClosingSpeed` | relative, horizontal | **DERIVED** | ProNav's relative velocity, flattened like `RangeRate`. D11. | Yes. `RangeRate(them, them_vel, us)` was the wrong quantity for commit. |
 | belief.cpp:62 | ballistic accel window | 6.0 .. 14.0 m/s² | **DERIVED**, now **MEASURED** | Brackets g = 9.81. Confirmed against real wreckage: `/tmp` run t=7.8→8.1, `vz` = −1.46, −0.47, 0.51, 1.49 → **9.8 m/s²** | Yes. Comfortably centred; ±40% tolerance absorbs the 10 Hz trace decimation and drag (`wreck.drag_coefficient=0.05`). |
 | belief.cpp:64 | ballistic lateral limit | 4.0 m/s² | **GUESS** | none | Plausible: wreckage has no thrust, so lateral accel should be ~drag only. *Too high:* a powered drone in a dive reads as wreckage. *Too low:* tumbling wreckage in wind is missed. |
 | belief.cpp:127 | ballistic accrual / clamp | `+dt·2.0`, clamp [0, 1.5] | **GUESS** | none | Reaches the 0.4 threshold in 0.2 s. Fast, but the test is specific. |
@@ -101,20 +103,22 @@ the real finding: **the margin and the ring geometry have to be designed togethe
 | file:line | name | value | category | source | defensible? |
 |---|---|---|---|---|---|
 | policy.cpp:24 | `PublishedClass` | Friendly + Hostile | **DERIVED** | D9. Local only. Wreckage/unknown → UNKNOWN. ENEMY restored: the viewer has no other channel. | x1-b still pays −2 on AimedAtAsset FPs. |
-| policy.cpp:9 | `kCommitMaxRange` | 120.0 m | **GUESS** | none | Exceeds `sense_radius` (60) — so it only ever binds on hearsay tracks, never on our own sensor tracks. Effectively dead code on s1. |
-| policy.cpp:10 | `kAbortAfter` | 25.0 s | **GUESS** | none | Hostiles spawn every 14 s (`s1.json`), so a 25 s pursuit spans two arrivals. *Too high:* a drone is committed to a lost cause while the next hostile transits unopposed. *Too low:* aborting a converging intercept. |
-| policy.cpp:11 | `kClaimHold` | 6.0 s | **GUESS** | none | Nothing reads claims yet (`brain.cpp:105` is a TODO), so this is inert. |
+| policy.cpp:11 | `kAbortAfter` | 12.0 s | **DERIVED** | `s1.json` `enemy_spawn_interval=14`. A 25 s pursuit spanned two arrivals (D11). | Yes as an upper bound; 12 s returns a failed interceptor before the next spawn. |
+| policy.cpp:15 | `kMinClosing` | 1.0 m/s | **GUESS** | D11. Below this, relative range is not shrinking. | Same number as the old abort floor; now it is the *commit* floor too, and the `\|\|` is gone. |
+| policy.cpp:16 | `kCatchSlack` | 0.5 s | **GUESS** | D11. Must arrive this much before the cylinder. | Low-risk. *Too high:* refuse a catchable intercept. *Too low:* kill on the wall for ~0 `W_kill`. |
+| policy.cpp | `kFreshHostile` | 6.0 s | **DERIVED** | Real intercepts finish in ~4 s of Hostile. Older latches were ghosts (D11). | s1 hostile_4: neighbours had called it and were still chasing a 12 s-old latch. |
+| policy.cpp | `kRecommitHold` | 2.0 s | **GUESS** | D11. Stops Hostile/Unknown flicker re-chase. | Low-risk. |
 | policy.cpp:12 | `kReportEvery` | 0.5 s | **GUESS** | none | Cheap. |
-| policy.cpp:14-17 | priorities | 1/3/4/5 | **GUESS** | none | Ordinal only; the ordering is the design, the values are arbitrary. Fine. |
-| policy.cpp:30 | `ring_radius_` | `asset_radius + comm_radius·0.5` = **75 m** | **DERIVED** (weakly) | `s1.json` `_fleet`: "the ring is what the radio and the sensors say it is" | Half-justified. At r=75 with 16 drones the neighbour chord is 2·75·sin(π/16) = **29.3 m**, inside both `sense_radius` 60 and `comm_radius` 90 — so the *intent* is met. But the `0.5` is a guess, and 75 m puts the ring well inside the 150 m civilian spawn ring, i.e. in the traffic. |
-| policy.cpp:31 | `ring_altitude_` | 30.0 m | **SCENARIO** | `s1.json` `spawn.friendly_altitude = 30.0` | Yes — matches spawn altitude, so no climb is needed. Note civilians fly at 50 m and hostiles at 40 m (`s1.json`), so the ring sits *below* both. |
-| policy.cpp:62 | slot-reached radius | 8.0 m | **GUESS** | none | Low-risk. |
-| policy.cpp:77 | commit evidence bar | `closing_score < 1.5` | **GUESS** | none | Higher than `kEvidenceForCall` (1.2), so committing is stricter than declaring. Good instinct, unjustified value. |
-| policy.cpp:86 | commit geometry gate | `closing > −2.0 \|\| ttg < 12.0` | **GUESS** | none | An `\|\|` — so a target with `ttg < 12` is committed to **even in a stern chase**, which flight.h:31 says never converges. *Too high:* chasing the uncatchable. |
-| policy.cpp:95/97 | non-convergence abort | after 6.0 s, `closing < 1.0` | **GUESS** | none | Reasonable shape. |
-| policy.cpp:177 | confidence encode | `>2.0 ? 255 : score·120` | **GUESS** | none | `score·120` saturates the `uint8_t` at score 2.125, and the branch caps at 2.0, so the mapping is continuous by luck rather than by construction. |
-| policy.cpp:205 | outbox max age | 2.0 s | **GUESS** | none | Sensible. |
-| policy.cpp:217 | tx headroom | `len + 64` | **GUESS** | none | Reserves 64 B. Never binds on s1: measured usage is 704 B/s against a 4096 B/s budget, and `frames_dropped_budget = 0` in both reports. |
+| policy.cpp | heartbeat prio | 5 (highest) | **DERIVED** | D8/D11 identity. Unread claims used to starve this. | Yes. Claims are not composed. |
+| policy.cpp:44 | `ring_radius_` | `asset_radius + comm_radius·0.5` = **75 m** | **DERIVED** (weakly) | `s1.json` `_fleet`: "the ring is what the radio and the sensors say it is" | Half-justified. At r=75 with 16 drones the neighbour chord is 2·75·sin(π/16) = **29.3 m**, inside both `sense_radius` 60 and `comm_radius` 90 — so the *intent* is met. But the `0.5` is a guess, and 75 m puts the ring well inside the 150 m civilian spawn ring, i.e. in the traffic. |
+| policy.cpp:45 | `ring_altitude_` | 30.0 m | **SCENARIO** | `s1.json` `spawn.friendly_altitude = 30.0` | Yes — matches spawn altitude, so no climb is needed. Note civilians fly at 50 m and hostiles at 40 m (`s1.json`), so the ring sits *below* both. |
+| policy.cpp:slot | slot-reached radius | 8.0 m | **GUESS** | none | Low-risk. |
+| policy.cpp:OwnsInbound | ring-slot owner | facing slot, ±1 if owner silent 1.5 s | **DERIVED** | Same angle as `RingSlot`. Heartbeat liveness (D11). | Unique while live; neighbours cover a spent sector. |
+| policy.cpp:ShouldCommit | commit gate | local, fresh Hostile, owner, in-sense, `closing ≥ 1`, cruise-catch vs cylinder | **DERIVED** | Replaces `closing > −2 \|\| ttg < 12`. D11. | Hearsay, ghosts, and stern chases refused. |
+| policy.cpp:AbortReason | non-closing abort | after 6.0 s, `closing < 1.0` | **GUESS** | D11. Immediate receding abort dropped an interceptor 5 m out on a weave. | |
+| policy.cpp:confidence | confidence encode | `>2.0 ? 255 : score·120` | **GUESS** | none | `score·120` saturates the `uint8_t` at score 2.125, and the branch caps at 2.0, so the mapping is continuous by luck rather than by construction. |
+| policy.cpp:outbox | outbox max age | 2.0 s | **GUESS** | none | Sensible. |
+| policy.cpp:tx | tx headroom | `len + 64` | **GUESS** | none | Reserves 64 B. Never binds on s1: measured usage is 704 B/s against a 4096 B/s budget, and `frames_dropped_budget = 0` in both reports. |
 
 ---
 
@@ -167,4 +171,4 @@ plus 3D miss (D2, D7). Horizontal leftover chords were the D7 case.
    `sense.track_drop_time = 2.0`. Cheap to align; ask whether you *want* to outlive it.
 4. **`belief.cpp:193` `kGate` 12 m** — too loose by its own stated reasoning (~3 m from
    measured sigmas). Matters more from s2 on, when peer reports carry the load.
-5. **`policy.cpp:86`** — the `||` admits stern chases the guidance cannot fly.
+5. ~~**`policy.cpp` `|| ttg < 12`**~~ **Done (D11).** Commit is local Hostile + relative closing + catchable vs the cylinder. The remaining G3 knob is `kEvidenceForCall` (row above): raising it late-commits, lowering it re-opens G1.
