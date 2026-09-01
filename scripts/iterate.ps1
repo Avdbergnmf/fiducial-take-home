@@ -71,6 +71,8 @@ if ($s.Causes) {
     Write-Host ("  losses by cause: {0}" -f $s.Causes) -ForegroundColor Yellow
 }
 Write-Host ("  declarations {0} correct / {1} wrong" -f $s.Correct, $s.Wrong)
+$p95 = if ($null -eq $s.P95 -or $s.P95 -eq '') { "null" } else { ("{0:N2} s" -f [double]$s.P95) }
+Write-Host ("  hops {0}   p95 {1}" -f $s.MaxHops, $p95)
 if ($s.Crashes -gt 0 -or $s.AbiViolations -gt 0) {
     Write-Host ("  INTEGRITY: {0} crash(es), {1} ABI violation(s)" -f $s.Crashes, $s.AbiViolations) -ForegroundColor Red
 }

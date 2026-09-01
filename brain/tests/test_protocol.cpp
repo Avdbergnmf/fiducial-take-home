@@ -196,6 +196,50 @@ static void TestOutboxExpiry() {
     CHECK(box.size() == 1);
 }
 
+static void TestRelayCopy() {
+    std::printf("relay copy stamps hops and keeps origin/seq\n");
+    uint8_t src[64];
+    Writer w(src, sizeof(src));
+    Header out;
+    out.type = MsgType::TrackReport;
+    out.origin = 9;
+    out.hops = 0;
+    out.seq = 77;
+    out.sent_time = 12.5f;
+    out.Write(w);
+    TrackReportMsg m;
+    m.position = Vec3(100, 20, -40);
+    m.velocity = Vec3(-13, 0, 0);
+    m.belief = Belief::Hostile;
+    m.confidence = 200;
+    m.Write(w);
+    CHECK(w.ok());
+
+    uint8_t dst[64];
+    CHECK(RelayCopy(src, w.size(), dst, sizeof(dst), 1));
+    CHECK(dst[Header::kHopsOffset] == 1);
+
+    Reader r(dst, w.size());
+    Header in;
+    CHECK(in.Read(r));
+    CHECK(in.origin == 9);
+    CHECK(in.seq == 77);
+    CHECK(in.hops == 1);
+    CHECK(in.type == MsgType::TrackReport);
+
+    // Cap: a frame already at kMaxHops is not copied by the caller; the
+    // helper still stamps whatever hop count it is given.
+    CHECK(RelayCopy(src, w.size(), dst, sizeof(dst), kMaxHops));
+    Reader r2(dst, w.size());
+    Header in2;
+    CHECK(in2.Read(r2));
+    CHECK(in2.hops == kMaxHops);
+
+    uint8_t tiny[4];
+    CHECK(!RelayCopy(src, w.size(), tiny, sizeof(tiny), 1));
+    CHECK(!RelayCopy(src, Header::kBytes - 1, dst, sizeof(dst), 1));
+}
+
 int main() {
     TestHeaderRoundTrip();
     TestTruncated();
@@ -207,6 +251,7 @@ int main() {
     TestSeenSet();
     TestOutboxPriority();
     TestOutboxExpiry();
+    TestRelayCopy();
 
     if (g_failures == 0) {
         std::printf("protocol: all passed\n");

@@ -161,6 +161,8 @@ function Get-RunSummary {
         Crashes       = [int]$r.integrity.brain_crashes
         AbiViolations = @($r.integrity.abi_violations).Count
         AssetSurvival = $m.asset_survival_time_s
+        MaxHops       = if ($r.comms) { $r.comms.max_hops_observed } else { $null }
+        P95           = if ($r.comms) { $r.comms.propagation_p95_s } else { $null }
         Path          = (Resolve-Path -LiteralPath $Path).Path
     }
 }

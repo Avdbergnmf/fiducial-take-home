@@ -226,6 +226,32 @@ static void TestHeartbeatRangeCorroboration() {
     CHECK(!HeartbeatPlausible(self, claimed, 5.0f, 0.5f));
 }
 
+static void TestPeerReportAssociatesByGeometry() {
+    std::printf("peer reports associate by geometry, not track_id\n");
+    TrackStore store;
+    const Vec3 p(170.0f, 0.0f, -40.0f);
+    const Vec3 v(-13.0f, 0.0f, 0.0f);
+
+    store.MergePeerReport(p, v, Belief::Hostile, 255, 10.0f, /*origin=*/3, /*hops=*/2);
+    CHECK(store.tracks().size() == 1);
+    CHECK(!store.tracks()[0].has_local_id);
+    CHECK(store.tracks()[0].belief == Belief::Hostile);
+    CHECK(store.tracks()[0].last_origin == 3);
+    CHECK(store.tracks()[0].last_hops == 2);
+    CHECK(store.FindByStoreId(store.tracks()[0].store_id) == &store.tracks()[0]);
+    CHECK(store.Find(0) == nullptr);   // hearsay must not collide with local id 0
+
+    // Same aircraft, a few metres off (two fix biases). One row.
+    store.MergePeerReport(Vec3(174.0f, 2.0f, -40.0f), v, Belief::Hostile, 255,
+                          10.4f, 3, 2);
+    CHECK(store.tracks().size() == 1);
+
+    // A different aircraft 30 m away. Second row.
+    store.MergePeerReport(Vec3(170.0f, 30.0f, -40.0f), v, Belief::Hostile, 255,
+                          10.5f, 4, 1);
+    CHECK(store.tracks().size() == 2);
+}
+
 int main() {
     TestRangeRate();
     TestApproachAlignment();
@@ -240,6 +266,7 @@ int main() {
     TestLevelOverflightIsNotAimed();
     TestLevelDashIsNotAHit();
     TestHeartbeatRangeCorroboration();
+    TestPeerReportAssociatesByGeometry();
 
     if (g_failures == 0) {
         std::printf("belief: all passed\n");

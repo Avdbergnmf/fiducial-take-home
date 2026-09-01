@@ -10,6 +10,7 @@ constexpr float kSureHit = 5.0f;           // m; aimed-dash CPA, well above fix_
 constexpr float kShrink = 3.0f;            // m of miss drop since first sight → steering
 constexpr float kFriendlyGate = 8.0f;      // m; heartbeat → sensor track
 constexpr float kFriendlyHold = 2.5f;      // s; 2 Hz heartbeat, covers a few losses
+constexpr float kAssociateGate = 8.0f;     // m; peer report → existing track (D14)
 
 float Clamp(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
@@ -111,10 +112,33 @@ Track* TrackStore::Find(uint32_t track_id) {
     return nullptr;
 }
 
+Track* TrackStore::FindByStoreId(uint32_t store_id) {
+    if (store_id == 0) return nullptr;
+    for (Track& t : tracks_)
+        if (t.store_id == store_id) return &t;
+    return nullptr;
+}
+
+uint32_t TrackStore::Birth(Track& t) {
+    t.store_id = ++next_id_;
+    return t.store_id;
+}
+
 Track* TrackStore::NearestTo(const Vec3& p, float max_distance) {
     Track* best = nullptr;
     float best_d = max_distance;
     for (Track& t : tracks_) {
+        const float d = swarm::Distance(t.position, p);
+        if (d < best_d) { best_d = d; best = &t; }
+    }
+    return best;
+}
+
+Track* TrackStore::NearestHostile(const Vec3& p, float max_distance) {
+    Track* best = nullptr;
+    float best_d = max_distance;
+    for (Track& t : tracks_) {
+        if (t.belief != Belief::Hostile) continue;
         const float d = swarm::Distance(t.position, p);
         if (d < best_d) { best_d = d; best = &t; }
     }
@@ -133,6 +157,7 @@ void TrackStore::Update(const swarm::Observation& obs) {
         if (!t) {
             t = tracks_.emplace();
             if (!t) continue;              // at capacity; drop rather than grow
+            Birth(*t);
             t->track_id = raw.track_id;
             t->has_local_id = true;
             t->first_seen = raw.first_seen;
@@ -151,6 +176,11 @@ void TrackStore::Update(const swarm::Observation& obs) {
 
         Classify(*t, now, dt);
     }
+
+    // A local track appearing on top of a hearsay row is the same aircraft
+    // now in view. Fold the peer evidence in and drop the ghost so a commit
+    // keyed on the hearsay store_id can re-associate (D18).
+    AbsorbHearsay();
 
     // Local tracks: the simulator already dropped them from obs.tracks()
     // (destroyed vanish the next tick; out-of-range after an unpublished
@@ -229,21 +259,52 @@ void TrackStore::Classify(Track& t, float now, float dt) {
     }
 }
 
+void TrackStore::AbsorbHearsay() {
+    bool drop[kMaxTracks]{};
+    for (uint32_t i = 0; i < tracks_.size(); ++i) {
+        if (!tracks_[i].has_local_id) continue;
+        for (uint32_t j = 0; j < tracks_.size(); ++j) {
+            if (j == i || tracks_[j].has_local_id || drop[j]) continue;
+            if (swarm::Distance(tracks_[i].position, tracks_[j].position) > kAssociateGate)
+                continue;
+            Track& local = tracks_[i];
+            const Track& peer = tracks_[j];
+            if (local.belief != Belief::Friendly) {
+                if (peer.closing_score > local.closing_score)
+                    local.closing_score = peer.closing_score;
+                if (peer.last_origin != 0) {
+                    local.last_origin = peer.last_origin;
+                    local.last_hops = peer.last_hops;
+                }
+                if (peer.belief == Belief::Hostile && local.belief != Belief::Hostile) {
+                    local.belief = Belief::Hostile;
+                    local.belief_since = peer.belief_since;
+                }
+            }
+            drop[j] = true;
+        }
+    }
+    for (uint32_t j = tracks_.size(); j > 0; --j) {
+        if (drop[j - 1]) tracks_.erase(j - 1);
+    }
+}
+
 void TrackStore::MergePeerReport(const Vec3& position, const Vec3& velocity,
-                                 Belief peer_belief, uint8_t confidence, float now) {
+                                 Belief peer_belief, uint8_t confidence, float now,
+                                 uint8_t origin, uint8_t hops) {
     // Association after extrapolating by measured age (D14). 4 m (sigmas
     // only) duplicated the same aircraft: 2089 class transitions on s1 and
     // comms 26 vs 36. Leftover after extrapolation is two biases plus any
     // unmodelled turn while a report sat in the outbox:
     // 2·1.2 + 3·√2·0.35 + 0.2 s · 16 m/s ≈ 7 m. 8 m is that, rounded.
-    constexpr float kGate = 8.0f;
 
-    Track* t = NearestTo(position, kGate);
+    Track* t = NearestTo(position, kAssociateGate);
     if (t && t->belief == Belief::Friendly)
         return;                           // drop; do not spawn a ghost hostile on a mate
     if (!t) {
         t = tracks_.emplace();
         if (!t) return;
+        Birth(*t);
         t->has_local_id = false;          // hearsay; Find() must not match it
         t->first_seen = now;
         t->belief_since = now;
@@ -253,6 +314,8 @@ void TrackStore::MergePeerReport(const Vec3& position, const Vec3& velocity,
     t->velocity = velocity;
     t->last_update = now;
     t->last_seen = now;
+    t->last_origin = origin;
+    t->last_hops = hops;
 
     // A peer's opinion is evidence, not truth. It moves the score; it does not
     // set the verdict. From tier 3 on, an unverified peer may be a hostile
@@ -291,7 +354,6 @@ Track* TrackStore::MostUrgentHostile(const Vec3& self_position, float now) {
 
     for (Track& t : tracks_) {
         if (t.belief != Belief::Hostile) continue;
-        if (!t.has_local_id) continue;    // cannot intercept hearsay (D11)
         const float ttg = TimeToCylinder(t.position, t.velocity, cfg_.asset,
                                          cfg_.asset_radius);
         // Weighted sum, NOT a lexicographic order, and track_id is not

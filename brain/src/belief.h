@@ -22,9 +22,11 @@ public:
 
     /// Fold in a peer's report. Position should already be extrapolated to
     /// `now` (caller measured age from sent_time). Associates by geometry
-    /// because track_id is observer-local.
+    /// because track_id is observer-local. `origin` / `hops` are the wire
+    /// header: stored on the row so a later detector can ask who said this.
     void MergePeerReport(const Vec3& position, const Vec3& velocity,
-                         Belief peer_belief, uint8_t confidence, float now);
+                         Belief peer_belief, uint8_t confidence, float now,
+                         uint8_t origin = 0, uint8_t hops = 0);
 
     /// A heartbeat that matches a sensor track is a mate. The RF range is
     /// our measurement, not their claim — a replay from the wrong side of
@@ -37,7 +39,9 @@ public:
     const FixedVec<Track, kMaxTracks>& tracks() const { return tracks_; }
 
     Track* Find(uint32_t track_id);
+    Track* FindByStoreId(uint32_t store_id);
     Track* NearestTo(const Vec3& p, float max_distance);
+    Track* NearestHostile(const Vec3& p, float max_distance);
 
     /// Threat ordering: which hostile is most urgent. Time-to-asset, not range.
     /// Returns nullptr when nothing qualifies.
@@ -45,10 +49,13 @@ public:
 
 private:
     void Classify(Track& t, float now, float dt);
+    void AbsorbHearsay();
+    uint32_t Birth(Track& t);
 
     Config cfg_;
     FixedVec<Track, kMaxTracks> tracks_;
     float last_time_ = 0.0f;
+    uint32_t next_id_ = 0;
 };
 
 // ---------------------------------------------------------------------------

@@ -84,6 +84,8 @@ private:
     const char* AbortReason(const Track& t, const swarm::Observation& obs) const;
     void LogAbort(const char* why, uint32_t trk, const Track* t,
                   const swarm::Observation& obs);
+    Track* ResolveTarget(TrackStore& store);
+    void BindTarget(Track* t);
 
     Config cfg_;
     Rng rng_;                 // unused today; the hook for jittering send times
@@ -91,8 +93,11 @@ private:
     Stance stance_ = Stance::Forming;
     Track* target_ = nullptr;
     uint32_t target_id_ = 0;
+    uint32_t target_store_id_ = 0;
+    Vec3 last_target_pos_{};
     float committed_at_ = 0.0f;
     uint32_t last_abort_id_ = 0;
+    uint32_t last_abort_store_id_ = 0;
     float last_abort_at_ = -1.0e9f;
     char last_log_[192]{};
 

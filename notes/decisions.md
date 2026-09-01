@@ -444,6 +444,32 @@ Claims were the half-built answer (`ClaimMsg` is on the wire format). D11 alread
 
 **Measured, 8 named scenarios:** worst **−524.6** (x2-b), mean **−136.4**, best **+158.4**. Same ladder as D15. This is a picket-goal clip, not a commit change.
 
+---
+
+## D18 — hop-limited TrackReport forward, commit on fused hearsay
+
+**Options considered**
+
+1. Do nothing. s2 `propagation_p95_s` stays `null`; UniqueOwner on a gap never hears the 220 m inbound. Baseline `hostiles_reached_asset` 5, last measured 3.
+2. Re-originate a new TrackReport from every drone that fused a peer Hostile (new origin/seq). Information travels semantically. The simulator's hop metric keys on a rebroadcast of the *same* frame (the example's flood of heartbeats is how fixture `p95=0.09` / `max_hops=7` happened). Budget: every drone that hears a hostile reports it at 0.5 Hz as if it were the seer.
+3. Naive flood of every frame, hop 4, like `hover_relay_brain.cpp`. Proves the radio. Exhausts s2's 3072 B/s if heartbeats join the flood.
+4. Hop-limited forward of **TrackReport only**. Same origin/seq/sent_time, `hops++`, `SeenSet` once, cap `kMaxHops=4`, outbox priority 2 (below original reports at 3 and heartbeats at 5). `Pump` already refuses the last 64 B. Compose reports **local** Hostiles only — hearsay rides the author's frame. Association stays D14 (geometry after `now−sent_time`, 8 m). UniqueOwner may commit on that fused Hostile: store_id, not track_id 0; catchable vs the cylinder; no `sense_radius` gate (hearsay is often 100 m out). Heartbeats stay one hop (never-heard is already assumed alive).
+
+**Chosen:** 4.
+
+**Why:** s2 is "the arrival happens 220 m out where only one drone can see it and the fleet has to be told." The facing slot is often not the seer (largest gap on the ring). A report that stops at one hop never reaches the drone that can still intercept. Forwarding the author's frame is what the hop metric measures, and it is cheaper than re-originating. Committing on hearsay is what turns a shared picture into a kill; D11's "hearsay never intercepts" was the bug that left Fly with a null target, not a principle. store_id plus absorb-into-local when the interceptor gets a sensor track is the fix. The association machinery (pose, velocity, time, class — no `track_id`) is the same piece insider detection will need.
+
+**Cost accepted:** from s3, an unverified peer can send us chasing a ghost or a civilian. Range-vs-claim on the first hop still applies to heartbeats; TrackReport hops are currently trusted. We will have to refuse or discount a report whose velocity extrapolates the wrong way before naming this a defence. Flooding TrackReports still costs bytes; s2 budget is 3072, headroom 64. Hop 4 on a 16-drone 75 m ring is more than the diameter (~2 hops) and will duplicate around the ring — SeenSet stops a second copy of the same (origin, seq).
+
+**Viewer:** Hops cue is a BFS tree on `links[]` from the selection (reachability, not a transcript). Disagree window lists declared calls plus fused `call … peer origin= hops= n= e=` lines. Pings no longer drop hearsay.
+
+**Measured, s2:** `propagation_p95_s` **0.09** s (was `null`), `max_hops_observed` 1, `hostiles_reached_asset` **3** (baseline 5). Same 3/6 as the last local-only ladder; the three late breaches are spent facing slots (drones 0–2 already used) whose clockwise successors sit off-axis and fail catchable until ~55 m. Peer `call` lines show hops 0–3 and n/e association. No `commit … peer` on this layout: UniqueOwner of the first three inbounds is already inside 60 m when the seer reports.
+
+**Measured, s1:** 6/6, civ 0, wasted 0, total **+134.3** (was +130.0). `p95` 0.05 s, hops 2.
+
+**Measured, 8 named scenarios:** worst **−511.1** (x2-b, was −524.6), mean **−108.2** (was −136.4), best **+160.3** (x1-b). x1-a 4/4 with 2 civilians (−51.0). x2-a still 2/4 (−297.9).
+
+
 
 
 

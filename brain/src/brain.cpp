@@ -10,6 +10,8 @@
 #include "protocol.h"
 #include "world.h"
 
+#include <cstdio>
+
 namespace {
 
 class SwarmBrain : public swarm::Brain {
@@ -115,7 +117,14 @@ private:
                     if (age > 2.0f) break;   // stale or replayed
                     const sw::Vec3 predicted = m.position + m.velocity * age;
                     store_.MergePeerReport(predicted, m.velocity, m.belief,
-                                           m.confidence, now);
+                                           m.confidence, now, h.origin, h.hops);
+                    if (h.hops + 1u <= sw::kMaxHops) {
+                        uint8_t relayed[SW_MTU];
+                        if (sw::RelayCopy(f.data, f.len, relayed, sizeof(relayed),
+                                          static_cast<uint8_t>(h.hops + 1u))) {
+                            outbox_.Push(relayed, f.len, sw::kPrioRelay, now);
+                        }
+                    }
                     break;
                 }
                 case sw::MsgType::Claim: {
@@ -130,11 +139,6 @@ private:
                 default:
                     break;
             }
-
-            // TODO(B4): multi-hop. On s2 the arrival is 220 m out and only one
-            // drone can see it, so a frame that stops here never reaches the
-            // drone that can act. Forward with a hop limit and a budget check,
-            // not the example's flood.
         }
     }
 
@@ -197,13 +201,20 @@ private:
             const char* verb = "drop";
             if (t.belief == sw::Belief::Wreckage) verb = "wreck";
             else if (t.belief != sw::Belief::Unknown) verb = "call";
+            char extra[72]{};
+            if (!t.has_local_id) {
+                std::snprintf(extra, sizeof(extra),
+                              " peer origin=%u hops=%u n=%.0f e=%.0f",
+                              t.last_origin, t.last_hops,
+                              t.position.x, t.position.y);
+            }
             host().Logf("%s trk=%u %s miss=%.1f first=%.1f score=%.2f align=%.2f close=%.1f%s",
                         verb,
                         t.has_local_id ? t.track_id : 0,
                         sw::BeliefName(t.belief),
                         miss, t.miss_at_first < 0.0f ? miss : t.miss_at_first,
                         t.closing_score, align, closing,
-                        t.has_local_id ? "" : " peer");
+                        extra);
             t.logged_belief = t.belief;
         }
     }

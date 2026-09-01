@@ -231,6 +231,15 @@ struct Track {
     /// same bug the example brain has in its seen[] table.
     bool has_local_id = false;
 
+    /// Store-local identity, including hearsay. Policy commits key on this
+    /// because track_id is 0 on a peer report and Find() would miss it (D18).
+    uint32_t store_id = 0;
+
+    /// Last peer report that fused into this row. Viewer reconstructs the
+    /// hoppable call; later insider detection wants the same origin.
+    uint8_t last_origin = 0;
+    uint8_t last_hops = 0;
+
     Vec3 position{};
     Vec3 velocity{};
     Quat attitude{};

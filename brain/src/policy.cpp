@@ -65,15 +65,12 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
     const float now = obs.time();
     last_log_[0] = '\0';
 
-    // Re-resolve the target pointer every tick: the store's storage moves as
-    // tracks are erased, so a pointer held across a tick is a dangling read.
-    // Find() only matches local ids, including 0 — a hearsay row also sits at
-    // 0 with has_local_id false, so we must not treat target_id_ == 0 as
-    // "no target" (that stuck drones in Committed while Fly saw a null and
-    // cruised the ring). D11.
+    // Re-resolve the target every tick: the store's storage moves as tracks
+    // are erased. Hearsay has no local id, so we key on store_id and
+    // re-associate by geometry if a local track absorbed the row (D18).
     target_ = nullptr;
     if (stance_ == Stance::Committed) {
-        target_ = store.Find(target_id_);
+        target_ = ResolveTarget(store);
         const char* why = nullptr;
         if (!target_)
             why = "lost";
@@ -84,10 +81,12 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
         if (why) {
             LogAbort(why, target_id_, target_, obs);
             last_abort_id_ = target_id_;
+            last_abort_store_id_ = target_store_id_;
             last_abort_at_ = now;
-            target_ = nullptr;
-            target_id_ = 0;
+            BindTarget(nullptr);
             stance_ = Stance::Picketing;
+        } else {
+            BindTarget(target_);
         }
     }
 
@@ -104,8 +103,7 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
             if (key < best_key) { best_key = key; candidate = &t; }
         }
         if (candidate) {
-            target_ = candidate;
-            target_id_ = candidate->track_id;
+            BindTarget(candidate);
             committed_at_ = now;
             stance_ = Stance::Committed;
             const float rng = swarm::Distance(candidate->position, obs.position());
@@ -116,9 +114,11 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
             const float ttg = TimeToCylinder(candidate->position, candidate->velocity,
                                              cfg_.asset, cfg_.asset_radius);
             std::snprintf(last_log_, sizeof(last_log_),
-                          "commit trk=%u score=%.2f miss=%.1f rng=%.0f close=%.1f ttg=%.1f",
-                          candidate->track_id, candidate->closing_score, miss, rng,
-                          closing, ttg);
+                          "commit trk=%u score=%.2f miss=%.1f rng=%.0f close=%.1f ttg=%.1f n=%.0f e=%.0f%s",
+                          candidate->has_local_id ? candidate->track_id : 0,
+                          candidate->closing_score, miss, rng, closing, ttg,
+                          candidate->position.x, candidate->position.y,
+                          candidate->has_local_id ? "" : " peer");
         }
     }
 
@@ -267,7 +267,6 @@ Vec3 Policy::PicketGoal(const TrackStore& store, float now) const {
                                  ring_radius_, ring_altitude_);
     for (const Track& t : store.tracks()) {
         if (t.belief != Belief::Hostile) continue;
-        if (!t.has_local_id) continue;
         if (OwnsInbound(t, now)) continue;
         const uint32_t facing = FacingSlot(t.position, cfg_.asset, cfg_.fleet_size);
         const uint32_t owner = UniqueOwner(facing, cfg_.fleet_size, cfg_.drone_id,
@@ -282,21 +281,24 @@ Vec3 Policy::PicketGoal(const TrackStore& store, float now) const {
 }
 
 bool Policy::ShouldCommit(const Track& t, const swarm::Observation& obs) const {
-    // Spend the airframe only on a local Hostile we can actually catch.
-    // Hearsay sits at track_id 0; committing to it left Fly with a null
-    // target and the drone "committed" on the ring until timeout.
-    if (!t.has_local_id) return false;
+    // Spend the airframe on a fresh Hostile we can catch. Hearsay is allowed
+    // on s2: the drone that sees a 220 m inbound is not the one that can
+    // intercept it, and a report that stops at one hop never gets there (D18).
+    // track_id 0 used to park a picket on the ring; BindTarget keys on
+    // store_id so Fly still has a pose.
     if (t.belief != Belief::Hostile) return false;
     // A Hostile latch that is older than a real intercept is wreckage or a
     // mate we failed to ID. Neighbours of a spent owner chased those for 12 s
     // and missed s1 hostile_4, which they had already called.
     if (obs.time() - t.belief_since > kFreshHostile) return false;
-    if (t.track_id == last_abort_id_ &&
-        obs.time() - last_abort_at_ < kRecommitHold) return false;
+    if (obs.time() - last_abort_at_ < kRecommitHold) {
+        if (t.store_id != 0 && t.store_id == last_abort_store_id_) return false;
+        if (t.has_local_id && last_abort_id_ != 0 && t.track_id == last_abort_id_)
+            return false;
+    }
     if (!OwnsInbound(t, obs.time())) return false;
 
     const float range = swarm::Distance(t.position, obs.position());
-    if (range > cfg_.sense_radius) return false;
     const float closing = ClosingSpeed(obs.position(), obs.velocity(),
                                        t.position, t.velocity);
     // flight.h: a stern chase against the same 6.7 m/s² bound does not
@@ -327,7 +329,6 @@ const char* Policy::AbortReason(const Track& t, const swarm::Observation& obs) c
     const float now = obs.time();
     if (now - committed_at_ > kAbortAfter) return "timeout";
     if (t.belief != Belief::Hostile) return "not-hostile";
-    if (!t.has_local_id) return "lost";
 
     const float closing = ClosingSpeed(obs.position(), obs.velocity(),
                                        t.position, t.velocity);
@@ -368,6 +369,28 @@ Vec3 Policy::DesiredPosition(const swarm::Observation& obs) const {
     }
     (void)obs;
     return picket_goal_;
+}
+
+Track* Policy::ResolveTarget(TrackStore& store) {
+    if (target_store_id_ != 0) {
+        if (Track* t = store.FindByStoreId(target_store_id_)) return t;
+    }
+    if (target_id_ != 0) {
+        if (Track* t = store.Find(target_id_)) return t;
+    }
+    return store.NearestHostile(last_target_pos_, 40.0f);
+}
+
+void Policy::BindTarget(Track* t) {
+    target_ = t;
+    if (!t) {
+        target_id_ = 0;
+        target_store_id_ = 0;
+        return;
+    }
+    target_id_ = t->has_local_id ? t->track_id : 0;
+    target_store_id_ = t->store_id;
+    last_target_pos_ = t->position;
 }
 
 void Policy::Declare(const swarm::Host& host, const TrackStore& store) const {
@@ -420,6 +443,7 @@ void Policy::Compose(Outbox<24>& outbox, TrackStore& store,
     // half the frame, so one-message-per-fact does not survive.
     for (Track& t : store.tracks()) {
         if (t.belief != Belief::Hostile) continue;
+        if (!t.has_local_id) continue;    // hearsay rides the author's frame (D18)
         if (now - t.last_reported < kReportEvery) continue;
 
         Writer w(buffer, sizeof(buffer));

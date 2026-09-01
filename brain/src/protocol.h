@@ -13,6 +13,13 @@ namespace sw {
 
 constexpr uint8_t kProtocolVersion = 1;
 
+/// Hop-limited forward of TrackReport. s2 spawn is 220 m out, comm 75 m, so
+/// three hops crosses the ring; four matches the example and leaves a spare.
+/// Relays sit below original reports and heartbeats so a flood cannot starve
+/// identity (D11) or the seer's own 0.5 s hostile reports (D18).
+constexpr uint8_t kMaxHops = 4;
+constexpr uint8_t kPrioRelay = 2;
+
 enum class MsgType : uint8_t {
     Heartbeat = 1,   // I am alive, here, at this time
     TrackReport = 2, // I see something, here, and I think it is this
@@ -144,6 +151,7 @@ struct Header {
     float sent_time = 0.0f;
 
     static constexpr uint32_t kBytes = 10;
+    static constexpr uint32_t kHopsOffset = 3;  // version, type, origin, hops
 
     void Write(Writer& w) const {
         w.U8(version);
@@ -171,6 +179,18 @@ struct Header {
         return true;
     }
 };
+
+/// Copy a received frame and stamp a new hop count. Origin, seq and
+/// sent_time stay the author's — that is what the simulator's hop metric
+/// and our SeenSet both key on. False if the buffer cannot hold the frame.
+inline bool RelayCopy(const uint8_t* src, uint32_t len,
+                      uint8_t* dst, uint32_t cap, uint8_t hops) {
+    if (src == nullptr || dst == nullptr) return false;
+    if (len < Header::kBytes || len > cap || len > SW_MTU) return false;
+    std::memcpy(dst, src, len);
+    dst[Header::kHopsOffset] = hops;
+    return true;
+}
 
 // ---------------------------------------------------------------------------
 // Payloads
