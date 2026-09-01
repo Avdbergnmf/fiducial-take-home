@@ -407,6 +407,23 @@ Claims were the half-built answer (`ClaimMsg` is on the wire format). D11 alread
 
 **Measured, `-Tier 1 -Count 6`:** 6/6 completed. `pair_friendly` **0**, wasted 0. Three layouts full clear (best +163.5). Three leaked one. Mean −26 on this draw (D11's +76 was six different tokens; kills did not drop on the fixtures we can compare).
 
+---
+
+## D16 — Yield and log pings as viewer cues, not new brain verbs
+
+**Options considered**
+
+1. Log `yield` whenever a picket's slot is pushed off an intercept corridor. Honest about the decision, costs the log budget on every ring neighbour that steps (D3: transitions only, overflow is `drone == -1`).
+2. Reconstruct the yield in the viewer from intercept spans + `params fsep=`, and draw log-named relations (call / drop / wreck / near / ram / duplicate abort) as 1.4 s fading lines associated the same way Intercept already associates `trk=`.
+
+**Chosen:** 2.
+
+**Why:** the intercept cue is a line because the recording already has commit/abort. Yield is the same geometry with no extra verb — the picket is inside `friendly_margin` of an intercept you can already see. A yield log would fire often on a tight ring and buy a confirmation the overlay can replay from numbers it already quotes. Pings are the logs themselves; the only extra is the same observer-local → world-entity join Intercept already makes, held for 1.4 s so a scrub lands on them.
+
+**Cost accepted:** yield is drawn against interceptor→target (the red line), not the owner's empty ring slot the brain uses. Those agree while the interceptor is leaving the slot and drift as it closes. Yield rows in Logs are the same reconstruction, merged in at load as `yield` / `yield clear` so the chip can filter them — Raw is not a brain line; the tooltip says so. Hearsay (`peer`) pings have no world entity and stay off. A `drop` ping needs a declaration that disappeared in the last 0.15 s; a drop without a prior call has nothing to aim at.
+
+---
+
 
 
 
