@@ -45,11 +45,13 @@ Vec3 ProNav(const Vec3& self_position, const Vec3& self_velocity,
 /// Known friendlies (heartbeat-matched tracks) use at least `friendly_margin`,
 /// or v_close²/(2a)+4·kill when closing faster than cruise. The closing
 /// component of the command is cancelled. Inside 3 kill-radii the intercept
-/// is abandoned and we accelerate away. Unknown traffic still gets the small
-/// `separation_margin` blend — a tendency, not a guarantee.
+/// is abandoned and we accelerate away.
 ///
-/// `exempt` is the one track we are deliberately ramming, if any. A mate is
-/// never exempt.
+/// Unknown / civilian / wreckage use the same arrest distance when closing
+/// (D12). The 4 m `separation_margin` is the floor for tracks that are not
+/// closing — a static 19 m around every unknown collapses the ring (D8).
+/// The intercept target is still a blend, not a cancel: we have to be
+/// allowed to ram it. `exempt` is that track. A mate is never exempt.
 Vec3 EnforceSeparation(const Vec3& desired, const Vec3& position, const Vec3& velocity,
                        const FixedVec<Track, kMaxTracks>& tracks,
                        const Config& cfg, const Track* exempt);

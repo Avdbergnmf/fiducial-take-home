@@ -327,4 +327,63 @@ The y = 1 m "hit" was the viewer's marker: EnvironmentView scaled the 2 m-tall c
 
 **Measured, `-Tier 1 -Count 6`:** 6/6 completed. 0 civilians, 0 wasted, 0 `pair_friendly` on all six. Four layouts 3/3 or 4/4 and positive (best +215). Two leaked one (2/3 and 3/4, worst −110). Mean +76. The over-fit failure mode would have been s1-perfect and generated-zero; this is not that.
 
+---
+
+## D12 — Unknown traffic gets the arrest distance, not a 4 m floor
+
+**The guess:** `separation_margin = kill_radius · 4 = 4 m` around unknown/civilian. Arresting 16 m/s with 6.7 m/s² needs `v²/(2a) ≈ 19 m`. At 4 m the drone has 0.25 s to shed 16 m/s, which needs 64 m/s² — about 10× too late.
+
+**Options considered**
+
+1. Raise the static floor to 19 m for everyone. D8 already refused this: 19 m around every track on a 75 m / 16-drone ring (neighbours 29 m apart) is a permanent repulsion. Formation dies.
+2. Leave 4 m. Honest about the ring, and after G1/D8 the leftover s1/x1-a civilian losses are not our rams (x1-a two `civilian_lost` at t=1.1, no `friendly_lost`, no `pair_neutral`). The kinematics are still wrong the next time we *do* close on a chord.
+3. Keep 4 m as the *non-closing* floor, and grow unknown/civilian/wreckage to `v_close²/(2a)+4·kill` when the pair is actually closing — the same arrest D8 already uses for mates. Do not cancel the closing command (the intercept target must still be rammable) and do not panic.
+
+**Chosen:** 3.
+
+Neighbours on the ring are not closing, so they stay on the 4 m floor and the ring holds. A civilian or wreckage closing at 16 m/s gets 19 m, in time for the lateral bound. The intercept `exempt` is unchanged. Mates still cancel closing and panic inside 3 kill-radii.
+
+**Cost accepted:** an interceptor can be shoved off a dash by a civilian that enters the arrest bubble. That is the G1 trade written as a manoeuvre rather than as a class. s1 did not pay it.
+
+**Measured:** s1 6/6, civ 0, total **+130.9** — identical to D11, so the new bubble is not the thing that was catching intercepts. x1-a 4/4, civ 2 at t=1.1 with no `pair_neutral` (unchanged; those two are not our collisions).
+
+---
+
+## D13 — Local tracks die with the sensor picture
+
+**The guess:** `kDropAfter = 3.0 s`. `--dump-params` on s1 says `sense.track_drop_time=2.0`. Holding a second past the simulator is a frozen Hostile at the last pose — D11's neighbours chased those for 12 s and missed the next inbound.
+
+**Options considered**
+
+1. Set 3.0 → 2.0 to match s1's dump-params. CHALLENGE.md §3 says drop time is unpublished and *varies between missions*. Fitting 2.0 is the same class of mistake as fitting `|| ttg < 12`.
+2. Keep 3.0 to outlive a short dropout. Costs the ghost latch D11 had to paper over.
+3. Drop a *local* track the moment it is absent from `obs.tracks()`. The simulator already made the decision (destroyed vanish next tick; out-of-range after its private hold). Hearsay is not in that list and keeps a 2 s age-out (four missed 0.5 s reports).
+
+**Chosen:** 3. The unpublished number is measured by absence, not guessed.
+
+**Cost accepted:** a one-tick sensor dropout now forgets the track and the next look is a new `track_id` with evidence from zero. s1 `dropout_prob=0`, so this did not fire. A mission with dropouts will re-learn class; that is the published ABI.
+
+**Measured, s1:** 6/6, civ 0, 3 wrong, total **+131.3** (was +130.9). Awareness 54.4 vs 53.9 — fewer stale declarations, not a new intercept trick.
+
+---
+
+## D14 — Extrapolate peer reports, then associate at 8 m
+
+**The guess:** `kGate = 12 m` to fuse a peer's track report onto a local track. The comment said to size it from `fix_sigma` and latency; the arithmetic on dump-params is ~3–4 m, not 12. 12 m merges two aircraft. 4 m (sigmas only, after extrapolating age) *duplicated* the same aircraft: 2089 `call` transitions on s1, comms 26 vs 36.
+
+**Options considered**
+
+1. Shrink 12 → 3 because the comment's own formula says so. Ignores outbox delay and unmodelled turn. Measured: duplicates, log flood, comms collapse.
+2. Leave 12. Still fuses two craft 10 m apart. Latency motion is still inside the gate, so extrapolation would be free lunch left on the table.
+3. Extrapolate the payload by measured `now − sent_time` (same as heartbeat; latency is unpublished, this is the measurement), drop reports older than 2 s, and associate at 8 m: `2·1.2 + 3·√2·0.35 + 0.2 s · 16 m/s ≈ 7 m`, rounded. 4 m was the sigma-only number and failed in flight.
+
+**Chosen:** 3.
+
+**Cost accepted:** two aircraft inside 8 m still merge. A report whose velocity is a lie (tier 3) is extrapolated the wrong way and may miss the real track — it then sits as hearsay, which D11 will not intercept. Multi-hop (s2, 220 m) is still the missing piece; this only makes the one-hop fuse honest.
+
+**Measured:** s1 6/6, civ 0, total **+130.0**, comms 35.5, 694 log lines (4 m gate was 2245 lines / comms 25.9). s2 1/6 → **2/6**, −902 → **−700**, civ 0. One extra fused intercept, not a new guidance trick.
+
+
+
+
 

@@ -14,13 +14,15 @@ class TrackStore {
 public:
     void Configure(const Config& cfg) { cfg_ = cfg; }
 
-    /// Fold this tick's sensor picture in. Tracks not seen for a while are
-    /// dropped: a destroyed entity vanishes from the list with no notification,
-    /// so absence is all the evidence you ever get.
+    /// Fold this tick's sensor picture in. Local tracks absent from it are
+    /// dropped immediately: a destroyed entity vanishes with no notification,
+    /// and the out-of-range hold is unpublished and varies (CHALLENGE.md §3).
+    /// Hearsay ages out separately.
     void Update(const swarm::Observation& obs);
 
-    /// Fold in a peer's report. Associates by geometry and time, because
-    /// track_id is observer-local and means nothing here.
+    /// Fold in a peer's report. Position should already be extrapolated to
+    /// `now` (caller measured age from sent_time). Associates by geometry
+    /// because track_id is observer-local.
     void MergePeerReport(const Vec3& position, const Vec3& velocity,
                          Belief peer_belief, uint8_t confidence, float now);
 

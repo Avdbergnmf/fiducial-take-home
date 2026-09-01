@@ -6,6 +6,12 @@ namespace {
 
 constexpr float kPi = 3.14159265358979f;
 
+float ArrestDistance(float closing, const Config& cfg) {
+    if (closing <= 0.0f) return 0.0f;
+    return (closing * closing) / (2.0f * cfg.lateral_limit)
+           + 4.0f * cfg.kill_radius;
+}
+
 }  // namespace
 
 Vec3 LimitAccel(const Vec3& desired, const Config& cfg) {
@@ -93,13 +99,12 @@ Vec3 EnforceSeparation(const Vec3& desired, const Vec3& position, const Vec3& ve
         const Vec3 rel_velocity = velocity - t.velocity;
         const float closing = -swarm::Dot(rel_velocity, away);
 
-        // Floor is cruise-vs-picket (friendly_margin, ~19 m on s1) so the
-        // ring still fits. Two interceptors close faster than cruise; size
-        // the bubble from this pair's closing speed so we start in time.
+        // Floor: mates get cruise-arrest (~19 m) so the ring still fits;
+        // unknown gets 4·kill for drift. When a pair is closing, both grow
+        // to v_close²/(2a)+4·kill so we start in time. D8/D12.
         float margin = mate ? cfg.friendly_margin : cfg.separation_margin;
-        if (mate && closing > 0.0f) {
-            const float stop = (closing * closing) / (2.0f * cfg.lateral_limit)
-                               + 4.0f * cfg.kill_radius;
+        if (closing > 0.0f) {
+            const float stop = ArrestDistance(closing, cfg);
             if (stop > margin) margin = stop;
         }
         if (d > margin) continue;
@@ -127,7 +132,8 @@ Vec3 EnforceSeparation(const Vec3& desired, const Vec3& position, const Vec3& ve
     if (!any) return desired;
 
     // For mates the closing component of the command is cancelled first (D8).
-    // Unknown traffic is still a blend: under saturation it can close.
+    // Unknown traffic is a blend of desired + avoid, sized to actually
+    // arrest (D12). Under saturation it can still close.
     return LimitAccel(desired + avoid, cfg);
 }
 

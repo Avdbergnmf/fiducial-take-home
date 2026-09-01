@@ -3,7 +3,7 @@
 namespace sw {
 namespace {
 
-constexpr float kDropAfter = 3.0f;         // s without an update before we forget
+constexpr float kHearsayDrop = 2.0f;       // s; local tracks drop with the sensor picture
 constexpr float kEvidenceForCall = 0.6f;   // s of aimed geometry to name Hostile
 constexpr float kScoreDecay = 0.6f;        // per second, toward zero
 constexpr float kSureHit = 5.0f;           // m; aimed-dash CPA, well above fix_sigma 0.35
@@ -152,9 +152,16 @@ void TrackStore::Update(const swarm::Observation& obs) {
         Classify(*t, now, dt);
     }
 
-    // Forget anything stale. Iterate backwards so erase() cannot skip an entry.
+    // Local tracks: the simulator already dropped them from obs.tracks()
+    // (destroyed vanish the next tick; out-of-range after an unpublished
+    // few seconds — CHALLENGE.md §3). Holding them 3 s was a frozen Hostile
+    // at the last pose, which is how D11's neighbours chased ghosts.
+    // Hearsay is not in the sensor picture; it ages out on last_update.
     for (uint32_t i = tracks_.size(); i > 0; --i) {
-        if (now - tracks_[i - 1].last_update > kDropAfter) tracks_.erase(i - 1);
+        Track& t = tracks_[i - 1];
+        const float age = now - t.last_update;
+        const bool stale = t.has_local_id ? age > 1e-4f : age > kHearsayDrop;
+        if (stale) tracks_.erase(i - 1);
     }
 }
 
@@ -224,11 +231,12 @@ void TrackStore::Classify(Track& t, float now, float dt) {
 
 void TrackStore::MergePeerReport(const Vec3& position, const Vec3& velocity,
                                  Belief peer_belief, uint8_t confidence, float now) {
-    // Association gate: both our fix and theirs are wrong by a bit, and the
-    // report is a few hundred ms stale, so the gate has to be generous.
-    // TODO(next): size this from fix_sigma and the measured link latency
-    // rather than a constant.
-    constexpr float kGate = 12.0f;
+    // Association after extrapolating by measured age (D14). 4 m (sigmas
+    // only) duplicated the same aircraft: 2089 class transitions on s1 and
+    // comms 26 vs 36. Leftover after extrapolation is two biases plus any
+    // unmodelled turn while a report sat in the outbox:
+    // 2·1.2 + 3·√2·0.35 + 0.2 s · 16 m/s ≈ 7 m. 8 m is that, rounded.
+    constexpr float kGate = 8.0f;
 
     Track* t = NearestTo(position, kGate);
     if (t && t->belief == Belief::Friendly)

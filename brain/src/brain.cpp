@@ -107,7 +107,14 @@ private:
                     sw::TrackReportMsg m;
                     m.Read(r);
                     if (!r.ok()) break;
-                    store_.MergePeerReport(m.position, m.velocity, m.belief,
+                    // Same trick as the heartbeat: payload is as-sent, we
+                    // associate against where they are now. Age is measured
+                    // (now − sent_time); latency is unpublished. D14.
+                    float age = now - h.sent_time;
+                    if (age < 0.0f) age = 0.0f;
+                    if (age > 2.0f) break;   // stale or replayed
+                    const sw::Vec3 predicted = m.position + m.velocity * age;
+                    store_.MergePeerReport(predicted, m.velocity, m.belief,
                                            m.confidence, now);
                     break;
                 }

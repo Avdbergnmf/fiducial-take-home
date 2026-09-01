@@ -134,9 +134,10 @@ struct Config {
     /// A hostile has exactly the same bound, so a stern chase never converges.
     float lateral_limit = 6.7f;
 
-    /// How close two aircraft may get before we treat it as a loss. The kill
-    /// radius applies to friendly-friendly with no exceptions, so this needs a
-    /// real margin over it, not a token one.
+    /// Drift floor around unknown/civilian tracks. Not the arrest distance —
+    /// that is v_close²/(2a)+4·kill, applied when the pair is closing (D12).
+    /// A static 19 m here collapses the 75 m ring (D8). 4·kill is a few
+    /// radii of slop for tracks that are not closing.
     float separation_margin = 0.0f;
 
     /// Floor keep-out around an identified mate. Sized to arrest cruise with
@@ -169,7 +170,7 @@ struct Config {
         c.arena_max = b.arena_max;
 
         c.lateral_limit = 9.81f * std::tan(b.max_tilt);
-        c.separation_margin = b.kill_radius * 4.0f;   // unknown/civilian; see DESIGN.md
+        c.separation_margin = b.kill_radius * 4.0f;   // non-closing floor; D12
         // Arrest 14 m/s (our cruise, brain.cpp) with lateral_limit, then four
         // kill radii. On s1 that is ~19 m; 16 drones on a 75 m ring sit 29 m
         // apart, so the picket does not sit inside this bubble. D8.

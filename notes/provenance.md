@@ -22,9 +22,10 @@ Serialisation widths, enum values and struct sizes are omitted: they are self-ju
 | SPEC / SCENARIO / MEASURED / DERIVED | 15 |
 | **GUESS** | **31** |
 
-The brain is mostly guesses. That is not automatically wrong — the brief refuses to publish
-loss, latency and track-drop times on purpose — but two of the guesses are currently costing
-380 points a run. See [Ranked guesses](#ranked-guesses).
+The brain is still mostly guesses. That is not automatically wrong — the brief
+refuses to publish loss, latency and track-drop times on purpose. The ranked
+list below is the ones that were costing runs; D2/D7/D11/D12/D13/D14 took
+the first five.
 
 ---
 
@@ -43,26 +44,20 @@ loss, latency and track-drop times on purpose — but two of the guesses are cur
 | world.h:125 | `asset_radius` | 30.0 | SCENARIO value, **MEASURED shape: cylinder** | `s1.json` `params.asset.radius = 30`; `--dump-params` has no height/shape. s1 breaches: last pose horiz 30.8 m, alt 6.75 m, 3D 31.5 m; event 0.06 s later (cylinder crossing), not 0.10 s (sphere). D10. | Radius yes. Treating it as a sphere is wrong. |
 | world.h:132 | `lateral_limit` default | 6.7 | DERIVED | 9.81 · tan(0.6) = 6.7117 | Yes. |
 | world.h:161 | `lateral_limit` computed | `9.81 · tan(max_tilt)` | SPEC | CHALLENGE.md §5.4: "bounded by `g·tan(max_tilt)` — around 6.7 m/s² where `max_accel` reads 15". Independently restated in `s1.json` `_evasion`: "g*tan(max_tilt) = 6.7 m/s^2 and not max_accel" | **Yes — the best-sourced constant in the brain.** Cited in two places and used correctly everywhere. |
-| world.h:167 | `separation_margin` | `kill_radius · 4.0` = **4.0 m** | **GUESS** | Unknown/civilian blend only (D8). The `4.0` has no source. | Still too small to arrest traffic; left small *because* 19 m around every track collapses the ring. See below. |
+| world.h:167 | `separation_margin` | `kill_radius · 4.0` = **4.0 m** | **DERIVED** as a *floor* | Non-closing unknown/civilian drift (D12). Arrest is `v_close²/(2a)+4·kill` when closing. | Yes as a floor. A static 19 m still collapses the ring (D8). |
 | world.h:171 | `friendly_margin` | `14² / (2 · lateral) + 4 · kill` ≈ **18.6 m** on s1 | **DERIVED** | Arrest cruise (14 m/s, `brain.cpp`) with the lateral bound, plus four kill radii. D8. Neighbour chord on the 75 m / 16-drone ring is 29 m, so a picket is not inside a neighbour's bubble. | Yes, jointly with the ring. |
 
-**`separation_margin` — why 4.0 m cannot work.** Arresting a closing speed `v` with the
-lateral authority `a` = 6.7 m/s² needs `v²/(2a)` metres. An s1 civilian crosses at ~16 m/s
-(`s1.json` `adv.enemy_dash_speed=16`, civilians "at a similar speed"), and a drone cruising
-at 14 m/s (`brain.cpp:141`) can close on one at up to ~30 m/s:
+**`separation_margin` — 4.0 m is the floor, not the arrest (D12).** Arresting a
+closing speed `v` with lateral authority `a` = 6.7 m/s² needs `v²/(2a)` metres.
+That distance is now computed per pair when `closing > 0`, for mates *and*
+unknown traffic. The 4 m constant is what we keep around a track that is not
+closing, so a 16-drone ring of radius 75 (neighbours 29 m) still fits. A static
+19 m around every unknown remains the option D8 refuses.
 
 | closing speed | distance needed to arrest it |
 |---|---|
 | 16 m/s | 256 / 13.4 = **19.1 m** |
 | 30 m/s | 900 / 13.4 = **67.2 m** |
-
-At 4 m the drone has 0.25 s to shed 16 m/s, which needs 64 m/s² against 6.7 available —
-roughly **10× too late**. The margin is sized for drift, not for traffic.
-*Too low:* collisions the avoidance term cannot prevent — observed, twice, in the first
-8.4 s. *Too high:* the ring cannot hold station (neighbours 29 m apart on a 16-drone ring of
-radius 75) and every drone permanently repels every other, so nothing holds formation.
-A margin near 20 m and a ring radius of 75 m are not simultaneously satisfiable — which is
-the real finding: **the margin and the ring geometry have to be designed together.**
 
 ---
 
@@ -70,7 +65,7 @@ the real finding: **the margin and the ring geometry have to be designed togethe
 
 | file:line | name | value | category | source | defensible? |
 |---|---|---|---|---|---|
-| belief.cpp:6 | `kDropAfter` | 3.0 s | **GUESS** | Sim's own value is `sense.track_drop_time=2.0` (`--dump-params`, `s1.json`) | Arguable, and inconsistent with the sim. We hold a track 1 s after the simulator retired it. The brief (§3) says the drop time is "not published" and varies — but on s1 it is measurable and it is 2.0. *Too high:* acting on tracks that no longer exist, and a reacquired entity arrives under a **new** `track_id` and becomes a duplicate. *Too low:* losing a track through a momentary dropout and re-learning its class from zero. |
+| belief.cpp:6 | `kHearsayDrop` | 2.0 s | **DERIVED** (weakly) | Local tracks drop when absent from `obs.tracks()` (D13). Hearsay only: four missed 0.5 s reports (`kReportEvery`). | Not the sim's unpublished `track_drop_time`. |
 | belief.cpp:7 | `kEvidenceForCall` | 0.6 | **GUESS**, G3 | Was 1.2. Units are seconds of aimed geometry. D11: moved after the commit rule was spending the facing drone. | s1: 6/6, civ 0, 3 wrong (same as 1.2). *Too low:* civilian FPs on generated chords. |
 | belief.cpp:8 | `kScoreDecay` | 0.6 /s | **GUESS** | none | Asymmetric with the +1.0/s accrual, so evidence builds ~1.7× faster than it decays. That bias is toward false positives. *Too high:* flickering beliefs. *Too low:* a stale hostile call never clears. |
 | belief.cpp:29 | alignment speed deadband | 0.5 m/s | **GUESS** | none | Low-risk. Prevents a divide-by-noise on a hovering track. |
@@ -92,7 +87,7 @@ the real finding: **the margin and the ring geometry have to be designed togethe
 | belief.cpp:160/162 | closing_score clamps | [−2, **3**] and [−2, **4**] | **GUESS** | none | **Inconsistent**: the accrual caps at 3.0 so the 4.0 decay bound is unreachable. Same class of sloppiness as :129. |
 | belief.cpp:161 | alignment release | 0.3 | **GUESS** | none | Hysteresis band 0.3–0.8. Reasonable shape, unjustified values. |
 | belief.cpp:181 | belief-clear threshold | 0.2 | **GUESS** | none | Low-risk. |
-| belief.cpp:193 | `kGate` peer association | 12.0 m | **GUESS** | Comment says to size it from `fix_sigma` + latency; `--dump-params` gives `sense.fix_sigma=0.35`, `sense.fix_bias_sigma=1.2`, `comm.latency_ticks=2`, `jitter 1` | Too loose by its own argument: two fixes at σ=0.35 plus 1.2 m bias plus 3 ticks × 16 m/s ≈ 0.5 m of staleness is ~3 m, not 12. *Too high:* two distinct aircraft merge into one track. *Too low:* the same aircraft becomes two tracks and peer reports never fuse. |
+| belief.cpp | `kGate` peer association | 8.0 m | **DERIVED**, then **MEASURED** | After extrapolating by `now−sent_time` (D14). 2·bias 1.2 + 3·√2·σ 0.35 + 0.2 s·16 m/s ≈ 7 m. | 4 m duplicated tracks (s1 comms 26, 2089 calls). 12 m merged distinct aircraft. 8 m holds s1 and gained a kill on s2. |
 | belief.cpp:215 | confidence scale | `/255.0` | **DERIVED** | `TrackReportMsg::confidence` is `uint8_t` | Yes. |
 | belief.cpp:234 | tie-break weight | `d · 0.001` | **GUESS** | none | 1000 m of range = 1 s of time-to-go. Effectively a tiebreak only. See code-map: the comment claims more than the code does. |
 
@@ -162,13 +157,12 @@ plus 3D miss (D2, D7). Horizontal leftover chords were the D7 case.
 
 1. ~~**`belief.cpp:157` `asset_radius · 0.8` (24 m miss gate)**~~ **Done (D2, D7).**
    Replaced by `AimedAtAsset`. Horizontal miss ≲ 5 m at altitude is D7 (3D miss).
-2. **`world.h:167` `kill_radius · 4.0` (4 m unknown-traffic margin)** — still ~5× too
-   small for civilian closing speeds. D8 added a kinematic `friendly_margin` (~19 m)
-   for *identified mates* only; raising the unknown margin to 19 m without growing
-   the 75 m ring is the option D8 refuses. Remaining ram risk is ID failure and
-   civilian chords.
-3. **`belief.cpp:6` `kDropAfter` 3.0 s** — contradicts the sim's measured
-   `sense.track_drop_time = 2.0`. Cheap to align; ask whether you *want* to outlive it.
-4. **`belief.cpp:193` `kGate` 12 m** — too loose by its own stated reasoning (~3 m from
-   measured sigmas). Matters more from s2 on, when peer reports carry the load.
+2. ~~**`world.h:167` `kill_radius · 4.0` (4 m unknown-traffic margin)**~~ **Done (D12).**
+   4 m is the non-closing floor. Closing unknown/civilian/wreckage grow to
+   `v_close²/(2a)+4·kill`. Static 19 m around everyone remains refused (D8).
+3. ~~**`belief.cpp:6` `kDropAfter` 3.0 s**~~ **Done (D13).** Local tracks drop
+   when they leave `obs.tracks()`. The sim's hold is unpublished and varies;
+   absence is the measurement. Hearsay keeps 2 s.
+4. ~~**`belief.cpp` `kGate` 12 m**~~ **Done (D14).** Extrapolate by measured age,
+   then 8 m. 4 m (sigmas only) duplicated tracks; 12 m merged them.
 5. ~~**`policy.cpp` `|| ttg < 12`**~~ **Done (D11).** Commit is local Hostile + relative closing + catchable vs the cylinder. The remaining G3 knob is `kEvidenceForCall` (row above): raising it late-commits, lowering it re-opens G1.
