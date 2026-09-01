@@ -1,9 +1,11 @@
-// test_policy.cpp -- unique allocation. G4: one drone per inbound, not both
-// neighbours of a silent facing slot.
+// test_policy.cpp -- unique allocation and the yield corridor.
+// G4: one drone per inbound, not both neighbours of a silent facing slot.
+// D17: yield is remaining flight to the predicted ram, not slot→hostile.
 
 #include "flight.h"
 #include "policy.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -64,9 +66,52 @@ static void TestUniqueOwnerIsOneDrone() {
     CHECK(UniqueOwner(15, n, 14, heard, now) == 0);
 }
 
+static float Horiz(const Vec3& a, const Vec3& b) {
+    const float dx = a.x - b.x;
+    const float dy = a.y - b.y;
+    return std::sqrt(dx * dx + dy * dy);
+}
+
+static void TestYieldHorizonIsRemainingFlight() {
+    std::printf("yield corridor is remaining flight, not the full chord\n");
+    // s1-like: picket on the 75 m ring, hostile 95 m further inbound at 16 m/s.
+    // Assumed cruise 14 + inbound 16 = 30 m/s closing. t_meet = 95/30 ≈ 3.2 s.
+    // Horizon is ~51 m along the LOS (cruise × (t_meet + 0.5 s)), not 95 m.
+    const Vec3 from(75.0f, 0.0f, -30.0f);
+    const Vec3 hostile(170.0f, 0.0f, -40.0f);
+    const Vec3 inbound(-16.0f, 0.0f, 0.0f);
+    const float clear = 19.0f;
+
+    const Vec3 end = CorridorHorizon(from, hostile, inbound);
+    CHECK(end.x > 120.0f && end.x < 135.0f);
+    CHECK(std::fabs(end.y) < 0.5f);
+    CHECK(Horiz(from, end) < Horiz(from, hostile) - 20.0f);
+
+    // A picket sitting beside the hostile's *current* pose is on the old
+    // full chord (12 m off a 95 m line) and off the remaining flight
+    // (≈40 m from the horizon). Full-chord yield was the nonsense move.
+    const Vec3 far(165.0f, 12.0f, -30.0f);
+    const Vec3 old_goal = YieldOffCorridor(far, from, hostile, clear);
+    CHECK(Horiz(old_goal, far) > 1.0f);
+    const Vec3 new_goal = YieldOffCorridor(far, from, end, clear);
+    CHECK(Horiz(new_goal, far) < 0.1f);
+
+    // A picket on the remaining path still steps off.
+    const Vec3 on_path(100.0f, 8.0f, -30.0f);
+    const Vec3 stepped = YieldOffCorridor(on_path, from, end, clear);
+    CHECK(Horiz(stepped, on_path) > 1.0f);
+
+    // Outbound: assumed cruise is not closing. Degenerate corridor, no yield.
+    const Vec3 outbound(16.0f, 0.0f, 0.0f);
+    const Vec3 none = CorridorHorizon(from, hostile, outbound);
+    CHECK(Horiz(none, from) < 0.1f);
+    CHECK(Horiz(YieldOffCorridor(far, from, none, clear), far) < 0.1f);
+}
+
 int main() {
     TestFacingSlotMatchesRing();
     TestUniqueOwnerIsOneDrone();
+    TestYieldHorizonIsRemainingFlight();
 
     if (g_failures == 0) {
         std::printf("policy: all passed\n");

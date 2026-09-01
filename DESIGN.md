@@ -135,9 +135,11 @@ Hostile (call younger than 6 s), the unique facing ring slot (first live drone
 clockwise if that slot's heartbeat is gone — one successor, not both
 neighbours), relative closing ≥ 1 m/s, and arrive 0.5 s before the cylinder.
 A Friendly already flying at that hostile is the interceptor; the farther
-drone aborts. Pickets step off the owner's corridor, and the interceptor does
-not cancel ProNav to dodge them. ProNav itself is not the leak — the first s1
-intercept finished. A 6 s-old Hostile latch is wreckage; chasing those is how
+drone aborts. Pickets step off the *remaining* intercept flight — cruise ×
+(time-to-meet + 0.5 s), capped at the 12 s abort — not the whole slot-to-hostile
+chord. A picket sitting past the predicted ram is not traffic. The interceptor
+does not cancel ProNav to dodge them. ProNav itself is not the leak — the first
+s1 intercept finished. A 6 s-old Hostile latch is wreckage; chasing those is how
 a spent sector missed the next inbound.
 
 Raising classifier sensitivity is the remaining knob, and it is the expensive
@@ -220,8 +222,9 @@ collision.
 
 - **`ctest`:** `test_protocol` (truncation, version, garbage, outbox
   priority/expiry, seen-set zero-collision) and `test_policy` (facing slot,
-  unique owner is one drone clockwise). Classifier geometry lives in
-  `test_belief.cpp`; it is not on the ctest line.
+  unique owner is one drone clockwise, yield corridor is remaining flight
+  not the full chord). Classifier geometry lives in `test_belief.cpp`; it is
+  not on the ctest line.
 - **Determinism:** `scripts\determinism.ps1` — `--threads 1 --record` then
   `--threads 8 --replay`, and two identical runs. Compute timings stripped
   (not scored).

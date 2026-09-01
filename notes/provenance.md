@@ -111,7 +111,7 @@ closing, so a 16-drone ring of radius 75 (neighbours 29 m) still fits. A static
 | policy.cpp:OwnsInbound | ring-slot owner | facing slot, then first live clockwise | **DERIVED** | Same angle as `RingSlot`. Heartbeat liveness (D11/D15). | Unique always. D11's ±1 both-neighbours was the two-on-one. |
 | policy.cpp:ShouldCommit | commit gate | local, fresh Hostile, unique owner, no closer chaser, in-sense, `closing ≥ 1`, cruise-catch vs cylinder | **DERIVED** | Replaces `closing > −2 \|\| ttg < 12`. D11/D15. | Hearsay, ghosts, stern chases, and stacked intercepts refused. |
 | policy.cpp | `kChasingToward` | 5.0 m/s | **DERIVED** | Below cruise 14, above picket station-keeping. D15. | A mate flying at the hostile is the interceptor. |
-| policy.cpp | corridor yield | `friendly_margin` off owner-slot → hostile | **DERIVED** | D15. Neighbours at 29 m on s1 do not move. | Pickets on the line step aside so ProNav is not the traffic. |
+| policy.cpp | corridor yield | `friendly_margin` off remaining flight (cruise × min(t_meet+0.5 s, 12 s)) | **DERIVED** | D15 keep-out, D17 horizon. Same cruise / slack / abort as commit. Neighbours at 29 m on s1 do not move. | Pickets on the remaining path step aside. Past the predicted ram they do not. |
 | policy.cpp:AbortReason | non-closing abort | after 6.0 s, `closing < 1.0` | **GUESS** | D11. Immediate receding abort dropped an interceptor 5 m out on a weave. | |
 | policy.cpp:confidence | confidence encode | `>2.0 ? 255 : score·120` | **GUESS** | none | `score·120` saturates the `uint8_t` at score 2.125, and the branch caps at 2.0, so the mapping is continuous by luck rather than by construction. |
 | policy.cpp:outbox | outbox max age | 2.0 s | **GUESS** | none | Sensible. |

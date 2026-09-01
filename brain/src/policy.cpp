@@ -171,32 +171,69 @@ bool Policy::OwnsInbound(const Track& t, float now) const {
            == cfg_.drone_id;
 }
 
+namespace {
+
+/// A Friendly already flying at this hostile is the interceptor. Picket
+/// station-keeping is a few m/s; cruise is 14.
+bool FlyingAt(const Track& craft, const Track& hostile) {
+    if (craft.belief != Belief::Friendly) return false;
+    if (craft.has_local_id && hostile.has_local_id &&
+        craft.track_id == hostile.track_id)
+        return false;
+    const Vec3 los(hostile.position.x - craft.position.x,
+                   hostile.position.y - craft.position.y, 0.0f);
+    const float range_h = swarm::Length(los);
+    if (range_h < 1.0f) return false;
+    const float toward = swarm::Dot(
+        Vec3(craft.velocity.x, craft.velocity.y, 0.0f), los / range_h);
+    if (toward < kChasingToward) return false;
+    const float closing = ClosingSpeed(craft.position, craft.velocity,
+                                       hostile.position, hostile.velocity);
+    return closing >= kMinClosing;
+}
+
+Vec3 CorridorOrigin(const TrackStore& store, const Track& hostile, const Vec3& slot) {
+    const Track* best = nullptr;
+    float best_d = 1.0e9f;
+    for (const Track& t : store.tracks()) {
+        if (!FlyingAt(t, hostile)) continue;
+        const float d = swarm::Distance(t.position, hostile.position);
+        if (d < best_d) { best_d = d; best = &t; }
+    }
+    return best ? best->position : slot;
+}
+
+}  // namespace
+
 bool Policy::CloserChaser(const Track& hostile, const TrackStore& store,
                           const swarm::Observation& obs) const {
-    // A Friendly already flying at this hostile is the interceptor. Do not
-    // stack. Picket station-keeping is a few m/s; cruise is 14.
     const float us_range = swarm::Distance(obs.position(), hostile.position);
     for (const Track& t : store.tracks()) {
-        if (t.belief != Belief::Friendly) continue;
-        if (t.has_local_id && hostile.has_local_id && t.track_id == hostile.track_id)
-            continue;
-        const Vec3 los(hostile.position.x - t.position.x,
-                       hostile.position.y - t.position.y, 0.0f);
-        const float range_h = swarm::Length(los);
-        if (range_h < 1.0f) continue;
-        const float toward = swarm::Dot(
-            Vec3(t.velocity.x, t.velocity.y, 0.0f), los / range_h);
-        if (toward < kChasingToward) continue;
-        const float closing = ClosingSpeed(t.position, t.velocity,
-                                           hostile.position, hostile.velocity);
-        if (closing < kMinClosing) continue;
+        if (!FlyingAt(t, hostile)) continue;
         const float d = swarm::Distance(t.position, hostile.position);
         if (d < us_range - kCloserBy) return true;
     }
     return false;
 }
 
-namespace {
+Vec3 CorridorHorizon(const Vec3& from, const Vec3& hostile_p, const Vec3& hostile_v) {
+    // Remaining flight is speed × time-to-meet, not the chord to where the
+    // hostile is now. A ram 3 s out is ~50 m of keep-out; the other 80 m
+    // of slot→hostile is empty air the interceptor will never fly (D17).
+    const float dx = hostile_p.x - from.x;
+    const float dy = hostile_p.y - from.y;
+    const float range = std::sqrt(dx * dx + dy * dy);
+    if (range < 1.0f) return hostile_p;
+    const Vec3 dir(dx / range, dy / range, 0.0f);
+    const Vec3 iv(dir.x * kCruise, dir.y * kCruise, 0.0f);
+    const float closing = ClosingSpeed(from, iv, hostile_p, hostile_v);
+    if (closing < kMinClosing) return from;
+    float t_meet = range / closing + kCatchSlack;
+    if (t_meet > kAbortAfter) t_meet = kAbortAfter;
+    float along = kCruise * t_meet;
+    if (along > range) along = range;
+    return Vec3(from.x + dir.x * along, from.y + dir.y * along, from.z);
+}
 
 Vec3 YieldOffCorridor(const Vec3& goal, const Vec3& a, const Vec3& b, float clear) {
     const Vec3 ab(b.x - a.x, b.y - a.y, 0.0f);
@@ -221,12 +258,11 @@ Vec3 YieldOffCorridor(const Vec3& goal, const Vec3& a, const Vec3& b, float clea
                 goal.z);
 }
 
-}  // namespace
-
 Vec3 Policy::PicketGoal(const TrackStore& store, float now) const {
-    // Hold the ring, but step off anyone else's intercept corridor so we
-    // are not the traffic that spoils ProNav. Owner slot → hostile; neighbours
-    // on a 16-drone 75 m ring sit 29 m off that line and do not move.
+    // Hold the ring, but step off anyone else's *remaining* intercept so we
+    // are not the traffic that spoils ProNav. Neighbours on a 16-drone 75 m
+    // ring sit 29 m off that line and do not move. Past the predicted ram
+    // they also do not move (D17).
     Vec3 goal = flight::RingSlot(cfg_.drone_id, cfg_.fleet_size, cfg_.asset,
                                  ring_radius_, ring_altitude_);
     for (const Track& t : store.tracks()) {
@@ -236,9 +272,11 @@ Vec3 Policy::PicketGoal(const TrackStore& store, float now) const {
         const uint32_t facing = FacingSlot(t.position, cfg_.asset, cfg_.fleet_size);
         const uint32_t owner = UniqueOwner(facing, cfg_.fleet_size, cfg_.drone_id,
                                            heard_, now);
-        const Vec3 from = flight::RingSlot(owner, cfg_.fleet_size, cfg_.asset,
+        const Vec3 slot = flight::RingSlot(owner, cfg_.fleet_size, cfg_.asset,
                                            ring_radius_, ring_altitude_);
-        goal = YieldOffCorridor(goal, from, t.position, cfg_.friendly_margin);
+        const Vec3 from = CorridorOrigin(store, t, slot);
+        const Vec3 end = CorridorHorizon(from, t.position, t.velocity);
+        goal = YieldOffCorridor(goal, from, end, cfg_.friendly_margin);
     }
     return goal;
 }

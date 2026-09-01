@@ -420,9 +420,30 @@ Claims were the half-built answer (`ClaimMsg` is on the wire format). D11 alread
 
 **Why:** the intercept cue is a line because the recording already has commit/abort. Yield is the same geometry with no extra verb — the picket is inside `friendly_margin` of an intercept you can already see. A yield log would fire often on a tight ring and buy a confirmation the overlay can replay from numbers it already quotes. Pings are the logs themselves; the only extra is the same observer-local → world-entity join Intercept already makes, held for 1.4 s so a scrub lands on them.
 
-**Cost accepted:** yield is drawn against interceptor→target (the red line), not the owner's empty ring slot the brain uses. Those agree while the interceptor is leaving the slot and drift as it closes. Yield rows in Logs are the same reconstruction, merged in at load as `yield` / `yield clear` so the chip can filter them — Raw is not a brain line; the tooltip says so. Hearsay (`peer`) pings have no world entity and stay off. A `drop` ping needs a declaration that disappeared in the last 0.15 s; a drop without a prior call has nothing to aim at.
+**Cost accepted:** yield is drawn against interceptor→predicted ram (D17), not the owner's empty ring slot the brain uses before a chaser is visible. Those agree while the interceptor is leaving the slot. Yield rows in Logs are the same reconstruction, merged in at load as `yield` / `yield clear` so the chip can filter them — Raw is not a brain line; the tooltip says so. Hearsay (`peer`) pings have no world entity and stay off. A `drop` ping needs a declaration that disappeared in the last 0.15 s; a drop without a prior call has nothing to aim at.
 
 ---
+
+## D17 — Yield only on the remaining flight, not the chord to the hostile
+
+**The leak:** D15 stepped a picket off anyone else's intercept if the picket's ring slot sat inside `friendly_margin` of the **full** segment owner-slot → hostile. A far inbound draws a chord across the ring. The interceptor rams in ~3 s / ~50 m; pickets sitting near the hostile's *current* pose — or anywhere else on that long chord the interceptor will never fly — still yield. That is traffic-avoidance of empty air.
+
+**Options considered**
+
+1. Yield only after a `commit` log (the viewer already has a span). Leaves the owner's lane blocked until they leave the slot. Does not fix the far-chord: once committed, interceptor→hostile is still the long line.
+2. Per-picket: yield iff time-to-meet the picket is less than time-to-meet the hostile. Same information as clipping the corridor, more branches.
+3. Clip the keep-out to a first-order horizon. Assume cruise (14 m/s) along remaining LOS. `t_meet = range / closing`; along-track length is `cruise × min(t_meet + 0.5 s, 12 s)`. If assumed cruise is not closing, there is no intercept and no corridor. Origin is the chasing Friendly if we can see one (~5 m/s along LOS, same test as D15), else the owner's slot. Lateral keep-out stays `friendly_margin`. No new numbers: cruise, catch slack, abort timeout, and min-closing are already the commit rule.
+
+**Chosen:** 3.
+
+**Why:** remaining flight is speed × time-to-collision. A picket past the predicted ram is not the traffic that cancels ProNav. The 0.5 s slack and the ~19 m bubble around the horizon endpoint cover a slightly late kill; they do not cover a stern chase we already refuse to fly.
+
+**Cost accepted:** a weave that delays the ram past the horizon can clip a picket that sat still because we thought the meet was earlier. The viewer Collect uses the same clip so the amber cue matches the brain; D16's reconstructed `yield` rows will fire less often.
+
+**Measured, s1:** 6/6, civ 0, wasted 0, total **+130.0** (identical to D15). Six `commit` lines, `pair_friendly` 0.
+
+**Measured, 8 named scenarios:** worst **−524.6** (x2-b), mean **−136.4**, best **+158.4**. Same ladder as D15. This is a picket-goal clip, not a commit change.
+
 
 
 

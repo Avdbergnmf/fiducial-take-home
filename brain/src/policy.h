@@ -31,6 +31,15 @@ bool SlotAlive(uint32_t drone_id, uint32_t self_id, const float* heard, float no
 uint32_t UniqueOwner(uint32_t facing, uint32_t fleet_size, uint32_t self_id,
                      const float* heard, float now);
 
+/// End of the remaining intercept flight, not the hostile's current pose.
+/// Assumed cruise along LOS, t_meet = range / closing, along = cruise ·
+/// min(t_meet + 0.5 s, abort 12 s). Returns `from` when that cruise is not
+/// closing — there is no intercept to yield for (D17).
+Vec3 CorridorHorizon(const Vec3& from, const Vec3& hostile_p, const Vec3& hostile_v);
+
+/// Push `goal` off the horizontal segment a→b when inside `clear`.
+Vec3 YieldOffCorridor(const Vec3& goal, const Vec3& a, const Vec3& b, float clear);
+
 class Policy {
 public:
     void Configure(const Config& cfg, Rng rng);
