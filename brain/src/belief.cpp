@@ -8,6 +8,8 @@ constexpr float kEvidenceForCall = 1.2f;   // integrated score needed to commit
 constexpr float kScoreDecay = 0.6f;        // per second, toward zero
 constexpr float kSureHit = 5.0f;           // m; aimed-dash CPA, well above fix_sigma 0.35
 constexpr float kShrink = 3.0f;            // m of miss drop since first sight → steering
+constexpr float kFriendlyGate = 8.0f;      // m; heartbeat → sensor track
+constexpr float kFriendlyHold = 2.5f;      // s; 2 Hz heartbeat, covers a few losses
 
 float Clamp(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
@@ -69,6 +71,17 @@ bool LooksBallistic(const Vec3& velocity, const Vec3& prev_velocity, float dt) {
     const bool falling = accel.z > 6.0f && accel.z < 14.0f;
     const float lateral = std::sqrt(accel.x * accel.x + accel.y * accel.y);
     return falling && lateral < 4.0f;
+}
+
+bool HeartbeatPlausible(const Vec3& self, const Vec3& claimed,
+                        float measured_range, float range_sigma) {
+    const float claimed_range = swarm::Distance(self, claimed);
+    const float sigma = range_sigma > 0.1f ? range_sigma : 1.0f;
+    // Three sigma plus a couple of metres for quantisation and a few ticks of
+    // latency. A replay from the far side of the arena misses this by tens of
+    // metres, not by noise.
+    const float tol = 3.0f * sigma + 2.0f;
+    return std::fabs(claimed_range - measured_range) <= tol;
 }
 
 // ---------------------------------------------------------------------------
@@ -140,6 +153,15 @@ void TrackStore::Classify(Track& t, float now, float dt) {
         return;
     }
 
+    // A live heartbeat pins this as a mate. Geometry that looks like a dash
+    // is exactly what an interceptor does on the way in; calling it hostile
+    // is how pickets ram their own. Hold expires if the radio goes quiet.
+    if (t.belief == Belief::Friendly) {
+        if (now <= t.friendly_until) return;
+        t.belief = Belief::Unknown;
+        t.belief_since = now;
+    }
+
     // --- hostile: sustained, deliberate approach to the asset ---------------
     //
     // Alignment and closing are horizontal: a dive from 40 m is still aimed
@@ -173,12 +195,8 @@ void TrackStore::Classify(Track& t, float now, float dt) {
     // there is cheap. But note the term is clamped at zero, so a brain that
     // never declares anything scores the same as one that guesses badly: the
     // goal is confident calls, not silence.
-    //
-    // TODO(next): friendlies are identifiable once heartbeats are running --
-    // a peer whose claimed position matches this track's position, corroborated
-    // by the measured range on the frame, is a friendly. That is free accuracy
-    // on a third of the airspace and it needs the protocol, not the sensors.
-    if (t.belief != Belief::Unknown && t.closing_score < 0.2f) {
+    if (t.belief != Belief::Unknown && t.belief != Belief::Friendly &&
+        t.closing_score < 0.2f) {
         t.belief = Belief::Unknown;
         t.belief_since = now;
     }
@@ -193,6 +211,8 @@ void TrackStore::MergePeerReport(const Vec3& position, const Vec3& velocity,
     constexpr float kGate = 12.0f;
 
     Track* t = NearestTo(position, kGate);
+    if (t && t->belief == Belief::Friendly)
+        return;                           // drop; do not spawn a ghost hostile on a mate
     if (!t) {
         t = tracks_.emplace();
         if (!t) return;
@@ -214,10 +234,26 @@ void TrackStore::MergePeerReport(const Vec3& position, const Vec3& velocity,
         t->closing_score = Clamp(
             t->closing_score + static_cast<float>(confidence) / 255.0f, -2.0f, 3.0f);
     }
-    if (t->closing_score > kEvidenceForCall && t->belief != Belief::Hostile) {
+    if (t->closing_score > kEvidenceForCall && t->belief != Belief::Hostile
+        && t->belief != Belief::Friendly) {
         t->belief = Belief::Hostile;
         t->belief_since = now;
     }
+}
+
+void TrackStore::MarkFriendly(const Vec3& claimed, const Vec3& self,
+                              float measured_range, float range_sigma, float now) {
+    if (!HeartbeatPlausible(self, claimed, measured_range, range_sigma)) return;
+
+    Track* t = NearestTo(claimed, kFriendlyGate);
+    if (!t || !t->has_local_id) return;
+
+    if (t->belief != Belief::Friendly) {
+        t->belief = Belief::Friendly;
+        t->belief_since = now;
+        t->closing_score = 0.0f;
+    }
+    t->friendly_until = now + kFriendlyHold;
 }
 
 Track* TrackStore::MostUrgentHostile(const Vec3& self_position, float now) {

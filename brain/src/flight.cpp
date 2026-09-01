@@ -75,34 +75,59 @@ Vec3 EnforceSeparation(const Vec3& desired, const Vec3& position, const Vec3& ve
                        const FixedVec<Track, kMaxTracks>& tracks,
                        const Config& cfg, const Track* exempt) {
     Vec3 avoid;
+    Vec3 panic;
     bool any = false;
+    bool hard = false;
 
     for (const Track& t : tracks) {
-        if (exempt && t.track_id == exempt->track_id) continue;
+        const bool mate = t.belief == Belief::Friendly;
+        // Never exempt a mate: ramming one costs two drones. The intercept
+        // target is the only track we are allowed to close on.
+        if (!mate && exempt && t.track_id == exempt->track_id) continue;
 
         const Vec3 offset = position - t.position;
         const float d = swarm::Length(offset);
-        if (d > cfg.separation_margin || d < 1e-4f) continue;
+        if (d < 1e-4f) continue;
 
-        // Closing speed along the line between us. Only react to things
-        // actually getting closer -- a neighbour drifting apart at the margin
-        // is not a problem and reacting to it wastes authority.
+        const Vec3 away = offset / d;
         const Vec3 rel_velocity = velocity - t.velocity;
-        const float closing = -swarm::Dot(rel_velocity, offset / d);
+        const float closing = -swarm::Dot(rel_velocity, away);
 
-        const float urgency = (cfg.separation_margin - d) / cfg.separation_margin;
+        // Floor is cruise-vs-picket (friendly_margin, ~19 m on s1) so the
+        // ring still fits. Two interceptors close faster than cruise; size
+        // the bubble from this pair's closing speed so we start in time.
+        float margin = mate ? cfg.friendly_margin : cfg.separation_margin;
+        if (mate && closing > 0.0f) {
+            const float stop = (closing * closing) / (2.0f * cfg.lateral_limit)
+                               + 4.0f * cfg.kill_radius;
+            if (stop > margin) margin = stop;
+        }
+        if (d > margin) continue;
+
+        if (mate && d < cfg.kill_radius * 3.0f) {
+            panic += away * cfg.lateral_limit;
+            hard = true;
+            continue;
+        }
+
+        const float urgency = (margin - d) / margin;
         float strength = urgency * urgency;
         if (closing > 0.0f) strength += closing * 0.15f;
-
-        avoid += (offset / d) * (strength * cfg.lateral_limit * 2.0f);
+        avoid += away * (strength * cfg.lateral_limit * (mate ? 2.5f : 2.0f));
         any = true;
+
+        if (mate) {
+            const float closing_cmd = -swarm::Dot(desired, away);
+            if (closing_cmd > 0.0f)
+                avoid += away * closing_cmd;
+        }
     }
 
+    if (hard) return LimitAccel(panic, cfg);
     if (!any) return desired;
 
-    // Avoidance is added at full weight and the result re-limited. Note this
-    // is a blend: when both saturate, the sum can still point somewhere that
-    // closes. See the header for what a real guarantee would take.
+    // For mates the closing component of the command is cancelled first (D8).
+    // Unknown traffic is still a blend: under saturation it can close.
     return LimitAccel(desired + avoid, cfg);
 }
 

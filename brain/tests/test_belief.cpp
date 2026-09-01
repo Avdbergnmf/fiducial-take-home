@@ -183,6 +183,19 @@ static void TestLevelDashIsNotAHit() {
     CHECK(!AimedAtAsset(miss, miss, 30.0f));
 }
 
+static void TestHeartbeatRangeCorroboration() {
+    std::printf("heartbeat range must match the claimed position\n");
+    const Vec3 self(0.0f, 0.0f, -30.0f);
+    const Vec3 claimed(40.0f, 0.0f, -30.0f);
+    const float r = swarm::Distance(self, claimed);
+    CHECK(HeartbeatPlausible(self, claimed, r, 0.5f));
+    // Within 3σ + 2 m of a 0.5 m sigma (~3.5 m).
+    CHECK(HeartbeatPlausible(self, claimed, r + 1.0f, 0.5f));
+    // A replay from the far side of the arena is tens of metres off.
+    CHECK(!HeartbeatPlausible(self, claimed, r + 50.0f, 0.5f));
+    CHECK(!HeartbeatPlausible(self, claimed, 5.0f, 0.5f));
+}
+
 int main() {
     TestRangeRate();
     TestApproachAlignment();
@@ -194,6 +207,7 @@ int main() {
     TestAimedAtAssetShrinkVsNoise();
     TestLevelOverflightIsNotAimed();
     TestLevelDashIsNotAHit();
+    TestHeartbeatRangeCorroboration();
 
     if (g_failures == 0) {
         std::printf("belief: all passed\n");

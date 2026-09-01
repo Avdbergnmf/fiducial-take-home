@@ -56,9 +56,10 @@ private:
         host().Logf("drone %u/%u up, lateral limit %.2f m/s^2, kill r %.1f, tier %u",
                     cfg_.drone_id, cfg_.fleet_size, cfg_.lateral_limit,
                     cfg_.kill_radius, cfg_.tier);
-        host().Logf("params sense=%.1f comm=%.1f maxv=%.1f maxa=%.1f tilt=%.2f lat=%.1f sep=%.1f ring=%.1f alt=%.1f",
+        host().Logf("params sense=%.1f comm=%.1f maxv=%.1f maxa=%.1f tilt=%.2f lat=%.1f sep=%.1f fsep=%.1f ring=%.1f alt=%.1f",
                     cfg_.sense_radius, cfg_.comm_radius, cfg_.max_speed, cfg_.max_accel,
                     cfg_.max_tilt, cfg_.lateral_limit, cfg_.separation_margin,
+                    cfg_.friendly_margin,
                     policy_.ring_radius(), policy_.ring_altitude());
         (void)obs;
     }
@@ -92,9 +93,14 @@ private:
                     sw::HeartbeatMsg m;
                     m.Read(r);
                     if (!r.ok()) break;
-                    NotePeer(h.origin, m.position, now);
-                    // TODO(next): a track sitting where a peer says it is, is a
-                    // friendly. Free accuracy on a third of the airspace.
+                    // Range is measured at reception; the payload is as-sent.
+                    // Extrapolate so association is not 8 m behind a 16 m/s mate.
+                    float age = now - h.sent_time;
+                    if (age < 0.0f) age = 0.0f;
+                    const sw::Vec3 predicted = m.position + m.velocity * age;
+                    NotePeer(h.origin, predicted, now);
+                    store_.MarkFriendly(predicted, obs.position(),
+                                        f.range, f.range_sigma, now);
                     break;
                 }
                 case sw::MsgType::TrackReport: {

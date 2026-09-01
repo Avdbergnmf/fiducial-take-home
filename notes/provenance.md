@@ -19,8 +19,8 @@ Serialisation widths, enum values and struct sizes are omitted: they are self-ju
 
 | Category | Count |
 |---|---|
-| SPEC / SCENARIO / MEASURED / DERIVED | 12 |
-| **GUESS** | **29** |
+| SPEC / SCENARIO / MEASURED / DERIVED | 15 |
+| **GUESS** | **31** |
 
 The brain is mostly guesses. That is not automatically wrong — the brief refuses to publish
 loss, latency and track-drop times on purpose — but two of the guesses are currently costing
@@ -43,7 +43,8 @@ loss, latency and track-drop times on purpose — but two of the guesses are cur
 | world.h:125 | `asset_radius` default | 30.0 | SCENARIO | `s1.json` `params.asset.radius = 30.0` | Yes. |
 | world.h:132 | `lateral_limit` default | 6.7 | DERIVED | 9.81 · tan(0.6) = 6.7117 | Yes. |
 | world.h:161 | `lateral_limit` computed | `9.81 · tan(max_tilt)` | SPEC | CHALLENGE.md §5.4: "bounded by `g·tan(max_tilt)` — around 6.7 m/s² where `max_accel` reads 15". Independently restated in `s1.json` `_evasion`: "g*tan(max_tilt) = 6.7 m/s^2 and not max_accel" | **Yes — the best-sourced constant in the brain.** Cited in two places and used correctly everywhere. |
-| world.h:162 | `separation_margin` | `kill_radius · 4.0` = **4.0 m** | **GUESS** | The `4.0` has no source. Comment says "tune this". | **No. This is finding #1.** See below. |
+| world.h:167 | `separation_margin` | `kill_radius · 4.0` = **4.0 m** | **GUESS** | Unknown/civilian blend only (D8). The `4.0` has no source. | Still too small to arrest traffic; left small *because* 19 m around every track collapses the ring. See below. |
+| world.h:171 | `friendly_margin` | `14² / (2 · lateral) + 4 · kill` ≈ **18.6 m** on s1 | **DERIVED** | Arrest cruise (14 m/s, `brain.cpp`) with the lateral bound, plus four kill radii. D8. Neighbour chord on the 75 m / 16-drone ring is 29 m, so a picket is not inside a neighbour's bubble. | Yes, jointly with the ring. |
 
 **`separation_margin` — why 4.0 m cannot work.** Arresting a closing speed `v` with the
 lateral authority `a` = 6.7 m/s² needs `v²/(2a)` metres. An s1 civilian crosses at ~16 m/s
@@ -81,6 +82,9 @@ the real finding: **the margin and the ring geometry have to be designed togethe
 | belief.cpp:129 | ballistic decay clamp | [0, **3.0**] | **GUESS** | none | **Inconsistent with :127**, which clamps the same variable to 1.5. The 3.0 upper bound is unreachable. Harmless today, confusing to read. |
 | belief.cpp:131 | wreckage threshold | 0.4 | **GUESS** | none | *Too high:* fly into debris. *Too low:* a descending friendly is called wreckage. |
 | belief.cpp:9–10 | `kSureHit` / `kShrink` | 5 m / 3 m | **GUESS**, G1a then D7 | `fix_sigma=0.35`; 5 m is well above it; 3 m is meant to beat position noise | Miss is 3D (D7). Horizontal sure-hit was the leftover FP: a 5.2 m ground chord at 30 m altitude. 3D miss is ~altitude and the 2D shrink damps to ~1.5 m. |
+| belief.cpp:11 | `kFriendlyGate` | 8.0 m | **GUESS** | Heartbeat claimed (extrapolated) position → nearest local sensor track (D8) | *Too high:* bind a heartbeat to the nearer of two close aircraft (widening to 14 m on s1 cost ~70 extra wrong declarations). *Too low:* a dash between beats never matches. Extrapolation by `now−sent_time` is what keeps 8 m viable. |
+| belief.cpp:12 | `kFriendlyHold` | 2.5 s | **DERIVED** (weakly) | 2 Hz heartbeat (`policy.cpp`); covers a few losses | Five missed beats. *Too high:* a dead mate stays Friendly until ballistic wins. *Too low:* a radio dropout demotes a mate and a picket commits to it. |
+| belief.cpp:83 | heartbeat range gate | `3σ + 2 m` | **DERIVED** | `f.range` / `f.range_sigma` are receiver measurements (`swarm_abi.h`) | The 2 m covers PosQ (0.125 m) and a few ticks of latency. A far-side replay misses by tens of metres. |
 | belief.cpp:159 | alignment threshold | 0.8 | **GUESS** | none | cos⁻¹(0.8) = 37°. A civilian on a chord holds this easily. |
 | belief.cpp:159 | closing threshold | 4.0 m/s | **GUESS** | none | Civilians cross at ~16 m/s, so this excludes almost nothing. |
 | belief.cpp:160/162 | closing_score clamps | [−2, **3**] and [−2, **4**] | **GUESS** | none | **Inconsistent**: the accrual caps at 3.0 so the 4.0 decay bound is unreachable. Same class of sloppiness as :129. |
@@ -124,7 +128,8 @@ the real finding: **the margin and the ring geometry have to be designed togethe
 | flight.cpp:42 | `stopping` | `√(2·lateral_limit·range)` | **DERIVED** | Kinematics, using the correct limit | Yes. Uses `lateral_limit`, not `max_accel` — the same distinction the brief flags. |
 | flight.cpp:47 | cruise velocity gain | 2.0 | **GUESS** | none | Low-risk. |
 | flight.cpp:69 | closing floor / boost | `12.0 m/s`, `lateral·0.6` | **GUESS** | none | Adds line-of-sight thrust when closing < 12 m/s. *Too high:* a permanent pursuit bias that spoils the ProNav geometry. |
-| flight.cpp:95/97 | avoidance strength | `closing·0.15`, `·lateral·2.0` | **GUESS** | none | The `·2.0` lets avoidance exceed the limit before re-clamping — deliberate, and honestly documented at flight.h:44-50 as a tendency and not a guarantee. |
+| flight.cpp:95/97 | avoidance strength | `closing·0.15`, `·lateral·2.0` (unknown) / `·2.5` (mate) | **GUESS** | none | Unknown traffic is still a blend (D8). Mates cancel the closing component of the command first; the `·2.5` is extra repulsion, not the guarantee — the cancel is. |
+| flight.cpp:98 | mate panic radius | `3 · kill_radius` = 3 m | **GUESS** | D8 hard override | Inside this, intercept is abandoned and we accelerate away. *Too high:* abandon a real intercept because a mate is nearby. *Too low:* still closing at 1 m. |
 | flight.cpp:111 | `kEdge` | 20.0 m | **GUESS** | none | Arena is ±200 m (`fixture.jsonl` header `arena.min/max`), so this is a 10% border. Nothing left the arena in either run. |
 | flight.cpp:115-116 | arena gains | 0.5, 0.8 | **GUESS** | none | Low-risk. |
 | brain.cpp:140 | cruise/goto switch | 25.0 m | **GUESS** | none | Low-risk. |
@@ -153,9 +158,11 @@ plus 3D miss (D2, D7). Horizontal leftover chords were the D7 case.
 
 1. ~~**`belief.cpp:157` `asset_radius · 0.8` (24 m miss gate)**~~ **Done (D2, D7).**
    Replaced by `AimedAtAsset`. Horizontal miss ≲ 5 m at altitude is D7 (3D miss).
-2. **`world.h:162` `kill_radius · 4.0` (4 m separation margin)** — the last line of defence,
-   and ~5× too small for the closing speeds involved. Cannot simply be raised to 19 m
-   without re-designing the 75 m ring; that trade is the DESIGN.md discussion.
+2. **`world.h:167` `kill_radius · 4.0` (4 m unknown-traffic margin)** — still ~5× too
+   small for civilian closing speeds. D8 added a kinematic `friendly_margin` (~19 m)
+   for *identified mates* only; raising the unknown margin to 19 m without growing
+   the 75 m ring is the option D8 refuses. Remaining ram risk is ID failure and
+   civilian chords.
 3. **`belief.cpp:6` `kDropAfter` 3.0 s** — contradicts the sim's measured
    `sense.track_drop_time = 2.0`. Cheap to align; ask whether you *want* to outlive it.
 4. **`belief.cpp:193` `kGate` 12 m** — too loose by its own stated reasoning (~3 m from

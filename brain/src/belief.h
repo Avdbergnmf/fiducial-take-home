@@ -24,6 +24,13 @@ public:
     void MergePeerReport(const Vec3& position, const Vec3& velocity,
                          Belief peer_belief, uint8_t confidence, float now);
 
+    /// A heartbeat that matches a sensor track is a mate. The RF range is
+    /// our measurement, not their claim — a replay from the wrong side of
+    /// the arena fails that check (tier 3). Until then, origin + geometry
+    /// is enough to stop us ramming our own fleet.
+    void MarkFriendly(const Vec3& claimed, const Vec3& self,
+                      float measured_range, float range_sigma, float now);
+
     FixedVec<Track, kMaxTracks>& tracks() { return tracks_; }
     const FixedVec<Track, kMaxTracks>& tracks() const { return tracks_; }
 
@@ -84,6 +91,12 @@ bool AimedAtAsset(float miss, float miss_at_first, float asset_radius);
 /// and it has no thrust. Nothing in the track marks it as debris, but the
 /// kinematics do. NED: +z is down, so falling means positive dz.
 bool LooksBallistic(const Vec3& velocity, const Vec3& prev_velocity, float dt);
+
+/// True if a heartbeat's claimed position is consistent with the range our
+/// receiver measured. Used to reject a frame that did not come from where
+/// it claims to be.
+bool HeartbeatPlausible(const Vec3& self, const Vec3& claimed,
+                        float measured_range, float range_sigma);
 
 }  // namespace sw
 

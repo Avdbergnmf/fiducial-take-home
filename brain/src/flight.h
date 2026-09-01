@@ -42,15 +42,14 @@ Vec3 ProNav(const Vec3& self_position, const Vec3& self_velocity,
 /// The kill radius applies to EVERY pair with no exceptions: friendly-friendly,
 /// friendly-civilian, and wreckage.
 ///
-/// HONEST LIMITATION: this adds a repulsion term and re-limits, which is a
-/// strong tendency, NOT the hard guarantee the brief asks for. Under saturation
-/// the guidance and the avoidance can still sum to something that closes. Two
-/// ways out, neither implemented: override the command outright inside a
-/// critical inner radius, or project the desired acceleration to remove any
-/// component that increases closure. Decide which, and say so in DESIGN.md --
-/// the doc is graded against the code matching it.
+/// Known friendlies (heartbeat-matched tracks) use at least `friendly_margin`,
+/// or v_close²/(2a)+4·kill when closing faster than cruise. The closing
+/// component of the command is cancelled. Inside 3 kill-radii the intercept
+/// is abandoned and we accelerate away. Unknown traffic still gets the small
+/// `separation_margin` blend — a tendency, not a guarantee.
 ///
-/// `exempt` is the one track we are deliberately ramming, if any.
+/// `exempt` is the one track we are deliberately ramming, if any. A mate is
+/// never exempt.
 Vec3 EnforceSeparation(const Vec3& desired, const Vec3& position, const Vec3& velocity,
                        const FixedVec<Track, kMaxTracks>& tracks,
                        const Config& cfg, const Track* exempt);

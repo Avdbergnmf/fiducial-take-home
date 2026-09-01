@@ -181,3 +181,39 @@ Forming has no verb. That is correct encoding — it is the default, not an even
 - A hostile that approaches *level* at an altitude greater than `asset_radius` will not be called. Not observed on x1-a (they arrive at ~10 m as they enter the cylinder). If a later scenario flies level attacks, this is the first thing to revisit.
 - `miss=` in the log is now the 3D figure. Old reads of "passes 5 m from the asset" on a 30 m overflight were the bug, not a format to preserve.
 
+---
+
+## D8 — Heartbeat identity, then kinematic keep-out for mates
+
+**The bug:** pickets ram their own interceptors. An interceptor on the way in looks like a dash at the asset — same alignment, same closing, same 3D miss as a hostile — so `Classify` calls it `Hostile`, `ShouldCommit` spends a picket on it, and `EnforceSeparation` **exempts the target**. Two drones, −80 each (`pair_friendly`). Heartbeats already named every live mate (`NotePeer`); they were never bound to a sensor track, so the exemption had no idea it was a mate.
+
+G1b: `pair_friendly` on 3 of 8 (s2: 4, x2-b: 6, x1-a: 2). The 4 m `separation_margin` cannot arrest a 16 m/s closure with 6.7 m/s² of lateral authority — that needs ~19 m — but 19 m around every track would collapse a 16-drone ring of radius 75 m, where neighbours sit 29 m apart. The margin and the ring have to be chosen together, and the 4 m blend stays for *unknown* traffic.
+
+**Options considered**
+
+1. Raise `separation_margin` to 19 m for everyone. Arrests a cruise-on-cruise close, and also permanently repels every neighbour on the ring. Formation dies.
+2. Trust `Heartbeat.origin` as a class without associating it to a track. `track_id` is observer-local; origin is a drone_id. No join, no keep-out.
+3. Bind heartbeat claimed position + measured RF range to the nearest *local* sensor track, latch `Friendly`, and give mates a keep-out the kinematics can actually fly. Unknown traffic keeps the 4 m blend.
+
+**Chosen:** 3.
+
+- `HeartbeatPlausible`: `|claimed_range − f.range| ≤ 3σ + 2 m`. Range is our measurement. A replay from the wrong side of the arena fails it (the tier-3 hook, used early because it is free).
+- `MarkFriendly`: nearest local track within 8 m of the payload position extrapolated by `now − sent_time` (heartbeat carries velocity). Hold 2.5 s (2 Hz, a few losses). Zeros `closing_score` so a prior dash-shaped score cannot re-fire the moment the hold expires.
+- `Classify` will not demote `Friendly` while `now ≤ friendly_until`. Ballistic wreckage still wins: it is checked first. A dead mate stops transmitting and becomes wreckage; a live interceptor diving under ProNav has lateral accel and does not.
+- `MergePeerReport` drops a report whose nearest track is already `Friendly`. Creating a ghost hostile at the same place was how a picket could commit to a mate it had already identified.
+- `EnforceSeparation`: a `Friendly` is **never exempt**. Floor `friendly_margin = v²/(2a) + 4·kill` with `v = 14` m/s (cruise) and `a = lateral_limit` (~19 m on s1). When a pair is closing faster than cruise — two interceptors on the same bearing — the bubble is `v_close²/(2a)+4·kill` instead, so we start in time rather than at the cruise floor. Closing component of the command is cancelled against a mate. Inside 3 kill-radii the intercept is abandoned and we accelerate away. Unknown traffic still gets the 4 m blend — a tendency, not a guarantee.
+
+Tick order is load-bearing: `Update` (Classify) → `ConsumeFrames` (`MarkFriendly`) → `Decide` → `Fly`. The first Classify of a tick can still call a mate hostile; MarkFriendly overwrites before policy commits. `AbortReason` already drops a commit that is no longer `Hostile`.
+
+**Why the 19 m / 75 m ring is jointly chosen, not independently tuned.** Arresting cruise with the lateral bound is `14² / (2 · 6.7) ≈ 14.6 m`, plus four kill radii → ~19 m. Neighbour chord on the s1 ring is `2 · 75 · sin(π/16) ≈ 29 m`. 19 < 29, so a stationary picket does not sit inside a neighbour's bubble. 19 m around *unknown* traffic would, because civilians cross the ring; that is why they keep 4 m and the identity step has to exist. Raising the unknown margin to 19 m without growing the ring (or thinning the fleet) is the option this decision refuses.
+
+**Cost accepted:**
+
+- A hostile that transmits a plausible heartbeat (tier 3 replay that also matches range, or a tier-5 insider) is marked Friendly and not rammed. The range check is the start of that defence, not the end of it. s1 hostiles do not transmit.
+- 19 m vs 29 m is the *picket* trade. Two interceptors can close at ~30 m/s, which needs ~70 m to arrest; that is larger than `sense_radius`, so a perfectly head-on pair that first sees each other at 60 m can still hit. The dynamic bubble starts as soon as they are tracks; it cannot invent range. Yielding one interceptor (B3 claims) is the remaining way out.
+- Identity only binds to a *local* sensor track. A mate we can hear but not see is noted as a peer and not yet kept out of — at 1 m they are inside `sense_radius`. The association gate stays 8 m: opening it to 14 m on s1 bound heartbeats to the nearer of two close aircraft and added ~70 wrong declarations.
+- Unknown / civilian traffic still uses 4 m. Failing to ID a mate still rams. Two aircraft inside the association gate bind the heartbeat to the nearer one.
+- `fsep=` on the params line. Viewer `LogPhrase` and the Separation cue text follow; the cue still draws `sep=`, not the mate keep-out.
+
+**Measured:** 8-scenario sweep after this: no `pair_friendly` on s1, s2, x1-a, x2-b. s1 total −947 (bar −1170). `civilians_lost == 0` on s0, s1, x1-b, x1-c. x1-a still reports 2, both at t=1.1 with no `friendly_lost` — the same two events as the pre-D8 baseline; the third civilian on that baseline was our `pair_neutral`, now gone. Leftover `pair_friendly` on x1-c (one pair at t=43.81) and on 1 of 6 fresh tier-1 draws. x1-b's pair is gone.
+

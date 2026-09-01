@@ -136,6 +136,13 @@ struct Config {
     /// real margin over it, not a token one.
     float separation_margin = 0.0f;
 
+    /// Floor keep-out around an identified mate. Sized to arrest cruise with
+    /// the lateral bound, plus a few kill radii. Must stay below ring neighbour
+    /// spacing or the picket permanently repels itself. EnforceSeparation
+    /// raises this to v_close²/(2a)+4·kill when a pair is closing faster
+    /// than cruise (two interceptors). D8.
+    float friendly_margin = 0.0f;
+
     static Config From(const SwBootInfo& b) {
         Config c;
         c.drone_id = b.drone_id;
@@ -159,7 +166,13 @@ struct Config {
         c.arena_max = b.arena_max;
 
         c.lateral_limit = 9.81f * std::tan(b.max_tilt);
-        c.separation_margin = b.kill_radius * 4.0f;   // tune this; see DESIGN.md
+        c.separation_margin = b.kill_radius * 4.0f;   // unknown/civilian; see DESIGN.md
+        // Arrest 14 m/s (our cruise, brain.cpp) with lateral_limit, then four
+        // kill radii. On s1 that is ~19 m; 16 drones on a 75 m ring sit 29 m
+        // apart, so the picket does not sit inside this bubble. D8.
+        constexpr float kSepSpeed = 14.0f;
+        c.friendly_margin = (kSepSpeed * kSepSpeed) / (2.0f * c.lateral_limit)
+                            + 4.0f * c.kill_radius;
         return c;
     }
 };
@@ -233,6 +246,7 @@ struct Track {
     float belief_since = 0.0f;
     Belief logged_belief = Belief::Unknown;  // last class we wrote to host->log
     uint8_t near_band = 0;                   // 0 far, 1 <12 m, 2 <6 m, 3 <3 m
+    float friendly_until = -1.0e9f;          // heartbeat hold; Classify will not demote before this
 
     /// Last time we put this on the radio. Without it, Compose queues a report
     /// every tick for a second, which is 100 duplicates at 100 Hz.
