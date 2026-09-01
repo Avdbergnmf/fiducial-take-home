@@ -592,3 +592,101 @@ worth the mean.
 
 **Determinism:** `--replay` clean on s1, s2, x1-a, x2-b. All three test suites
 pass, including a new `TestStationBisectsTheGap` pinning the geometry above.
+---
+
+## D22 — Lead intercept for midcourse, proportional navigation for terminal
+
+**Where the score actually was.** The report carries a per-intercept breakdown I
+had not read. On s1 we scored 6/6 kills, zero breaches — and **99.1 mission
+points out of a possible 600**:
+
+```
+reward:   14.4  17.5  21.3  21.4   5.7  18.8     (W_kill = 100 each)
+urgency:  .856  .825  .787  .786  .943  .812     (reward = 100*(1 - urgency))
+t_free_s = 9.04       ← the whole budget from spawn to the asset
+```
+
+The arithmetic confirms the weights from data rather than the spec: s2 is
+`41.5 − 2×200 = −358.4` mission, so P_breach = 200 and W_kill = 100. We were
+banking **16%** of the available kill reward. On s1 there are no breaches left
+to prevent, so that 500 was the only thing on the table.
+
+**Why.** Tracing one s1 intercept, the committed drone's own speed:
+
+| t | hostile range to asset | separation | closing | **our speed** |
+|---|---|---|---|---|
+| 8.5 | 169.6 | 86.1 | 1.8 | **0.4** |
+| 10.5 | 155.0 | 71.7 | 12.7 | **0.3** |
+| 12.5 | 126.0 | 43.6 | 14.0 | **0.2** |
+| 14.0 | 103.7 | 23.2 | 13.3 | 6.4 |
+| 15.5 | 81.4 | 3.9 | 12.2 | 9.1 |
+
+**The interceptor never flew at the hostile.** It held 0.2–0.4 m/s for four
+seconds and was rammed at 81 m — our own ring radius. Every metre of "closing"
+was the hostile's own speed. Two compounding causes, both in `ProNav`:
+
+1. Pure PN commands acceleration only *across* the line of sight, to null its
+   rotation rate. A picket already standing on the hostile's inbound bearing
+   sees almost no rotation, so PN commands almost nothing. PN is a terminal
+   homing law; it was being used as an intercept law.
+2. The one term that would have fixed it — `if (closing < 12.0f) accel += ...`
+   — keys on **closing speed**, which the hostile supplies for free at 15 m/s.
+   The condition is false from t = 10.5 onward, so the drone never accelerated.
+
+**Options measured** (8 fixed scenarios; sweep mean, D21 baseline **+16.3**):
+
+1. **Lead intercept all the way in**, flown at `max_speed`. Reward capture
+   jumps — max 191.9 → 280.9, x1-b +89, x2-b 1/3 → 2/3 — but kills collapse:
+   mean **−199.7**. Measuring closest approach explains it: misses of
+   **1.0–3.3 m against a 1.0 m kill radius**. The lead point assumes constant
+   target velocity, s1 hostiles evade, and at 35 m/s of closing there is no
+   range left to correct.
+2. **Lead intercept at 0.85·max_speed.** Better (−31.4), same disease.
+3. **Blend lead → PN by range**, handing over while there is still time to null
+   the error. 20–50 m: −85.6. 30–80 m: +14.8. 12–35 m: −252.6.
+4. **Raise the terminal PN gain** with the handover. The lead intercept arrives
+   with far more closing speed than N = 3.5 was tuned for. N = 5: +39.1.
+   **N = 7: +63.9.** N = 9: +38.3. N = 12: +37.5.
+5. **Handover on time-to-go instead of range** — `range/closing`, which is the
+   scale-free way to say "enough time to correct". Sounds more principled and
+   is measurably worse: best variant **+39.2** against +99.1 for plain range.
+   `closing` swings wildly during the approach, so the threshold jitters while
+   range is monotone. Rejected on the numbers.
+
+**Chosen:** blend by range 25 → 70 m, terminal gain N = 7.
+
+**Why:** it is the standard midcourse/terminal split. The lead solution is
+closed form — `|d + w·t| = s·t` is a quadratic in t — so the midcourse leg has
+no tuning in it at all, and it returns −1 when no intercept exists, which is
+the honest answer for an equal-speed stern chase. The two tuned numbers are the
+handover band and the terminal gain, both measured.
+
+**Cost accepted:** the handover band is in metres, and the time-to-go
+reformulation that would make it scale-free is empirically worse. N = 6 and
+N = 7 score the same, so the gain sits on a plateau; the handover does not —
+25–70 m gives +99.1 and 25–60 m gives +76.4, so it is a ridge.
+
+**Measured, 8 fixed scenarios:** improves or matches **every one**. min
+**−303.8 → −246.8**, mean **+16.3 → +99.1**, max **191.9 → 276.7**. Civilians
+2 and wasted 0, both unchanged. x2-b **1/3 → 3/3** (−303.8 → +124.8).
+
+**Measured, s1 reward capture:** mission 99.1 → 140.3; per-kill rewards
+14.4/17.5/21.3/21.4/5.7/18.8 → 16.7/25.4/29.4/29.5/12.5/26.8, urgency 0.79–0.94
+→ 0.71–0.88.
+
+**Measured, 20 fresh `--new-token` ids:** **17 of 20 improve.** mean
+**−20.8 → +30.9**, kills 52 → 54/65, breaches 13 → 11. tier-1 mean 85.7 →
+**145.9** with **31/31 kills and zero breaches**; tier-2 mean −127.3 → −84.1.
+
+**Open, and the one regression:** the floor on fresh ids gets worse,
+−315.8 → −556.2, on two tier-2 layouts with fast (18.5 m/s) hostiles. Measured
+closest approach there: the old law misses by 1.9–2.7 m and the new one by
+2.0–8.0 m. Both miss; the lead intercept misses wider. This is terminal
+accuracy against a fast evader and it is unsolved — a lead point that estimated
+target *acceleration*, rather than assuming constant velocity, is the obvious
+next thing and is untested.
+
+**Determinism:** `--replay` clean on s1, s2, x1-a, x2-b. All three suites pass,
+including `TestLeadIntercept`, which pins the closed form (including that it
+correctly refuses an equal-speed perpendicular crossing) and the standstill case
+that was the original bug.

@@ -30,12 +30,30 @@ Vec3 Cruise(const Vec3& target, const Vec3& position, const Vec3& velocity,
 /// line-of-sight rate rather than chasing the target's current position, which
 /// is why it beats pursuit against anything moving.
 ///
+/// Time until we and a constant-velocity target can occupy the same point, if
+/// we fly at `speed`. Closed form; -1 when no positive root exists, i.e. the
+/// target outruns us and is opening.
+float TimeToIntercept(const Vec3& to_target, const Vec3& target_velocity,
+                      float speed);
+
 /// A stern chase against an equally capable evader does NOT converge -- both
 /// airframes have the same 6.7 m/s^2 lateral bound. Arrive from a geometry that
 /// already leads, or do not commit.
+///
+/// Two laws, blended by range (D22): a closed-form lead intercept flown at
+/// max_speed while there is still range to cover, handing over to proportional
+/// navigation for the last 25-70 m, where the target's manoeuvring matters more
+/// than the range does. Pure PN alone commanded almost nothing at a picket
+/// already on the inbound bearing, so the drone sat still and was rammed at our
+/// own ring radius.
+///
+/// `navigation_gain` is the terminal PN gain. 7 measured over 3.5: the lead
+/// intercept arrives with much more closing speed than PN was tuned for, and a
+/// higher gain is what buys the miss distance back (3.5 missed by 1-3 m against
+/// a 1 m kill radius). 6 and 7 score the same; 9 and 12 are worse.
 Vec3 ProNav(const Vec3& self_position, const Vec3& self_velocity,
             const Vec3& target_position, const Vec3& target_velocity,
-            const Config& cfg, float navigation_gain = 3.5f);
+            const Config& cfg, float navigation_gain = 7.0f);
 
 /// Applied last, over every other decision.
 ///

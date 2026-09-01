@@ -138,6 +138,53 @@ static void TestLiveRingRespaces() {
     CHECK(Horiz(new14, at[15]) < 8.0f);
 }
 
+static void TestLeadIntercept() {
+    std::printf("lead intercept solves the meeting point, and closes range\n");
+    Config cfg;
+    cfg.max_speed = 20.0f;
+    cfg.max_accel = 15.0f;
+    cfg.lateral_limit = 6.71f;
+
+    // Head-on: target 100 m away closing at 20, we fly at 20. Closing speed is
+    // 40, so they meet in 2.5 s.
+    float tau = flight::TimeToIntercept(Vec3(100, 0, 0), Vec3(-20, 0, 0), 20.0f);
+    CHECK(std::fabs(tau - 2.5f) < 1e-2f);
+
+    // Crossing, target slower than us: there is a lead point, and flying to
+    // it at our speed arrives exactly when the target does.
+    tau = flight::TimeToIntercept(Vec3(100, 0, 0), Vec3(0, 10, 0), 20.0f);
+    CHECK(tau > 0.0f);
+    const Vec3 meet(100.0f, 10.0f * tau, 0.0f);
+    CHECK(std::fabs(swarm::Length(meet) - 20.0f * tau) < 0.5f);
+
+    // Crossing at OUR speed is a different answer, and the right one is "no".
+    // Equal airframes make the quadratic linear, and with no component of the
+    // target's velocity toward us there is no meeting point at all -- the same
+    // reason a stern chase never converges. Returning a lead point here would
+    // send an interceptor after something it can never reach.
+    CHECK(flight::TimeToIntercept(Vec3(100, 0, 0), Vec3(0, 20, 0), 20.0f) < 0.0f);
+
+    // Opening faster than we fly: no meeting point exists, and saying so is
+    // the point -- a stern chase against an equal airframe never converges.
+    CHECK(flight::TimeToIntercept(Vec3(100, 0, 0), Vec3(25, 0, 0), 20.0f) < 0.0f);
+
+    // The bug this replaced: a picket sitting still on the hostile's inbound
+    // bearing sees no line-of-sight rotation, so pure PN commanded nothing and
+    // it was rammed at its own station. Measured on s1 at 0.2-0.4 m/s for four
+    // seconds. Command must now point AT the target, not across it.
+    const Vec3 self(70, 0, -30);
+    const Vec3 still(0, 0, 0);
+    const Vec3 hostile(170, 0, -30);
+    const Vec3 inbound(-15, 0, 0);
+    const Vec3 accel = flight::ProNav(self, still, hostile, inbound, cfg);
+    const Vec3 los = hostile - self;
+    const float range = swarm::Length(los);
+    CHECK(range > 1.0f);
+    const float along = swarm::Dot(accel, los / range);
+    CHECK(along > 0.5f * cfg.lateral_limit);   // most of the budget, outbound
+    CHECK(accel.x > 0.0f);
+}
+
 static void TestStationBisectsTheGap() {
     std::printf("station bisects the gap a run of deaths leaves\n");
     // The s2 leak, in numbers. Ring 70 m, 16 drones, comm 75. Slots 0, 1 and 2
@@ -241,6 +288,7 @@ int main() {
     TestFacingSlotMatchesRing();
     TestUniqueOwnerIsOneDrone();
     TestLiveRingRespaces();
+    TestLeadIntercept();
     TestStationBisectsTheGap();
     TestYieldHorizonIsRemainingFlight();
 
