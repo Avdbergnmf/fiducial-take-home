@@ -347,6 +347,165 @@ def derive_events(arr, times, entities, header, report):
     return events
 
 
+# ---------------------------------------------------------------------------
+# Score attribution
+# ---------------------------------------------------------------------------
+
+# Verified against the reports rather than read off the brief: on nine runs
+# spanning both tiers, mission == sum(intercept rewards) - 150*civilians
+# - 200*breaches - 40*wasted, exactly. build_scoring re-checks it per run and
+# says so in the output, so a future rules change shows up as verified: false
+# instead of silently skewing the ledger.
+SCORE_WEIGHTS = {
+    "kill_max": 100.0,        # scaled by (1 - t_engage/t_free); see reward
+    "breach": -200.0,
+    "civilian": -150.0,
+    "wasted_friendly": -40.0,
+}
+
+# A civilian that dies with no drone of ours anywhere near it was not killed by
+# us: kill_radius applies to EVERY pair of objects, civilians included, so two
+# of them drifting together destroy each other. Measured over 28 runs, 8 of 9
+# civilian losses had the nearest friendly 65-138 m away or died before the
+# first recorded frame. That is 1200 points of penalty no brain can avoid, and
+# it is worth showing as such rather than burying it in the total.
+CIVILIAN_BLAME_M = 15.0
+
+
+def build_scoring(arr, times, entities, report):
+    """Per-event ledger of where the score came from, and whether it was ours.
+
+    Everything here is the report's own numbers; the only thing derived from
+    the frames is how far the nearest friendly was when a civilian died, which
+    is what separates "we rammed a civilian" from "two civilians hit each other
+    on the far side of the arena".
+    """
+    if not report:
+        return None
+
+    mission = report.get("mission", {})
+    score = report.get("score", {})
+    friendly_slots = [e["slot"] for e in entities if e["kind"] == "friendly"]
+    civ_slots = [e["slot"] for e in entities if e["kind"] == "civilian"]
+
+    def frame_before(t):
+        """Last recorded frame at or before t, or None if t precedes them all."""
+        idx = None
+        for i, tt in enumerate(times):
+            if tt <= t + 1e-9:
+                idx = i
+            else:
+                break
+        return idx
+
+    def nearest_friendly_to_any_civilian(t):
+        f = frame_before(t)
+        if f is None or not friendly_slots or not civ_slots:
+            return None
+        best = None
+        for c in civ_slots:
+            if arr[f, c, 10] <= 0.0:      # alive flag
+                continue
+            for d in friendly_slots:
+                if arr[f, d, 10] <= 0.0:
+                    continue
+                gap = float(np.linalg.norm(arr[f, c, 0:3] - arr[f, d, 0:3]))
+                if best is None or gap < best:
+                    best = gap
+        return best
+
+    by_hostile = {i.get("hostile"): i for i in mission.get("intercepts", [])}
+    ledger = []
+
+    for ev in report.get("events", []):
+        t = ev["t"]
+        kind = ev["type"]
+        entry = {"t": t, "frame": frame_at(times, t), "kind": kind,
+                 "points": 0.0, "attributable": True, "detail": {}}
+
+        if kind == "intercept":
+            hit = by_hostile.get(ev.get("target"), {})
+            entry["points"] = float(hit.get("reward", 0.0))
+            drones = hit.get("by_drones") or []
+            entry["text"] = "%s destroyed%s" % (
+                ev.get("target", "hostile"),
+                (" by drone %d" % drones[0]) if drones else "")
+            entry["detail"] = {k: hit[k] for k in
+                               ("urgency_ratio", "t_engage_s", "t_free_s", "t_spawn")
+                               if k in hit}
+            # Reward is what is left of kill_max after the urgency scaling, so
+            # the gap between them is the cost of engaging late. Worth showing.
+            entry["detail"]["forgone_by_engaging_late"] = round(
+                SCORE_WEIGHTS["kill_max"] - entry["points"], 2)
+
+        elif kind == "breach":
+            entry["points"] = SCORE_WEIGHTS["breach"]
+            entry["text"] = "%s reached the asset" % ev.get("target", "hostile")
+
+        elif kind == "civilian_lost":
+            entry["points"] = SCORE_WEIGHTS["civilian"]
+            near = nearest_friendly_to_any_civilian(t)
+            if near is None:
+                entry["attributable"] = False
+                entry["text"] = ("civilian lost before the first recorded frame "
+                                 "- no drone had moved yet")
+                entry["detail"] = {"nearest_friendly_m": None}
+            else:
+                entry["attributable"] = near < CIVILIAN_BLAME_M
+                entry["text"] = ("civilian lost, nearest drone %.0f m away%s"
+                                 % (near, "" if entry["attributable"]
+                                    else " - not ours"))
+                entry["detail"] = {"nearest_friendly_m": round(near, 1),
+                                   "blame_radius_m": CIVILIAN_BLAME_M}
+
+        elif kind == "friendly_lost":
+            # A drone spent on a hostile is credited, not wasted, and costs
+            # nothing; only an uncredited loss carries the penalty.
+            wasted = ev.get("target") != "pair_hostile"
+            entry["points"] = SCORE_WEIGHTS["wasted_friendly"] if wasted else 0.0
+            entry["text"] = "drone %s lost (%s)" % (ev.get("drone", "?"),
+                                                    ev.get("target", "unknown"))
+            entry["detail"] = {"credited": not wasted}
+
+        else:
+            entry["text"] = kind
+
+        ledger.append(entry)
+
+    ledger.sort(key=lambda e: (e["t"], e["kind"]))
+
+    running, total = [], 0.0
+    for e in ledger:
+        total += e["points"]
+        running.append({"t": e["t"], "mission": round(total, 2)})
+
+    ours = [e for e in ledger if e["attributable"]]
+    theirs = [e for e in ledger if not e["attributable"]]
+    reported = float(score.get("mission", 0.0))
+
+    return {
+        "formula": ("mission = sum(intercept rewards) - 150*civilians "
+                    "- 200*breaches - 40*wasted_friendlies"),
+        "weights": SCORE_WEIGHTS,
+        "totals": {
+            "mission": reported,
+            "awareness": score.get("awareness"),
+            "comms": score.get("comms"),
+            "total": score.get("total"),
+            "ledger_sum": round(total, 2),
+            # If this goes false the scoring rules moved and the ledger is
+            # describing a formula the simulator no longer uses.
+            "verified": abs(total - reported) < 0.15,
+        },
+        "attributable": {"count": len(ours),
+                         "points": round(sum(e["points"] for e in ours), 2)},
+        "unattributable": {"count": len(theirs),
+                           "points": round(sum(e["points"] for e in theirs), 2)},
+        "ledger": ledger,
+        "running": running,
+    }
+
+
 def cross_check(events, report, entities):
     """Compare what geometry found against what the report says, and report the gap.
 
@@ -438,6 +597,7 @@ def main(argv):
                  for r in data["logs"]],
         "telemetry": expand_telemetry(data["telemetry"]),
         "report": report,
+        "scoring": build_scoring(arr, times, entities, report),
     }
 
     # The arena box is a min/max pair in NED; converting each corner flips the

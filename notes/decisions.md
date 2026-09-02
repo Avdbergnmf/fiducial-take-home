@@ -1018,3 +1018,61 @@ the brain is not given.
 **Determinism:** `--replay` clean on s1, s2, x1-a, x2-b and x1-72362d. All three
 suites pass, including `TestRingStaysInsideTheSpawnCircle`, which pins both that
 the cap bites on a small arena and that it does *not* bite on a large one.
+---
+
+## D29 — Score attribution in the viewer, and what the civilian penalty really is
+
+**The question that started it:** several runs score badly with nothing visibly
+wrong — full kill count, no breaches, no waste. `x1-fba99bede1412c0b8cb25f2b9b68cfe1`
+is 4/4 hostiles destroyed, zero breaches, zero wasted, and scores **−456.3**.
+
+**The scoring formula, verified rather than quoted.** Across nine runs spanning
+both tiers it reproduces the reported mission score exactly:
+
+```
+mission = sum(intercept rewards) - 150*civilians - 200*breaches - 40*wasted
+```
+
+`build_scoring` re-checks this per run and publishes `verified`, so a future
+rules change surfaces as `verified: false` rather than a silently skewed ledger.
+
+**Where the points went.** `kill_radius` applies to **every pair of physical
+objects with no exceptions** — the ABI header says so — civilians included. Two
+civilians that drift together destroy each other, and we are charged 150 each.
+Cross-referencing every civilian death against the frames:
+
+| scenario | civilians lost | nearest friendly at death |
+|---|---|---|
+| x1-a | 2 | 65 m, 65 m |
+| x1-fba99bede… | 4 | **t=0**, **t=0**, 138 m, 138 m |
+| x1-19941165… | 2 | **t=0**, **t=0** |
+| x1-8e0cbbb… | 1 | 2 m ← genuinely ours |
+
+Over 28 runs: **9 civilian losses, 8 of them unavoidable — 1200 points** charged
+for collisions our nearest drone was 65–138 m from, or that happened at t = 0.0
+before the brain had issued a single command. On x1-a that penalty is the entire
+difference between a −104 mission and a +196 one.
+
+**This is not a bug to fix in the brain.** There is no action available: we do
+not control civilian flight paths, and staying further away from them is already
+what `separation_margin` does. The one attributable death (2 m) is the only one
+worth chasing. What the brain *can* do is not be blamed for the rest, so the
+viewer now separates them.
+
+**What shipped:** `tools/build_viewer_data.py` gains a `scoring` block in
+`run.meta.json`:
+
+* `formula`, `weights`, and `totals` (with `verified`)
+* `attributable` / `unattributable` — count and points either side of the line
+* `ledger` — one entry per scoring event: `t`, `frame`, `kind`, `points`,
+  `attributable`, `text`, and a `detail` object. Intercepts carry
+  `urgency_ratio` and `forgone_by_engaging_late` (kill_max minus what we
+  actually banked), which is the reward D22 exists to recover.
+* `running` — cumulative mission score over time, for a graph.
+
+Civilian attribution uses a 15 m blame radius against the last frame at or
+before the death; a death with no prior frame is reported as such rather than
+guessed at.
+
+**Not a brain change.** `brain/src` is untouched, so determinism and the C++
+suites are unaffected.
