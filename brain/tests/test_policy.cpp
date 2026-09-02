@@ -185,6 +185,38 @@ static void TestLeadIntercept() {
     CHECK(accel.x > 0.0f);
 }
 
+static void TestZeroEffortMissSteersAtTheMiss() {
+    std::printf("terminal guidance steers at the predicted miss\n");
+    Config cfg;
+    cfg.max_speed = 20.0f;
+    cfg.max_accel = 15.0f;
+    cfg.lateral_limit = 6.71f;
+
+    // Head-on but offset: we run +x at 20, the target runs -x at 20 from 100 m
+    // ahead and 10 m to our left. Neither turning, they pass 10 m apart -- that
+    // 10 m IS the zero-effort miss, and the command must be spent closing it.
+    const Vec3 self(0, 0, -30);
+    const Vec3 self_v(20, 0, 0);
+    const Vec3 tgt(100, 10, -30);
+    const Vec3 tgt_v(-20, 0, 0);
+    const Vec3 accel = flight::ProNav(self, self_v, tgt, tgt_v, cfg);
+    CHECK(accel.y > 0.5f * cfg.lateral_limit);   // toward the miss, hard
+    CHECK(std::fabs(accel.x) < accel.y);         // across the LOS, not along it
+
+    // Mirror the offset and the command mirrors with it.
+    const Vec3 mirrored = flight::ProNav(self, self_v, Vec3(100, -10, -30),
+                                         tgt_v, cfg);
+    CHECK(mirrored.y < -0.5f * cfg.lateral_limit);
+
+    // Already on a collision course: nothing to correct, so almost no lateral
+    // command. This is the case classic PN also gets right; it is the one
+    // above, mid-handover with the closing rate still changing, that it does
+    // not.
+    const Vec3 straight = flight::ProNav(self, self_v, Vec3(100, 0, -30),
+                                         tgt_v, cfg);
+    CHECK(std::fabs(straight.y) < 0.1f * cfg.lateral_limit);
+}
+
 static void TestStationBisectsTheGap() {
     std::printf("station bisects the gap a run of deaths leaves\n");
     // The s2 leak, in numbers. Ring 70 m, 16 drones, comm 75. Slots 0, 1 and 2
@@ -289,6 +321,7 @@ int main() {
     TestUniqueOwnerIsOneDrone();
     TestLiveRingRespaces();
     TestLeadIntercept();
+    TestZeroEffortMissSteersAtTheMiss();
     TestStationBisectsTheGap();
     TestYieldHorizonIsRemainingFlight();
 

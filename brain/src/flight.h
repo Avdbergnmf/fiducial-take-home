@@ -47,13 +47,13 @@ float TimeToIntercept(const Vec3& to_target, const Vec3& target_velocity,
 /// already on the inbound bearing, so the drone sat still and was rammed at our
 /// own ring radius.
 ///
-/// `navigation_gain` is the terminal PN gain. 7 measured over 3.5: the lead
-/// intercept arrives with much more closing speed than PN was tuned for, and a
-/// higher gain is what buys the miss distance back (3.5 missed by 1-3 m against
-/// a 1 m kill radius). 6 and 7 score the same; 9 and 12 are worse.
+/// `navigation_gain` is the terminal gain, now on a zero-effort-miss law
+/// rather than classic PN (D25): a = N * ZEM / t_go^2. 10 measured -- escapes
+/// fall monotonically from N=3 to N=10 and the fixed-set score is flat, while
+/// N=14 starts costing kills.
 Vec3 ProNav(const Vec3& self_position, const Vec3& self_velocity,
             const Vec3& target_position, const Vec3& target_velocity,
-            const Config& cfg, float navigation_gain = 7.0f);
+            const Config& cfg, float navigation_gain = 10.0f);
 
 /// Applied last, over every other decision.
 ///

@@ -812,3 +812,69 @@ open item — a lead point that estimates target *acceleration* instead of
 assuming constant velocity.
 
 **Nothing committed but this entry.**
+---
+
+## D26 — Terminal guidance: zero-effort miss instead of proportional navigation
+
+**First, a correction to D22 and D24.** Both said intercepts turn on "1-3 m of
+terminal miss against a 1 m kill radius". That reading was wrong, and it came
+from a broken instrument: a ram removes **both** entities, so a *successful*
+kill also leaves a truncated 1-3 m closest approach in the trace. I was
+measuring kills and calling them misses.
+
+**The instrument, rebuilt** (`/tmp` scratch, not shipped): classify each hostile
+against the report's `intercepts` list, measure closest approach only for the
+ones that got away, and solve the CPA of each 10 Hz segment analytically rather
+than taking the sample minimum — at 35 m/s of closing a sample is 3.5 m of
+travel, larger than the kill radius. That gives a gradient the score does not:
+the score moves in whole kills, "how close did we get to the ones we lost" moves
+smoothly.
+
+**What it says.** On the fixed set, only **2 hostiles escape at all**, both on
+s2, at 9.3 m and 15.9 m — never engaged, not missed. There is nothing left to
+win there. On 20 fresh ids: 11 escapes, of which **6 are near misses**
+(1.67, 1.99, 2.25, 2.67, 3.92, 8.02 m; mean 3.42) and 5 were never engaged
+(18-53 m). All six near misses are tier-2, which fits — 8% loss and latency
+make a staler track and a worse lead point.
+
+**Options measured** (fixed-set sweep mean as the guard, near-miss count on the
+six fresh ids that lose hostiles as the gradient; baseline **+99.1** / 11
+escapes / 6 near):
+
+1. **Give the terminal law full authority** (fade only the midcourse leg, since
+   `LimitAccel` clips the sum). 8 escapes, 3 near — but sweep mean **+67.5**.
+2. **Reserve authority: cap midcourse at 0.7 / 0.5 of the lateral bound.**
+   **6 escapes and zero near misses** — the accuracy problem simply goes away —
+   but the sweep mean collapses to **+6.8 / +2.2**. Arriving gentler makes the
+   hit easy and the interception late. A trade, not a win. Rejected.
+3. **Zero-effort miss**: `a = N·ZEM/t_go²`, where ZEM is where the target would
+   pass us if neither accelerated again. N=3 → 14 escapes; N=4 → 13; N=6 → 10;
+   N=8 → 10; **N=10 → 9**; N=14 → 8 escapes but the sweep mean falls to +70.7.
+   Escapes fall monotonically to N=10 with the score flat.
+
+**Chosen:** 3, at N = 10.
+
+**Why:** classic PN nulls the line-of-sight *rotation rate*, which is equivalent
+to nulling the miss only while the closing rate is steady. After D22 ours is
+not — the midcourse leg hands over still accelerating hard — so PN was solving a
+slightly wrong problem at exactly the moment it mattered. ZEM steers at the
+predicted miss directly and stays correct through the handover. It is the same
+closed-form family, no extra state, no extra tuning beyond the one gain.
+
+**Cost accepted:** tier-1 mean falls 145.9 → 127.2 on fresh ids, at **identical
+31/31 kills and zero breaches** — so it is reward, not kills: the stronger
+terminal steering pulls slightly off the lead point and engages a little later
+where nothing was going wrong anyway.
+
+**Measured, 8 fixed scenarios:** flat. mean 99.1 → 98.2, min −246.8 → −247.9,
+max 276.7 → 276.4, same kills everywhere, civilians 2, wasted 0.
+
+**Measured, 20 fresh ids:** mean **30.9 → 44.4**, min **−556.2 → −505.4**,
+kills **54 → 56/65**, breaches **11 → 9**, tier-2 mean **−84.1 → −38.5**.
+
+**Still open:** 5 of the 9 remaining escapes were never engaged at all (18-53 m
+closest approach). Those are allocation or coverage, not accuracy, and D24 says
+a real weapon-target assignment needs `Claim` back on the wire first.
+
+**Determinism:** `--replay` clean on s1, s2, x1-a, x2-b. All three suites pass,
+including `TestZeroEffortMissSteersAtTheMiss`.
