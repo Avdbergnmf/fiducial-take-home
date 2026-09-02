@@ -7,6 +7,7 @@ constexpr float kHearsayDrop = 2.0f;       // s; local tracks drop with the sens
 constexpr float kEvidenceForCall = 0.6f;   // s of aimed geometry to name Hostile
 constexpr float kScoreDecay = 0.6f;        // per second, toward zero
 constexpr float kSureHit = 5.0f;           // m; aimed-dash CPA, well above fix_sigma 0.35
+constexpr float kDiveRate = 1.0f;         // m/s down; civilians measure 0.00-0.14
 constexpr float kShrink = 3.0f;            // m of miss drop since first sight → steering
 constexpr float kFriendlyGate = 8.0f;      // m; heartbeat → sensor track
 constexpr float kFriendlyHold = 2.5f;      // s; 2 Hz heartbeat, covers a few losses
@@ -233,7 +234,33 @@ void TrackStore::Classify(Track& t, float now, float dt) {
     const float miss = ClosestApproachDistance(t.position, t.velocity, cfg_.asset);
     if (t.miss_at_first < 0.0f) t.miss_at_first = miss;
 
-    const bool aimed = AimedAtAsset(miss, t.miss_at_first, cfg_.asset_radius);
+    // A hostile dives; a civilian does not. The 3D miss test above is what
+    // keeps civilian overflights out of the hostile call (D7), but it can only
+    // fire once the dive has developed: measured, a hostile's 3D miss needs
+    // 2.5 s to fall under kSureHit, out of a window that is about 4 s long.
+    //
+    // The dive itself is visible immediately and civilians never produce it.
+    // Measured on x1-ae01dd: hostiles ramp to vz +3.6 m/s within 2 s and hold
+    // it, passing +1.67 by 0.5 s with a ground miss already at 0.1 m, while
+    // every civilian in the same run sits between 0.00 and 0.14 m/s at
+    // altitudes from 31 to 67 m. So a track that is descending AND whose
+    // GROUND track enters the cylinder is a hostile now -- and the breach is a
+    // cylinder at any altitude (D10), so the ground track is the right test for
+    // it. Wreckage falls too, but the ballistic test above has already returned.
+    const float ground_miss = ClosestApproachDistance(
+        Flat(t.position), Flat(t.velocity), Flat(cfg_.asset));
+    // Only when there is no time left to wait for it, though. Calling early is
+    // not free: the owner commits early, leaves station early and is away
+    // longer, which on a spawner that enters where nobody is standing costs
+    // more than the early call wins. Measured, the unconditional version gained
+    // on every layout with a short window and lost more on the ones with a long
+    // one. So the dive is the answer to "I cannot afford to wait", not a
+    // replacement for the patient test.
+    const bool diving = t.velocity.z > kDiveRate;
+    const bool urgent = TimeToCylinder(t.position, t.velocity, cfg_.asset,
+                                       cfg_.asset_radius) < 10.0f;
+    const bool aimed = AimedAtAsset(miss, t.miss_at_first, cfg_.asset_radius)
+                       || (urgent && diving && ground_miss < cfg_.asset_radius);
 
     if (aimed && alignment > 0.8f && closing > 4.0f) {
         t.closing_score = Clamp(t.closing_score + dt, -2.0f, 3.0f);

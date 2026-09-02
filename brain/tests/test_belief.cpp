@@ -183,6 +183,43 @@ static void TestAimedAtAssetShrinkVsNoise() {
     CHECK(!AimedAtAsset(19.7f, 20.0f, asset_radius));
 }
 
+static void TestDiveIsAHostileSignatureWhenTimeIsShort() {
+    std::printf("a diving track on the cylinder is hostile without the wait\n");
+    // The 3D miss test is what keeps civilian overflights out of the hostile
+    // call, but it can only fire once the dive has developed -- measured, 2.5 s
+    // of a window about 4 s long. The dive itself is visible at once, and
+    // civilians never produce it: on x1-ae01dd every hostile ramps to vz +3.6
+    // m/s within 2 s while every civilian sits between 0.00 and 0.14.
+    const Vec3 asset(0, 0, 0);
+    const float asset_radius = 30.0f;
+
+    // Hostile, 0.5 s after spawn: still high, so the 3D miss is far too big for
+    // AimedAtAsset, but it is descending and its GROUND track is on the asset.
+    const Vec3 h_pos(120.0f, 0.0f, -39.5f);
+    const Vec3 h_vel(-19.0f, 0.0f, 1.67f);
+    const float h_miss3 = ClosestApproachDistance(h_pos, h_vel, asset);
+    CHECK(h_miss3 > 5.0f);                                  // patient test says no
+    CHECK(!AimedAtAsset(h_miss3, h_miss3, asset_radius));
+    const float h_ground = ClosestApproachDistance(
+        Vec3(h_pos.x, h_pos.y, 0), Vec3(h_vel.x, h_vel.y, 0), asset);
+    CHECK(h_ground < asset_radius);                         // dive test says yes
+    CHECK(h_vel.z > 1.0f);
+    CHECK(TimeToCylinder(h_pos, h_vel, asset, asset_radius) < 10.0f);
+
+    // Civilian overflying the same ground track, level at 50 m. Its ground miss
+    // is just as small -- which is exactly why the ground track alone cannot be
+    // the test -- but it is not descending, so the dive path never opens.
+    const Vec3 c_vel(-19.0f, 0.0f, 0.02f);
+    const Vec3 c_pos(120.0f, 0.0f, -50.0f);
+    const float c_ground = ClosestApproachDistance(
+        Vec3(c_pos.x, c_pos.y, 0), Vec3(c_vel.x, c_vel.y, 0), asset);
+    CHECK(c_ground < asset_radius);
+    CHECK(!(c_vel.z > 1.0f));
+    CHECK(!AimedAtAsset(ClosestApproachDistance(c_pos, c_vel, asset),
+                        ClosestApproachDistance(c_pos, c_vel, asset),
+                        asset_radius));
+}
+
 static void TestLevelOverflightIsNotAimed() {
     std::printf("AimedAtAsset rejects a radial level overflight (x1-a drone 2)\n");
     const float asset_radius = 38.1f;
@@ -263,6 +300,7 @@ int main() {
     TestMissDistanceIgnoresThePast();
     TestAimedAtAssetRejectsTheG1aChord();
     TestAimedAtAssetShrinkVsNoise();
+    TestDiveIsAHostileSignatureWhenTimeIsShort();
     TestLevelOverflightIsNotAimed();
     TestLevelDashIsNotAHit();
     TestHeartbeatRangeCorroboration();

@@ -1141,3 +1141,82 @@ than tier-1 loses — overall fresh mean 44.6 → 89.0 — so it is taken.
 three suites pass; `TestStationBisectsTheGap` was updated to pin the new
 behaviour (both near neighbours now register as dead, each lip slides a full
 slot, and the 90° hole closes by two slots instead of one).
+---
+
+## D31 — Classification latency: the dive, and why calling early mostly does not pay
+
+**Two questions first, both answered from the code.**
+
+*Does repositioning block interception?* **No.** `Fly()` branches on
+`stance == Committed` before anything else and hands straight to `ProNav`; the
+reposition path only runs when not committed.
+
+*Does repositioning corrupt detection or classification?* **No.** Every term in
+`Classify` is measured against the **asset**, not against us —
+`ApproachAlignment`, `RangeRate` and `ClosestApproachDistance` all take
+`cfg_.asset`. Our own motion does not enter the evidence at all.
+
+**What the latency actually is.** `kEvidenceForCall` is only **0.6 s**, so the
+integrator is not the delay. The delay is the gate:
+
+```cpp
+bool AimedAtAsset(float miss, float miss_at_first, float asset_radius) {
+    if (miss < kSureHit) return true;                              // 3D CPA < 5 m
+    return miss < asset_radius && miss < miss_at_first - kShrink;  // or shrunk 3 m
+}
+```
+
+`miss` is **3D**, and hostiles enter at 40 m altitude against an asset on the
+ground, so a hostile flying level has a 3D CPA of about its own altitude — above
+both branches. It only becomes "aimed" once the **dive** pulls the 3D miss down.
+That is the wait, and it is the price of D7: a civilian overflight has a tiny
+*ground* miss too, so the ground track alone cannot be the test.
+
+**Measured on x1-ae01dd** (age since spawn):
+
+| | vz (+ down) | ground miss | 3D miss |
+|---|---|---|---|
+| hostile, 0.5 s | **+1.67** | 0.1 | 52.6 |
+| hostile, 2.0 s | +3.59 | 0.0 | 8.8 |
+| hostile, 2.5 s | +3.69 | 0.1 | **2.8** ← called here |
+| civilians (all, t=10 s) | **0.00 – 0.14** | — | — |
+
+The dive is unambiguous at 0.5 s and civilians never produce it. The current
+test waits until 2.5 s, out of a window about 4 s long.
+
+**Options measured** (mean over the fixed 8, the 20 fresh ids, and the two
+reported hard ids — 30 runs, weighted equally):
+
+| | fixed 8 | fresh 20 | hard 2 | **all 30** |
+|---|---|---|---|---|
+| baseline | 125.2 | 89.0 | 33.0 | **94.9** |
+| dive gate, unconditional (vz > 1.0) | **132.5** | 80.8 | **64.6** | **93.5** |
+| …vz > 0.6 / vz > 2.0 | 132.8 / 131.2 | — | 66.8 / 55.9 | — |
+| **dive gate, only when ttg < 10 s** | 127.4 | **89.2** | 33.0 | **95.7** |
+| dive gate, only when ttg < 6 s | 125.2 | 89.0 | 33.0 | 94.9 (inert) |
+
+**Chosen:** the dive path, gated on `TimeToCylinder < 10 s`.
+
+**Why the unconditional version loses, which is the interesting part.** It is
+the best variant on the fixed set *and* on both hard ids, and it is **net
+negative overall** — the 20 unseen ids drop 89.0 → 80.8, a kill and a breach.
+Declarations stay clean (1 wrong, 0 false accusations across the sweep), so it is
+not a classification-quality cost. Calling earlier makes the owner *commit*
+earlier, leave station earlier and stay away longer, and against a spawner that
+enters where nobody is standing that costs more than the early call wins. The
+dive is the answer to "I cannot afford to wait", not a replacement for the
+patient test.
+
+This is the second time in a row that "better on the fixed set and on
+hand-picked bad runs, worse on fresh ids" has shown up (see D30). The fixed
+eight are what every session has tuned against and the hard ids were chosen
+*because* they were bad; only the fresh draw is an unbiased estimate.
+
+**Measured:** fixed sweep mean 125.2 → **127.4**, floor unchanged at −39.4;
+20 fresh ids 89.0 → **89.2** with identical kills (60/65), breaches (5) and
+floor; both hard ids unchanged. Small, but it regresses nothing.
+
+**Determinism:** `--replay` clean on s1, s2, x1-a, x2-b and both hard ids. All
+three suites pass, including `TestDiveIsAHostileSignatureWhenTimeIsShort`, which
+pins that a diving track on the cylinder opens the fast path while a level
+civilian on the *same ground track* does not.
