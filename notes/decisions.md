@@ -955,3 +955,66 @@ is the shape of the problem.
 **What I am NOT claiming:** that relaying would help. It propagates a detection
 that already exists, and the hearsay `call trk=0` lines land within ~0.5 s of the
 local call, so propagation is not the lag. First detection is geometry.
+---
+
+## D28 — The ring must sit well inside the circle hostiles enter on
+
+**Found by inspection of a bad run, then confirmed by measurement.** On
+`x1-72362d4ff5f79a18684e1706d8687322` the nearest picket sat at radius 99 and
+the first hostile appeared at 127 — **27 m outside the ring**. It was inside the
+picket before it could be called, and the run scored −519 at 2/5 with three
+breaches.
+
+`ring_radius_` was `asset_radius + comm_radius·0.625`, which is a *radio*
+property and says nothing about how far out the threat starts. When a scenario
+pairs a generous radio with a small arena the two are unrelated and the ring
+lands almost on the spawn circle.
+
+**The spawn radius is derivable.** `spawn.enemy_radius` is not in `SwBootInfo`,
+but `arena_min`/`arena_max` are, and the ratio is stable:
+
+| scenario | arena½ | spawn | ratio | ring | **ring/spawn** | score |
+|---|---|---|---|---|---|---|
+| x1-b | 232 | 185.6 | 0.80 | 92.8 | 0.50 | +276 |
+| x2-b | 239 | 191.5 | 0.80 | 94.0 | 0.49 | +124 |
+| x2-a | 184 | 147.5 | 0.80 | 72.6 | 0.49 | +179 |
+| s1 | 200 | 170.0 | 0.85 | 86.2 | 0.51 | +230 |
+| s2 | 250 | 220.0 | 0.88 | 76.9 | 0.35 | −248 |
+| x1-a | 187 | 149.3 | 0.80 | 112.1 | **0.75** | −18 |
+| x1-ae01dd… | 171 | 136.8 | 0.80 | 89.7 | **0.66** | **−395** |
+| x1-72362d… | 158 | 126.6 | 0.80 | 99.1 | **0.78** | **−519** |
+
+Every generated scenario spawns hostiles at **0.80 of the arena half-extent**;
+the two hand-written ones are 0.85 and 0.88, so 0.80 is the conservative read
+and the cap binds slightly early there rather than late. Every healthy run sits
+near ring/spawn = 0.50; everything at 0.66 and above is a disaster.
+
+**Cap swept** (hard = the two ids above; guard = the fixed sweep mean, +98.2):
+
+| cap | x1-72362d… | x1-ae01dd… | sweep mean |
+|---|---|---|---|
+| none | −519.4 (2/5) | −395.4 (2/3) | **98.2** |
+| 0.45 | +191.3 (5/5) | −139.8 (3/3) | 84.7 |
+| 0.55 | +212.4 (5/5) | −147.5 (3/3) | 95.5 |
+| **0.65** | **+226.3 (5/5)** | **−159.6 (3/3)** | **97.3** |
+| 0.70 | +20.5 (4/5) | −395.4 (2/3) | 97.3 |
+
+**Chosen:** 0.65. It is the largest cap that still bites on x1-ae01dd (whose
+ratio is 0.66) — 0.70 misses it entirely and the run stays broken — while giving
+away the least standoff elsewhere.
+
+**Measured:** both bad runs go to **zero breaches and a full kill count**;
+−519.4 → +226.3 and −395.4 → −159.6. The fixed sweep is untouched apart from
+x1-a (−18.1 → −25.2, still 4/4), mean 98.2 → 97.3. On 20 fresh ids it is
+**inert** — mean 44.4 → 44.6, identical kills and breaches — because the cap
+only binds where the ring was already too far out.
+
+**Cost accepted:** the 0.80 constant is measured from the generator, not read
+from the scenario. If a future generator moved the spawn circle in without
+moving the arena, the cap would be too loose. A `spawn.enemy_radius` field in
+`SwBootInfo` would remove the guess entirely; the cap is a proxy for a number
+the brain is not given.
+
+**Determinism:** `--replay` clean on s1, s2, x1-a, x2-b and x1-72362d. All three
+suites pass, including `TestRingStaysInsideTheSpawnCircle`, which pins both that
+the cap bites on a small arena and that it does *not* bite on a large one.

@@ -138,6 +138,37 @@ static void TestLiveRingRespaces() {
     CHECK(Horiz(new14, at[15]) < 8.0f);
 }
 
+static void TestRingStaysInsideTheSpawnCircle() {
+    std::printf("ring is capped well inside where hostiles enter\n");
+    // The failure this exists for: a small arena with a generous radio put the
+    // ring at 0.78 of the spawn radius, so hostiles were born 27 m outside it
+    // and were inside the picket before they could be called. -519 on that id.
+    Config cfg;
+    cfg.drone_id = 0;
+    cfg.fleet_size = 16;
+    cfg.asset = Vec3(0, 0, 0);
+    cfg.asset_radius = 30.0f;
+    cfg.comm_radius = 118.0f;          // generous radio...
+    cfg.sense_radius = 92.0f;
+    cfg.arena_min = Vec3(-158, -158, -120);   // ...small arena
+    cfg.arena_max = Vec3(158, 158, 0);
+
+    Policy p;
+    p.Configure(cfg, Rng());
+    const float spawn_radius = 0.80f * 158.0f;
+    CHECK(p.ring_radius() <= spawn_radius * 0.65f + 1e-3f);
+    CHECK(p.ring_radius() > cfg.asset_radius);
+
+    // A big arena leaves the radio rule in charge: the cap must not bite when
+    // there is plenty of room, or it would give away standoff for nothing.
+    cfg.arena_min = Vec3(-400, -400, -120);
+    cfg.arena_max = Vec3(400, 400, 0);
+    Policy wide;
+    wide.Configure(cfg, Rng());
+    CHECK(std::fabs(wide.ring_radius()
+                    - (cfg.asset_radius + cfg.comm_radius * 0.625f)) < 1e-3f);
+}
+
 static void TestLeadIntercept() {
     std::printf("lead intercept solves the meeting point, and closes range\n");
     Config cfg;
@@ -320,6 +351,7 @@ int main() {
     TestFacingSlotMatchesRing();
     TestUniqueOwnerIsOneDrone();
     TestLiveRingRespaces();
+    TestRingStaysInsideTheSpawnCircle();
     TestLeadIntercept();
     TestZeroEffortMissSteersAtTheMiss();
     TestStationBisectsTheGap();

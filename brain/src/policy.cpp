@@ -60,6 +60,28 @@ void Policy::Configure(const Config& cfg, Rng rng) {
     // a leaker at that range cannot be run down, since a hostile has our
     // lateral limit -- and tier-2 layouts collapse. See notes/decisions.md.
     ring_radius_ = cfg.asset_radius + cfg.comm_radius * 0.625f;
+
+    // ...but never out near the circle hostiles enter on (D28). A picket that
+    // sits just inside it meets its first hostile already born on top of it,
+    // with no room left to detect, classify and turn -- measured, the two worst
+    // generated layouts put the ring at 0.78 and 0.66 of the spawn radius and
+    // scored -519 and -395, while every healthy one sits near 0.50.
+    //
+    // spawn.enemy_radius is not in SwBootInfo, but it is a fixed fraction of
+    // the arena, which is: 0.80 of the half-extent on every generated scenario
+    // measured (0.85 and 0.88 on the two hand-written ones, so 0.80 is the
+    // conservative read and the cap binds a little early there rather than
+    // late). comm_radius is a radio property and says nothing about how far out
+    // the threat starts, which is why the ring needed a second bound at all.
+    const float span_x = cfg.arena_max.x - cfg.arena_min.x;
+    const float span_y = cfg.arena_max.y - cfg.arena_min.y;
+    const float arena_half = 0.5f * (span_x < span_y ? span_x : span_y);
+    const float spawn_radius = 0.80f * arena_half;
+    const float ring_cap = spawn_radius * 0.65f;
+    if (ring_radius_ > ring_cap) ring_radius_ = ring_cap;
+    // Never inside the thing we are defending.
+    const float floor_r = cfg.asset_radius + 10.0f;
+    if (ring_radius_ < floor_r) ring_radius_ = floor_r;
     ring_altitude_ = 30.0f;
     picket_goal_ = flight::RingSlot(cfg.drone_id, cfg.fleet_size, cfg.asset,
                                     ring_radius_, ring_altitude_);
