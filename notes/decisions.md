@@ -744,3 +744,71 @@ closes it locally and for free, without anyone having to fly a circle.
 
 **Nothing committed but this entry.** The experiment scripts are scratch; the
 numbers above are the deliverable.
+---
+
+## D24 — Best-interceptor assignment: prototyped, measured, not adopted
+
+Today's rule answers **"who is pointed at it"**, not "who can catch it":
+
+```cpp
+const uint32_t facing = FacingSlot(t.position, cfg_.asset, cfg_.fleet_size);
+return UniqueOwner(facing, ...) == cfg_.drone_id;   // first live CLOCKWISE
+```
+
+Two things are wrong with it on paper. It scores by bearing rather than by
+reachability, and when the facing drone is dead it walks clockwise **only**, so
+a better-placed drone counter-clockwise never gets the track. Ownership is
+exclusive, so if the drone it picks cannot catch the hostile, nobody else may
+try — which is exactly the s2 29 s dead window in D21.
+
+D22 gave us the right metric for free: `TimeToIntercept` returns the lead
+solution's time, and −1 when a candidate cannot catch the target at all.
+
+**Prototypes, all against the D22 baseline (sweep mean +99.1):**
+
+| assignment rule | mean | min |
+|---|---|---|
+| current (bearing, first live clockwise) | **+99.1** | −246.8 |
+| min time-to-intercept, scored from stations | +22.0 | −236.6 |
+| …plus "must catch before the cylinder" | +22.1 | −236.6 |
+| …plus hysteresis (a committed drone keeps its track) | +22.0 | −236.6 |
+| min time-to-intercept, scored from heard poses | +21.0 | −457.1 |
+| top **2** by time-to-intercept (drop exclusivity) | −30.8 | −450.7 |
+
+**Not adopted.** Every variant is worse, and doubling up is worst of all — it
+breaks s1 from 6/6 to 4/6.
+
+**Is the current rule actually choosing badly?** Instrumented it to log, at
+every commit, the committing drone's own time-to-intercept next to the best
+available. Over s2, x2-b and x1-c: **optimal 9 times out of 15**, and most of
+the misses are near-optimal (2.0 vs 1.7, 3.1 vs 2.4). Two are not:
+`d2 tau=2.9 best=0.2` and `d3 tau=2.6 best=0.6`.
+
+So the observation that a badly-placed drone sometimes takes the intercept is
+**correct**. It is also mostly harmless, for a reason worth writing down: for a
+hostile flying *radially* at the asset, the drone on the facing bearing is
+usually the one nearest its corridor — bearing and catchability coincide, and
+the clockwise walk lands a slot or two away, still near-optimal.
+
+**Why fixing it does not pay.** Traced x2-b under both rules: each logs three
+rams, yet the baseline scores 3/3 and the reassigned build 2/3 — the difference
+is one `ram ... rng=2.6` followed by `abort not-closing`. Measured closest
+approach across scenarios sits at **1–3 m against a 1.0 m kill radius**.
+Intercepts turn on terminal miss distance, not on who flies them; changing the
+assignment reshuffles geometry and flips marginal intercepts in both directions.
+The ±1 kill per scenario in these rows is that noise, not a signal about
+allocation quality.
+
+**The confound, and what a correct version would need.** The two large
+mis-assignments above are partly an artefact: the "better" drone was already
+committed to another hostile, so it was never actually available. Neither the
+diagnostic nor a naive min-tau rule knows who is busy — and a drone cannot know,
+because D11 took `Claim` off the wire for bandwidth. **A real weapon-target
+assignment needs claims broadcast again.** That is the honest prerequisite, and
+it is untested.
+
+**Where the points actually are:** terminal accuracy. Same conclusion as D22's
+open item — a lead point that estimates target *acceleration* instead of
+assuming constant velocity.
+
+**Nothing committed but this entry.**
