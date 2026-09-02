@@ -878,3 +878,80 @@ a real weapon-target assignment needs `Claim` back on the wire first.
 
 **Determinism:** `--replay` clean on s1, s2, x1-a, x2-b. All three suites pass,
 including `TestZeroEffortMissSteersAtTheMiss`.
+---
+
+## D27 — Allocation is not the constraint; the actionable window is
+
+D24 left "a real weapon-target assignment needs Claim back on the wire" as the
+next step, and D26 left five escapes that were never engaged at all. This is the
+same instrument-first treatment applied to those.
+
+**The instrument** (`/tmp` scratch, not shipped). For every hostile that got
+away, walk the trace with **ground truth** — every drone's real position, which
+no single drone has — and separate three questions:
+
+* `seen_s` — how long was it inside somebody's sense radius?
+* `feas_s` — how long did some live drone have a lead solution landing before
+  the cylinder, using the same closed form the brain flies?
+* `BOTH_s` — how long were those true *at the same time*? That is the only
+  window in which any allocation rule could have acted.
+
+**What it says**, over s2 and the six fresh tier-2 ids that lose hostiles:
+
+| | escaped | seen_s | feas_s | **BOTH_s** |
+|---|---|---|---|---|
+| range across 11 escapes | 11 | 4.5 – 11.5 | 7.0 – 15.1 | **1.5 – 7.3** |
+
+Every escape was actionable — **zero were physically uncatchable**. But the
+window is 1.5–7.3 s, and `feas_s` exceeds `seen_s` almost everywhere: the
+hostile is catchable well before anybody can see it.
+
+**Options measured** (fixed-set sweep mean guard = **+98.2**, escapes on the
+allocation bench = **11**):
+
+1. **Fallback ownership.** Keep the bearing rule as primary (D24 showed
+   replacing it costs 78 points) and let the best feasible drone take the track
+   only when the bearing owner has no lead solution. **No change whatsoever** —
+   the fallback never fires, because `TimeToIntercept` returns a solution for
+   almost any ring drone against an inbound. "Has a solution" is not "can catch
+   it in time".
+2. **Fallback on the deadline** instead: the owner must land before the cylinder,
+   at margins 1.0, 0.8, 0.6 of the time-to-go. **No change at any margin.**
+3. **Fix the commit gate.** `ShouldCommit` still tested `t_meet = range/closing`
+   — how long until the hostile arrives at *us*. That was the right model when a
+   picket waited on station and was rammed, which is literally what it did
+   before D22; since D22 we fly a lead point at max_speed, so it understates
+   what we can reach. Replaced it with the lead solution, with and without the
+   old `closing >= kMinClosing` precondition. **Bit-identical scores on all
+   eight scenarios**, verified against the per-scenario totals and the loaded
+   brain path, not just the summary.
+4. **Push the ring out again.** D21 rejected a wider ring because a leaker past
+   it could not be run down — which is exactly what D22's lead intercept fixed,
+   so the trade deserved re-testing. It did not survive: fixed mean 98.2 → 49.0
+   → −116.5 → −146.2 at F = 0.75 / 0.875 / 1.0, fresh tier-2 kills 25 → 20 → 18
+   → 15. Tier-1 improves throughout (fresh mean 127.2 → 175.9), which is the
+   same tier split as D21, now confirmed on top of D22 and D26.
+
+**Nothing adopted. No code change.**
+
+**Why four ownership variants and two commit-gate variants changed nothing:**
+execution never reaches them. Logged the calls on a fresh id that loses 2 of 3:
+
+```
+hostile id21  spawns 29.2 -> gone 45.1    first "call hostile" 41.23   (3.9 s left)
+hostile id22  spawns 47.8 -> gone 63.6    first "call hostile" 59.75   (3.9 s left)
+```
+
+Classification is **not** slow — first sensor contact to `call` is about 0.6 s.
+The hostile is simply only inside sense range for ~4.5 s, having flown 220 m to
+get there. There is barely a window to allocate *in*, so who owns it and what
+the gate permits are both nearly irrelevant.
+
+**The real constraint is sensor reach against a spawner that picks the bearing
+furthest from any defender**, and the one geometric lever on it — a wider ring —
+is the one tier-2's radio cannot carry. That is not a rule that needs fixing; it
+is the shape of the problem.
+
+**What I am NOT claiming:** that relaying would help. It propagates a detection
+that already exists, and the hearsay `call trk=0` lines land within ~0.5 s of the
+local call, so propagation is not the lag. First detection is geometry.
