@@ -206,8 +206,17 @@ bool RingAlive(uint32_t drone_id, uint32_t self_id, const float* heard,
     const float dx = heard_at[drone_id].x - self_pos.x;
     const float dy = heard_at[drone_id].y - self_pos.y;
     const float d = std::sqrt(dx * dx + dy * dy);
-    const float keep = comm_radius - kCruise * kOwnerSilent - 10.0f;
-    return d > keep;
+    //
+    // The threshold is the radio itself (D30). It used to be
+    // comm_radius - cruise*silent - 10, allowing for a mate having flown out of
+    // range during the silence -- but on the ring they do not: station-keeping
+    // is a few m/s, not cruise. That 31 m of slack meant only the IMMEDIATE
+    // neighbour ever registered as dead, since the slot chords run 27 / 54 /
+    // 80 m, so each lip of a hole slid half a slot and the gap D21 exists to
+    // close only half closed. Measured on the radio: fixed-sweep floor
+    // -247.9 -> -39.4, s2 4/6 -> 5/6; over 20 unseen ids mean 44.6 -> 89.0,
+    // kills 56 -> 60/65, breaches 9 -> 5.
+    return d > comm_radius;
 }
 
 uint32_t CountLive(uint32_t fleet_size, uint32_t self_id, const float* heard,

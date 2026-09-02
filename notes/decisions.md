@@ -1076,3 +1076,68 @@ guessed at.
 
 **Not a brain change.** `brain/src` is untouched, so determinism and the C++
 suites are unaffected.
+---
+
+## D30 — Respacing: the death signal, not the rule
+
+**The request:** rather than the neighbours of a hole sliding in, have *every*
+drone keep equal distance from its neighbours — a local relaxation that should
+even the ring out by itself, and needs no shared roster to do it.
+
+**Tried exactly that first.** `EvenSpacingBearing`: take the bearings of the
+neighbours we can hear that are actually holding station, find the nearest
+either side, move toward the midpoint. Equal gaps is a fixed point, so a healthy
+ring does not move. Guards: only on-ring neighbours count (or a drone sortieing
+to intercept drags its neighbours off station behind it), and with fewer than
+two visible neighbours fall back to the slot rule.
+
+It does work as advertised — gap spread at six survivors improved from 45.0-71.6
+to 52.6-75.5 degrees — and it looks good on the fixed sweep: mean **97.3 → 103.5**
+with a better floor. Gain 0.5/1.0 and with/without the on-ring filter all landed
+in the same place.
+
+**It does not survive unseen data.** Over 20 fresh ids: mean **44.6 → 36.4**,
+kills 56 → 55, breaches 9 → 10, tier-2 mean −38.0 → −56.1. And it re-broke
+`x1-ae01dd1d7c29b46e2a45774c06baccbc`, one of the two runs D28 had just fixed
+(−159.6 → −404.4, 3/3 → 2/3). I also anchored it against the free rotation mode
+a Laplacian on a ring has — clamping the deviation from the nominal slot at
+0.6 / 1.0 / 1.5 slots — and the hard case was **bit-identical** at every clamp,
+so rotation drift was not what was hurting. **Rejected.**
+
+The lesson is about method as much as about spacing: the fixed eight scenarios
+are what I have been iterating against all session, so "better on the fixed set,
+worse on fresh ids" is exactly the shape overfitting takes.
+
+**What actually fixed it was one constant, and D21 already named it.** D21's
+"cost accepted" said the death signal is shorter than the radio: `RingAlive`
+counted silence as a death only inside `comm_radius − cruise·1.5 s − 10 m`,
+allowing for a mate having flown out of range during the silence. On the ring
+they never do — station-keeping is a few m/s, not cruise. That 31 m of slack
+meant only the *immediate* neighbour ever registered (slot chords run 27 / 54 /
+80 m against a 75 m radio), so each lip of a hole slid **half a slot** and the
+gap D21 exists to close only half closed.
+
+Use the radio itself: `d > comm_radius`. A mate whose last known position was
+inside our radio has no innocent reason to be quiet.
+
+| threshold | fixed min | fixed mean | fresh mean | fresh kills | fresh breaches |
+|---|---|---|---|---|---|
+| `comm − cruise·silent − 10` (was) | −247.9 | 97.3 | 44.6 | 56/65 | 9 |
+| **`comm_radius`** | **−39.4** | **125.2** | **89.0** | **60/65** | **5** |
+| `comm·0.85` | −26.5 | 124.5 | — | — | — |
+| `comm − 10` | −75.7 | 99.5 | — | — | — |
+
+**s2 finally reaches 5/6** (−247.9 → −39.4), the target set back in D21 and
+missed by every redistribution scheme since. Fresh-id floor −505.4 → −309.5.
+Both D28 hard cases hold at 5/5 and 3/3.
+
+**Cost accepted:** tier-1 loses a kill and takes its first breach (31/31 → 30/31,
+0 → 1 breach; tier-1 mean 127.2 → 106.3). Treating a silent in-range mate as
+dead is occasionally wrong, and when it is, a live drone gets written off and
+its neighbours close over a station that was never empty. Tier-2 gains far more
+than tier-1 loses — overall fresh mean 44.6 → 89.0 — so it is taken.
+
+**Determinism:** `--replay` clean on s1, s2, x1-a, x2-b and both hard ids. All
+three suites pass; `TestStationBisectsTheGap` was updated to pin the new
+behaviour (both near neighbours now register as dead, each lip slides a full
+slot, and the 90° hole closes by two slots instead of one).

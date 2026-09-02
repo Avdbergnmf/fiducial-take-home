@@ -277,27 +277,31 @@ static void TestStationBisectsTheGap() {
     heard[1] = now - 3.0f;
     heard[2] = now - 3.0f;
 
-    // How far the death signal reaches is RingAlive's business, and it is
-    // shorter than the radio: silence only counts as a death inside
-    // comm - cruise*silent - 10 = 44 m. On this ring the slot chords are 27 m,
-    // 54 m, 80 m, so drone 3 registers 2 as dead and still believes in 1.
+    // How far the death signal reaches is RingAlive's business, and it reaches
+    // exactly as far as the radio: a mate whose last pose was inside comm_radius
+    // has no innocent reason to be silent. On this ring the slot chords run
+    // 27 m, 54 m, 80 m against a 75 m radio, so drone 3 registers BOTH 2 and 1
+    // as dead and only 0, genuinely out of range, stays a ghost.
     CHECK(RingAlive(2, 3, heard, at, at[3], comm, now) == false);
-    CHECK(RingAlive(1, 3, heard, at, at[3], comm, now) == true);
+    CHECK(RingAlive(1, 3, heard, at, at[3], comm, now) == false);
+    CHECK(RingAlive(0, 3, heard, at, at[3], comm, now) == true);
 
-    // So each lip of the hole sees one empty slot on that side and one full
-    // slot on the other, and bisects: half a slot inward.
+    // So each lip of the hole sees two empty slots on that side against one
+    // full slot on the other, and bisects: a whole slot inward. The older
+    // threshold allowed for a mate having flown out of range during the
+    // silence, which on the ring they never do, and it cost half this slide.
     const float b3 = StationBearing(3, n0, 3, heard, at, at[3], comm, now);
-    CHECK(std::fabs(b3 - (step * 3.0f - 0.5f * step)) < 1e-4f);
+    CHECK(std::fabs(b3 - (step * 3.0f - step)) < 1e-4f);
 
     const float b15 = StationBearing(15, n0, 15, heard, at, at[15], comm, now);
-    CHECK(std::fabs(b15 - (step * 15.0f + 0.5f * step)) < 1e-4f);
+    CHECK(std::fabs(b15 - (step * 15.0f + step)) < 1e-4f);
 
     // Which is the point: the 90 deg hole closes by a slot from the two
     // drones that can see it, without anyone needing the full roster.
     const float two_pi = 2.0f * 3.14159265358979f;
     const float before = step * 3.0f - step * 15.0f + two_pi;
     const float after = b3 - b15 + two_pi;
-    CHECK(after < before - 0.9f * step);
+    CHECK(after < before - 1.9f * step);
 
     // Far from the hole, nothing moves: this is local, not a global reshuffle.
     const float b8 = StationBearing(8, n0, 8, heard, at, at[8], comm, now);
