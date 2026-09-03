@@ -370,6 +370,48 @@ static void TestProNavSteersAtTheZem() {
     CHECK(swarm::Distance(with_traj, along_v_only) > 1e-4f);
 }
 
+static void TestArenaAllowsADiveIntercept() {
+    std::printf("arena floor is stopping distance, not a 20 m halo\n");
+    Config cfg;
+    cfg.max_accel = 19.7f;
+    cfg.lateral_limit = 6.71f;
+    cfg.arena_min = Vec3(-200, -200, -100);
+    cfg.arena_max = Vec3(200, 200, 0);
+
+    // Drone 7 at t=27.6: 12.6 m up, diving 8 m/s. Old 20 m edge pushed UP
+    // at 10 m/s^2 and killed the intercept. Stopping distance is ~4 m.
+    const Vec3 dive = flight::EnforceArena(
+        Vec3(0, 0, 15.0f), Vec3(0, 0, -12.6f), Vec3(0, 0, 8.4f), cfg);
+    CHECK(dive.z > 5.0f);
+
+    // Inside stopping distance of the dirt: reduce the dive. (v=10 at 2 m
+    // cannot actually stop — that is why the band starts earlier.)
+    const Vec3 floor = flight::EnforceArena(
+        Vec3(0, 0, 15.0f), Vec3(0, 0, -2.0f), Vec3(0, 0, 10.0f), cfg);
+    CHECK(floor.z < dive.z - 1.0f);
+}
+
+static void TestProNavDoesNotBrakeAlongTheLos() {
+    std::printf("a ram never commands away from the target along the LOS\n");
+    Config cfg;
+    cfg.max_speed = 24.6f;
+    cfg.max_accel = 19.7f;
+    cfg.lateral_limit = 6.71f;
+    cfg.kill_radius = 1.907f;
+
+    // Drone 7 / hostile_1 at t=27.8: 3.4 m, closing already gone. Old PN
+    // used t_go = range/max_speed = 0.14 s and saturated 19.7 m/s^2 UP.
+    const Vec3 self(-37.9f, -39.5f, -11.3f);
+    const Vec3 self_v(-1.0f, 5.0f, 5.06f);
+    const Vec3 tgt(-38.8f, -36.4f, -10.0f);
+    const Vec3 tgt_v(12.7f, 12.2f, 3.32f);
+    const Vec3 a = flight::ProNav(self, self_v, tgt, tgt_v, cfg);
+    const Vec3 los = tgt - self;
+    const float along = swarm::Dot(a, los);
+    CHECK(along > 0.0f);
+    CHECK(a.z > 0.0f);
+}
+
 static void TestStationBisectsTheGap() {
     std::printf("station bisects the gap a run of deaths leaves\n");
     // The s2 leak, in numbers. Ring 70 m, 16 drones, comm 75. Slots 0, 1 and 2
@@ -567,6 +609,8 @@ int main() {
     TestRingStaysInsideTheSpawnCircle();
     TestAimAheadUsesConfiguredDistance();
     TestProNavSteersAtTheZem();
+    TestArenaAllowsADiveIntercept();
+    TestProNavDoesNotBrakeAlongTheLos();
     TestStationBisectsTheGap();
     TestSilentNeighbourIsGoneEvenFar();
     TestApproachingFarSilenceDoesNotKill();

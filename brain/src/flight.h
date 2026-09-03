@@ -84,7 +84,11 @@ Vec3 EnforceSeparation(const Vec3& desired, const Vec3& position, const Vec3& ve
                        const Config& cfg, const Track* exempt,
                        bool intercepting = false);
 
-/// Keep inside the arena. Leaving it is charged as a wasted loss.
+/// Keep inside the arena. Leaving it is a wasted loss.
+///
+/// The band is stopping distance to the actual wall, not a fixed 20 m
+/// halo. Vertical uses `max_accel` (the real bound). A 20 m ground buffer
+/// braked interceptors at 15 m while the hostile dived under them (D45).
 Vec3 EnforceArena(const Vec3& desired, const Vec3& position, const Vec3& velocity,
                   const Config& cfg);
 

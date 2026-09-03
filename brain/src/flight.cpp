@@ -112,11 +112,20 @@ Vec3 ProNav(const Vec3& self_position, const Vec3& self_velocity,
     const Vec3 rel_velocity = aimed_v - self_velocity;
 
     // 3. Closing speed and time-to-go. If they are not closing, there is no
-    //    intercept time — use our dash speed so the law still has a horizon.
+    //    intercept time — ram along the LOS instead of a tiny fake t_go
+    //    that blows the gain and commands us away from them (D45).
     const float closing = -swarm::Dot(rel_velocity, unit);
-    const float t_go = (closing > 1.0f)
-        ? range / closing
-        : range / (cfg.max_speed > 1.0f ? cfg.max_speed : 1.0f);
+    if (closing <= 1.0f) {
+        Vec3 ram = unit * cfg.max_accel;
+        ram = LimitAccel(ram, cfg);
+        const float along = swarm::Dot(ram, unit);
+        if (along < 0.0f) ram = ram - unit * along;
+        return LimitAccel(ram, cfg);
+    }
+    float t_go = range / closing;
+    // Floor so N/t_go² cannot explode in the last metres and saturate
+    // *away* from the target after LimitAccel splits xy and z.
+    if (t_go < 0.35f) t_go = 0.35f;
 
     // 4. Zero-effort miss, then augmented ZEM if we have their acceleration:
     //    where they pass us if nobody (else) steers, plus ½ At t_go².
@@ -129,11 +138,24 @@ Vec3 ProNav(const Vec3& self_position, const Vec3& self_velocity,
     // 6. ProNav: a = N * ZEMn / t_go². Same as a = N * Vc * ω.
     Vec3 accel = zemn * (navigation_gain / (t_go * t_go));
 
-    // 7. A missile already has closing speed. We start at rest, so add a
-    //    modest close along the LOS. Sized under the lateral cap so ZEMn
-    //    still has authority against a weave.
-    accel = accel + unit * (cfg.lateral_limit * 0.6f);
-    return LimitAccel(accel, cfg);
+    // 7. A missile already has closing speed. A picket starts at rest, so
+    //    add close along the LOS. In the last few kill-radii take the full
+    //    lateral budget — a ram that brakes along the LOS misses under them.
+    float along_close = cfg.lateral_limit * 0.6f;
+    if (range < cfg.kill_radius * 4.0f)
+        along_close = cfg.lateral_limit;
+    accel = accel + unit * along_close;
+    accel = LimitAccel(accel, cfg);
+
+    // LimitAccel splits xy and z. That can flip the along-LOS sign and
+    // command us *up* off a diving intercept. A kill is a ram: never brake
+    // along the line of sight (D45).
+    const float along = swarm::Dot(accel, unit);
+    if (along < 0.0f) {
+        accel = accel - unit * along;
+        accel = LimitAccel(accel, cfg);
+    }
+    return accel;
 }
 
 Vec3 EnforceSeparation(const Vec3& desired, const Vec3& position, const Vec3& velocity,
@@ -210,19 +232,30 @@ Vec3 EnforceSeparation(const Vec3& desired, const Vec3& position, const Vec3& ve
 
 Vec3 EnforceArena(const Vec3& desired, const Vec3& position, const Vec3& velocity,
                   const Config& cfg) {
-    constexpr float kEdge = 20.0f;
+    constexpr float kSlack = 2.0f;
     Vec3 push;
 
-    auto axis = [&](float p, float lo, float hi, float v, float& out) {
-        if (p < lo + kEdge) out += (lo + kEdge - p) * 0.5f - v * 0.8f;
-        else if (p > hi - kEdge) out -= (p - (hi - kEdge)) * 0.5f + v * 0.8f;
+    auto axis = [&](float p, float lo, float hi, float v, float bound, float& out) {
+        float stop_lo = kSlack;
+        float stop_hi = kSlack;
+        if (bound > 0.1f) {
+            if (v < -0.1f) stop_lo = (v * v) / (2.0f * bound) + kSlack;
+            if (v > 0.1f) stop_hi = (v * v) / (2.0f * bound) + kSlack;
+        }
+        if (p < lo + stop_lo) out += (lo + stop_lo - p) * 0.5f - v * 0.8f;
+        else if (p > hi - stop_hi) out -= (p - (hi - stop_hi)) * 0.5f + v * 0.8f;
     };
 
-    axis(position.x, cfg.arena_min.x, cfg.arena_max.x, velocity.x, push.x);
-    axis(position.y, cfg.arena_min.y, cfg.arena_max.y, velocity.y, push.y);
+    axis(position.x, cfg.arena_min.x, cfg.arena_max.x, velocity.x,
+         cfg.lateral_limit, push.x);
+    axis(position.y, cfg.arena_min.y, cfg.arena_max.y, velocity.y,
+         cfg.lateral_limit, push.y);
 
     // NED: z is down. arena_min.z is the ceiling, arena_max.z is the ground.
-    axis(position.z, cfg.arena_min.z, cfg.arena_max.z, velocity.z, push.z);
+    // Vertical authority is max_accel, not the tilt cap — using 20 m + 6.7
+    // treated 15 m intercepts as a crash into the floor (D45).
+    axis(position.z, cfg.arena_min.z, cfg.arena_max.z, velocity.z,
+         cfg.max_accel, push.z);
 
     if (swarm::LengthSq(push) < 1e-6f) return desired;
     return LimitAccel(desired + push, cfg);

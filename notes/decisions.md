@@ -1994,3 +1994,48 @@ through the cylinder now pulls the owner off station at 0.1 s. Hard id
 costs on fresh ids. This is that trade, taken on purpose. Investigate
 civilian rams, emptied sectors, and `not-threat` aborts on real hostiles
 before rolling it back.
+
+---
+
+## D45 — A ram must not brake along the LOS or at 20 m AGL
+
+**The miss, drone 7, t≈27 s on `x1-06b926af…`.** Early scramble, hostile_1
+inbound. Truth: closest 3.4 m at 27.80, kill 1.9. Altitude 20.6 m → 11.3 m
+then **hovered at 10.5 m** while the hostile dived to 6 m. Closing 19 → 4.8
+→ −12. Believed ram at 1.2 m (fix_sigma 1.25). Looked like “scared to
+overshoot.”
+
+**Two stacked causes**
+
+1. **`EnforceArena` 20 m ground halo.** NED z-down, ground at z=0. Inside
+   20 m AGL the same spring/damper as the walls pushed **up** (~10 m/s² at
+   15 m, vz=10). Vertical authority is `max_accel` (~20), not the 6.7 tilt
+   cap. Stopping distance at 10 m/s down is v²/2a ≈ 2.5 m. The halo treated
+   a 12 m intercept as a crash into the floor. Hostiles live in that band
+   on the terminal dive.
+
+2. **ProNav + `LimitAccel` at small t_go.** ZEMn is perp to the LOS, then
+   xy and z are clipped independently. When closing died, t_go became
+   `range/max_speed` ≈ 0.14 s, gain exploded, z saturated at −19.7
+   (up). Along-LOS went negative: we braked off the target.
+
+**Chosen**
+
+- Arena band is **stopping distance to the real wall** (`v²/2a + 2 m`).
+  Vertical uses `max_accel`. A dive at 12 m AGL is free; a dive that would
+  hit z=0 is not.
+- If not closing: accelerate along the LOS, do not invent a tiny t_go.
+- Floor t_go at 0.35 s. Last 4 kill-radii take the full lateral budget
+  along the LOS.
+- After `LimitAccel`, **strip any away-from-target along-LOS component.**
+  A kill is a ram; flying through them is the hit.
+
+**Measured.** 8 named scenarios unchanged (mean 98.3 vs 98.9). Hard id
+still 1/3: drone 7 now **keeps diving** (10.5 m hover is gone; alt 11 → 5 m
+with vz ≈ 8) and does not dump speed, but CPA is still 3.4 m, almost all
+horizontal — they fly through beside the inbound, inside the old altitude
+trap but outside `kill_radius` 1.9. The “scared to overshoot” part is
+fixed; the remaining miss is intercept geometry, not a floor brake.
+
+Not a second guidance law. Same PN, with the ram constraint the split
+limit had been violating.
