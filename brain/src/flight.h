@@ -36,16 +36,26 @@ Vec3 Cruise(const Vec3& target, const Vec3& position, const Vec3& velocity,
 float TimeToIntercept(const Vec3& to_target, const Vec3& target_velocity,
                       float speed);
 
+/// Point on the inbound's ground track we actually fly at (D39).
+/// The closed-form meeting, pushed `lead` metres further in front of
+/// them along their velocity. Early → we get to the chord first and they
+/// fly into us; late → we are still ahead of current position, not abeam.
+/// Default lead is `kBarrierLeadKills · kill_radius`.
+constexpr float kBarrierLeadKills = 8.0f;
+Vec3 BarrierAim(const Vec3& self, const Vec3& target_p, const Vec3& target_v,
+                float speed, float lead);
+
 /// A stern chase against an equally capable evader does NOT converge -- both
 /// airframes have the same 6.7 m/s^2 lateral bound. Arrive from a geometry that
 /// already leads, or do not commit.
 ///
 /// Two laws, blended by range (D22): a closed-form lead intercept flown at
-/// max_speed while there is still range to cover, handing over to proportional
-/// navigation for the last 25-70 m, where the target's manoeuvring matters more
-/// than the range does. Pure PN alone commanded almost nothing at a picket
-/// already on the inbound bearing, so the drone sat still and was rammed at our
-/// own ring radius.
+/// max_speed while there is still range to cover, handing over to a
+/// zero-effort-miss law for the last 25-70 m. The lead point is on their
+/// ground track, `8 · kill_radius` in front of the kinematic meeting
+/// (D39), so an early drone is a barrier and a late one still clips.
+/// Pure PN commanded almost nothing at a picket already on the inbound
+/// bearing, so the drone sat still and was rammed at our own ring radius.
 ///
 /// `navigation_gain` is the terminal gain, now on a zero-effort-miss law
 /// rather than classic PN (D25): a = N * ZEM / t_go^2. 10 measured -- escapes
@@ -65,14 +75,16 @@ Vec3 ProNav(const Vec3& self_position, const Vec3& self_velocity,
 /// cancels the closing component of its command against a mate, and panics
 /// inside 3 kill-radii. An *interceptor* (`intercepting`) does not cancel:
 /// that was ProNav being overwritten by a picket on the line of sight (D15).
-/// The arrest blend and the panic still fire, so we curve around rather
-/// than ram.
+/// If the ram on `exempt` is at the same time as a mate collision, or
+/// first, the mate is ignored — braking then misses the hostile (D38).
+/// A picket still in front of the intercept is traffic and is still avoided.
 ///
 /// Unknown / civilian / wreckage use the same arrest distance when closing
 /// (D12). The 4 m `separation_margin` is the floor for tracks that are not
 /// closing — a static 19 m around every unknown collapses the ring (D8).
 /// The intercept target is still a blend, not a cancel: we have to be
-/// allowed to ram it. `exempt` is that track. A mate is never exempt.
+/// allowed to ram it. `exempt` is that track. A mate is never exempt unless
+/// D38 says the hostile ram comes first.
 Vec3 EnforceSeparation(const Vec3& desired, const Vec3& position, const Vec3& velocity,
                        const FixedVec<Track, kMaxTracks>& tracks,
                        const Config& cfg, const Track* exempt,

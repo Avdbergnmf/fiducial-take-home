@@ -35,6 +35,81 @@ static void TestFacingSlotMatchesRing() {
     CHECK(FacingSlot(asset, asset, n) == 0);
 }
 
+static void TestFacingSlotAgreesOnABisector() {
+    std::printf("two observers on a slot bisector name the same owner\n");
+    const Vec3 asset(0, 0, 0);
+    const uint32_t n = 14;
+    // x1-e1257f: drones 12 and 13 logged these NED poses 40 ms apart.
+    CHECK(FacingSlot(Vec3(95.5f, -78.6f, -25.0f), asset, n) ==
+          FacingSlot(Vec3(96.6f, -77.0f, -25.0f), asset, n));
+
+    const float u = (12.5f / 14.0f) * 2.0f * 3.14159265358979f;
+    const float r = 120.0f;
+    const Vec3 mid(r * std::cos(u), r * std::sin(u), -40.0f);
+    CHECK(FacingSlot(mid, asset, n) ==
+          FacingSlot(Vec3(mid.x + 1.0f, mid.y - 1.0f, mid.z), asset, n));
+    CHECK(FacingSlot(mid, asset, n) ==
+          FacingSlot(Vec3(mid.x - 1.0f, mid.y + 1.0f, mid.z), asset, n));
+    for (uint32_t id = 0; id < n; ++id) {
+        const Vec3 slot = flight::RingSlot(id, n, asset, 79.3f, 30.0f);
+        CHECK(FacingSlot(slot, asset, n) == id);
+    }
+}
+
+static void TestOtherInterceptorTieBreak() {
+    std::printf("similar-range duplicate yields to the lower id\n");
+    CHECK(OtherInterceptorWins(49.0f, 13, 49.0f, 12) == true);
+    CHECK(OtherInterceptorWins(49.0f, 12, 49.0f, 13) == false);
+    CHECK(OtherInterceptorWins(49.0f, 12, 46.0f, 13) == true);
+    CHECK(OtherInterceptorWins(49.0f, 13, 49.0f, -1) == false);
+}
+
+static void TestInterceptorKeepsGoingAtTheMerge() {
+    std::printf("interceptor does not brake for a wingman at the ram\n");
+    Config cfg;
+    cfg.kill_radius = 1.0f;
+    cfg.lateral_limit = 6.71f;
+    cfg.friendly_margin = 19.0f;
+    cfg.separation_margin = 4.0f;
+    cfg.max_accel = 15.0f;
+
+    Track hostile{};
+    hostile.track_id = 9;
+    hostile.has_local_id = true;
+    hostile.position = Vec3(50, 0, -20);
+    hostile.velocity = Vec3(-14, 0, 0);
+    hostile.belief = Belief::Hostile;
+
+    Track mate{};
+    mate.track_id = 6;
+    mate.has_local_id = true;
+    mate.position = Vec3(8, 8, -20);
+    mate.velocity = Vec3(14, 0, 0);
+    mate.belief = Belief::Friendly;
+
+    FixedVec<Track, kMaxTracks> wing;
+    wing.push(hostile);
+    wing.push(mate);
+
+    const Vec3 us(0, 0, -20);
+    const Vec3 us_v(14, 0, 0);
+    const Vec3 desired(6.71f, 0, 0);
+    const Vec3 out = flight::EnforceSeparation(desired, us, us_v, wing, cfg,
+                                               &hostile, true);
+    CHECK(out.x > 3.0f);
+    CHECK(std::fabs(out.y) < out.x);
+
+    Track picket = mate;
+    picket.position = Vec3(10, 0, -20);
+    picket.velocity = Vec3(0, 0, 0);
+    FixedVec<Track, kMaxTracks> front;
+    front.push(hostile);
+    front.push(picket);
+    const Vec3 braked = flight::EnforceSeparation(desired, us, us_v, front, cfg,
+                                                  &hostile, true);
+    CHECK(braked.x < desired.x - 0.5f);
+}
+
 static void TestUniqueOwnerIsOneDrone() {
     std::printf("unique owner is facing, then first live clockwise\n");
     float heard[kMaxFleet];
@@ -247,30 +322,62 @@ static void TestZeroEffortMissSteersAtTheMiss() {
     cfg.max_speed = 20.0f;
     cfg.max_accel = 15.0f;
     cfg.lateral_limit = 6.71f;
+    cfg.kill_radius = 1.0f;
 
-    // Head-on but offset: we run +x at 20, the target runs -x at 20 from 100 m
-    // ahead and 10 m to our left. Neither turning, they pass 10 m apart -- that
-    // 10 m IS the zero-effort miss, and the command must be spent closing it.
+    // Inside the 25 m handover, and on-track enough that D39 does not sit.
+    // A 10 m miss at 100 m is a barrier (ahead + off the chord), not ZEM.
     const Vec3 self(0, 0, -30);
     const Vec3 self_v(20, 0, 0);
-    const Vec3 tgt(100, 10, -30);
+    const Vec3 tgt(20, 1.5f, -30);
     const Vec3 tgt_v(-20, 0, 0);
     const Vec3 accel = flight::ProNav(self, self_v, tgt, tgt_v, cfg);
     CHECK(accel.y > 0.5f * cfg.lateral_limit);   // toward the miss, hard
     CHECK(std::fabs(accel.x) < accel.y);         // across the LOS, not along it
 
-    // Mirror the offset and the command mirrors with it.
-    const Vec3 mirrored = flight::ProNav(self, self_v, Vec3(100, -10, -30),
+    const Vec3 mirrored = flight::ProNav(self, self_v, Vec3(20, -1.5f, -30),
                                          tgt_v, cfg);
     CHECK(mirrored.y < -0.5f * cfg.lateral_limit);
 
-    // Already on a collision course: nothing to correct, so almost no lateral
-    // command. This is the case classic PN also gets right; it is the one
-    // above, mid-handover with the closing rate still changing, that it does
-    // not.
-    const Vec3 straight = flight::ProNav(self, self_v, Vec3(100, 0, -30),
+    const Vec3 straight = flight::ProNav(self, self_v, Vec3(20, 0, -30),
                                          tgt_v, cfg);
     CHECK(std::fabs(straight.y) < 0.1f * cfg.lateral_limit);
+}
+
+static void TestBarrierAimSitsOnTheChord() {
+    std::printf("lead intercept is biased in front on the inbound track\n");
+    Config cfg;
+    cfg.max_speed = 20.0f;
+    cfg.max_accel = 15.0f;
+    cfg.lateral_limit = 6.71f;
+    cfg.kill_radius = 1.85f;
+
+    // x1-e1257f hostile_3 at commit: ~50 m in front, 17 m abeam.
+    const Vec3 self(0, 17, -15);
+    const Vec3 still(0, 0, 0);
+    const Vec3 hostile(50, 0, -15);
+    const Vec3 inbound(-16, 0, 0);
+    const float lead = flight::kBarrierLeadKills * cfg.kill_radius;
+
+    const float tau = flight::TimeToIntercept(hostile - self, inbound,
+                                              cfg.max_speed);
+    CHECK(tau > 0.0f);
+    const float meet_along = 16.0f * tau;           // dir is -x
+    const Vec3 aim = flight::BarrierAim(self, hostile, inbound, cfg.max_speed,
+                                        lead);
+    CHECK(std::fabs(aim.y) < 0.5f);                 // on their ground track
+    CHECK(aim.x > 0.0f);
+    CHECK(aim.x < 50.0f);
+    const float aim_along = 50.0f - aim.x;
+    CHECK(aim_along > meet_along + lead * 0.5f);
+
+    // Off-track still spends budget getting onto the chord, not only along LOS.
+    const Vec3 accel = flight::ProNav(self, still, hostile, inbound, cfg);
+    CHECK(accel.y < -0.3f * cfg.lateral_limit);
+
+    // On the bearing, still in front: D22 still charges along the LOS.
+    const Vec3 on_line = flight::ProNav(Vec3(0, 0, -15), still, hostile,
+                                        inbound, cfg);
+    CHECK(on_line.x > 0.5f * cfg.lateral_limit);
 }
 
 static void TestStationBisectsTheGap() {
@@ -340,6 +447,58 @@ static void TestStationBisectsTheGap() {
     CHECK(std::fabs(b14 - step * 14.0f) <= 2.0f * step + 1e-4f);
 }
 
+static void TestSilentNeighbourIsGoneEvenFar() {
+    std::printf("an interceptor who left radio keeps their station\n");
+    // Silent and far: never confirmed from inside the bubble, so D19 keeps
+    // the station. A neighbour we are still next to is a nearby death.
+    float heard[kMaxFleet];
+    Vec3 at[kMaxFleet];
+    uint8_t dead[kMaxFleet]{};
+    InitHeard(heard);
+    const uint32_t n0 = 16;
+    const float now = 20.0f;
+    const float comm = 90.0f;
+    const Vec3 asset(0, 0, 0);
+    FillStations(at, asset, n0);
+
+    heard[1] = now - 2.0f;
+    CHECK(RingAlive(1, 0, heard, at, at[8], comm, now, n0, dead) == true);
+    CHECK(dead[1] == 0);
+    CHECK(RingAlive(1, 0, heard, at, at[0], comm, now, n0, dead) == false);
+    CHECK(dead[1] != 0);
+
+    heard[1] = now;
+    CHECK(RingAlive(1, 0, heard, at, at[0], comm, now, n0, dead) == true);
+    CHECK(dead[1] == 0);
+}
+
+static void TestApproachingFarSilenceDoesNotKill() {
+    std::printf("a confirmed nearby death stays dead after we leave the bubble\n");
+    // D19: opposite-side silence is radio loss. The ping-pong was treating
+    // current range to a stale pose as a nearby death: approach, they die,
+    // reverse, they live, approach. Latch the death so leaving does not
+    // resurrect them. A heartbeat still would.
+    float heard[kMaxFleet];
+    Vec3 at[kMaxFleet];
+    uint8_t dead[kMaxFleet]{};
+    InitHeard(heard);
+    const uint32_t n0 = 16;
+    const float now = 20.0f;
+    const float comm = 90.0f;
+    const Vec3 asset(0, 0, 0);
+    FillStations(at, asset, n0);
+
+    heard[8] = now - 2.0f;
+    CHECK(RingAlive(8, 0, heard, at, at[0], comm, now, n0, dead) == true);
+    CHECK(dead[8] == 0);
+    CHECK(RingAlive(8, 0, heard, at, at[8], comm, now, n0, dead) == false);
+    CHECK(dead[8] != 0);
+    CHECK(RingAlive(8, 0, heard, at, at[0], comm, now, n0, dead) == false);
+
+    heard[8] = now;
+    CHECK(RingAlive(8, 0, heard, at, at[0], comm, now, n0, dead) == true);
+}
+
 static void TestYieldHorizonIsRemainingFlight() {
     std::printf("yield corridor is remaining flight, not the full chord\n");
     // s1-like: picket on the 75 m ring, hostile 95 m further inbound at 16 m/s.
@@ -404,15 +563,21 @@ static void TestStalkAimLeadsNotPursues() {
 
 int main() {
     TestFacingSlotMatchesRing();
+    TestFacingSlotAgreesOnABisector();
+    TestOtherInterceptorTieBreak();
     TestUniqueOwnerIsOneDrone();
     TestInboundOwnerSkipsARecedingFacing();
     TestLiveRingRespaces();
     TestRingStaysInsideTheSpawnCircle();
     TestLeadIntercept();
     TestZeroEffortMissSteersAtTheMiss();
+    TestBarrierAimSitsOnTheChord();
     TestStationBisectsTheGap();
+    TestSilentNeighbourIsGoneEvenFar();
+    TestApproachingFarSilenceDoesNotKill();
     TestYieldHorizonIsRemainingFlight();
     TestStalkAimLeadsNotPursues();
+    TestInterceptorKeepsGoingAtTheMerge();
 
     if (g_failures == 0) {
         std::printf("policy: all passed\n");

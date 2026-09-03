@@ -1,5 +1,7 @@
 #include "flight.h"
 
+#include <cmath>
+
 namespace sw {
 namespace flight {
 namespace {
@@ -12,6 +14,18 @@ float ArrestDistance(float closing, const Config& cfg) {
            + 4.0f * cfg.kill_radius;
 }
 
+/// Seconds until the pair is inside `radius`, using relative closing.
+/// 0 if already inside; large if not approaching.
+float TimeToClose(const Vec3& p, const Vec3& v, const Vec3& q, const Vec3& w,
+                  float radius) {
+    const Vec3 offset = p - q;
+    const float d = swarm::Length(offset);
+    if (d <= radius) return 0.0f;
+    if (d < 1e-4f) return 0.0f;
+    const float closing = -swarm::Dot(v - w, offset / d);
+    if (closing < 0.1f) return 1.0e6f;
+    return (d - radius) / closing;
+}
 
 }  // namespace
 
@@ -37,6 +51,35 @@ float TimeToIntercept(const Vec3& d, const Vec3& w, float speed) {
     if (t1 > 1e-3f) best = t1;
     if (t2 > 1e-3f && (best < 0.0f || t2 < best)) best = t2;
     return best;
+}
+
+Vec3 BarrierAim(const Vec3& self, const Vec3& target_p, const Vec3& target_v,
+                float speed, float lead) {
+    if (lead < 0.0f) lead = 0.0f;
+    const Vec3 v(target_v.x, target_v.y, 0.0f);
+    const float vlen = swarm::Length(v);
+    if (vlen < 0.5f) {
+        const Vec3 los = target_p - self;
+        const float tau = TimeToIntercept(los, target_v, speed);
+        return (tau >= 0.0f) ? target_p + target_v * tau : target_p;
+    }
+    const Vec3 dir = v / vlen;
+
+    auto at_along = [&](float s) {
+        return Vec3(target_p.x + dir.x * s, target_p.y + dir.y * s, target_p.z);
+    };
+
+    const Vec3 los = target_p - self;
+    const float tau = TimeToIntercept(los, target_v, speed);
+    Vec3 meet = (tau >= 0.0f) ? target_p + target_v * tau : at_along(lead);
+    const float meet_along = swarm::Dot(
+        Vec3(meet.x - target_p.x, meet.y - target_p.y, 0.0f), dir);
+    // Slightly in front of the meeting, hence of them (D39). Early → we
+    // arrive on the chord and they fly into us; late → still ahead of
+    // current position, not abeam. Never behind `lead`.
+    float s = meet_along + lead;
+    if (s < lead) s = lead;
+    return at_along(s);
 }
 
 Vec3 LimitAccel(const Vec3& desired, const Config& cfg) {
@@ -117,9 +160,9 @@ Vec3 ProNav(const Vec3& self_position, const Vec3& self_velocity,
     // is held back for later: a kill is a ram, and the report credits the
     // drone we spend (losses_by_cause pair_hostile, wasted 0).
     const float speed = cfg.max_speed;
-    const float tau = TimeToIntercept(los, target_velocity, speed);
-    const Vec3 aim = (tau >= 0.0f) ? target_position + target_velocity * tau
-                                   : target_position;
+    const float lead = kBarrierLeadKills * cfg.kill_radius;
+    const Vec3 aim = BarrierAim(self_position, target_position, target_velocity,
+                                speed, lead);
     const Vec3 to_aim = aim - self_position;
     const float aim_range = swarm::Length(to_aim);
     const Vec3 wanted = (aim_range > 1e-3f) ? (to_aim / aim_range) * speed
@@ -150,11 +193,23 @@ Vec3 EnforceSeparation(const Vec3& desired, const Vec3& position, const Vec3& ve
     bool any = false;
     bool hard = false;
 
+    const float kill = cfg.kill_radius * 2.0f;
+    float t_target = 1.0e6f;
+    if (intercepting && exempt)
+        t_target = TimeToClose(position, velocity, exempt->position,
+                               exempt->velocity, kill);
+
     for (const Track& t : tracks) {
         const bool mate = t.belief == Belief::Friendly;
         // Never exempt a mate: ramming one costs two drones. The intercept
-        // target is the only track we are allowed to close on.
+        // target is the only track we are allowed to close on. D38: unless
+        // we hit the target first or together — then braking misses.
         if (!mate && exempt && t.track_id == exempt->track_id) continue;
+        if (mate && intercepting && t_target < 1.0e5f) {
+            const float t_mate = TimeToClose(position, velocity, t.position,
+                                             t.velocity, kill);
+            if (t_target <= t_mate) continue;
+        }
 
         const Vec3 offset = position - t.position;
         const float d = swarm::Length(offset);

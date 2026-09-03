@@ -143,9 +143,10 @@ unique facing ring slot (first live drone clockwise if that slot's heartbeat
 is gone), relative closing ≥ 1 m/s, and arrive 0.5 s before the cylinder.
 Sense range is not a gate: on s2 the owner hears the inbound 100 m out.
 After a *nearby* death the survivors re-space on the same radius so the
-next dash on that bearing is not met from a hole (D19). Opposite-side
-radio loss is not a death — treating it as one collapsed the ring to
-whoever we could still hear and s1 went to 4/6. A Friendly already flying
+next dash on that bearing is not met from a hole (D19). That death latches:
+flying out of the stale last-heard bubble does not resurrect them and reverse
+the slide (D37). Opposite-side radio loss is not a death — treating it as
+one collapsed the ring to whoever we could still hear and s1 went to 4/6. A Friendly already flying
 at that hostile is the interceptor; the farther drone aborts. Pickets step off
 the *remaining* intercept flight — cruise × (time-to-meet + 0.5 s), capped at
 the 12 s abort — not the whole slot-to-hostile chord. A picket sitting past the predicted ram is not traffic. The interceptor

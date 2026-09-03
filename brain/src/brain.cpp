@@ -41,6 +41,7 @@ public:
         policy_.Decide(store_, obs);
         if (policy_.last_log()[0] != '\0')
             host().Log(policy_.last_log());
+        policy_.LogRing(host());
         policy_.Declare(host(), store_);
 
         // 4. OUTBOUND: what is worth saying, then say at most one thing
@@ -58,12 +59,12 @@ private:
         host().Logf("drone %u/%u up, lateral limit %.2f m/s^2, kill r %.1f, tier %u",
                     cfg_.drone_id, cfg_.fleet_size, cfg_.lateral_limit,
                     cfg_.kill_radius, cfg_.tier);
-        host().Logf("params sense=%.1f comm=%.1f maxv=%.1f maxa=%.1f tilt=%.2f lat=%.1f sep=%.1f fsep=%.1f ring=%.1f alt=%.1f",
+        host().Logf("params sense=%.1f comm=%.1f maxv=%.1f maxa=%.1f tilt=%.2f lat=%.1f sep=%.1f fsep=%.1f ring=%.1f alt=%.1f fix=%.2f",
                     cfg_.sense_radius, cfg_.comm_radius, cfg_.max_speed, cfg_.max_accel,
                     cfg_.max_tilt, cfg_.lateral_limit, cfg_.separation_margin,
                     cfg_.friendly_margin,
-                    policy_.ring_radius(), policy_.ring_altitude());
-        (void)obs;
+                    policy_.ring_radius(), policy_.ring_altitude(),
+                    obs.self().fix_sigma);
     }
 
     void ConsumeFrames(const swarm::Observation& obs) {
@@ -258,10 +259,12 @@ private:
             // "ram" is reserved for the last metres of a committed intercept.
             // A 12 m pass of a civilian we are trying not to hit is "near".
             const char* verb = (intercept && band >= 3) ? "ram" : "near";
-            host().Logf("%s trk=%u class=%s rng=%.1f close=%.1f",
+            host().Logf("%s trk=%u class=%s rng=%.1f close=%.1f n=%.1f e=%.1f alt=%.1f vn=%.1f ve=%.1f",
                         verb,
                         t.has_local_id ? t.track_id : 0,
-                        sw::BeliefName(t.belief), d, closing);
+                        sw::BeliefName(t.belief), d, closing,
+                        t.position.x, t.position.y, -t.position.z,
+                        t.velocity.x, t.velocity.y);
         }
     }
 

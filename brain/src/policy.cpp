@@ -22,6 +22,8 @@ constexpr float kRecommitHold = 2.0f;       // s; do not re-chase a track we jus
 
 constexpr float kChasingToward = 5.0f;     // m/s along LOS; pickets sit below this
 constexpr float kCloserBy = 2.0f;          // m; farther duplicate aborts
+constexpr float kFacingTie = 0.08f;        // slots; bisector band so two observers agree (D38)
+constexpr float kMateIdGate = 20.0f;       // m; heartbeat pose → sensor track (same as FacingReceding)
 constexpr float kOwnerSilent = 1.5f;       // s; three missed 2 Hz heartbeats
 constexpr float kNeverHeard = -1.0e8f;
 
@@ -91,13 +93,34 @@ void Policy::Configure(const Config& cfg, Rng rng) {
                                     ring_radius_, ring_altitude_);
     station_ = picket_goal_;
     stalk_ = nullptr;
-    for (uint32_t i = 0; i < kMaxFleet; ++i) heard_[i] = -1.0e9f;
+    for (uint32_t i = 0; i < kMaxFleet; ++i) {
+        heard_[i] = -1.0e9f;
+        confirmed_dead_[i] = 0;
+        announced_dead_[i] = 0;
+    }
 }
 
 void Policy::NoteAlive(uint8_t drone_id, const Vec3& position, float now) {
     if (drone_id >= kMaxFleet) return;
     heard_[drone_id] = now;
     heard_at_[drone_id] = position;
+    confirmed_dead_[drone_id] = 0;
+}
+
+void Policy::LogRing(const swarm::Host& host) {
+    const uint32_t n = cfg_.fleet_size < kMaxFleet ? cfg_.fleet_size : kMaxFleet;
+    for (uint32_t id = 0; id < n; ++id) {
+        if (id == cfg_.drone_id) continue;
+        const bool dead = confirmed_dead_[id] != 0;
+        const bool told = announced_dead_[id] != 0;
+        if (dead && !told) {
+            host.Logf("gone id=%u", id);
+            announced_dead_[id] = 1;
+        } else if (!dead && told) {
+            host.Logf("live id=%u", id);
+            announced_dead_[id] = 0;
+        }
+    }
 }
 
 void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
@@ -153,10 +176,12 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
             const float ttg = TimeToCylinder(candidate->position, candidate->velocity,
                                              cfg_.asset, cfg_.asset_radius);
             std::snprintf(last_log_, sizeof(last_log_),
-                          "commit trk=%u score=%.2f miss=%.1f rng=%.0f close=%.1f ttg=%.1f n=%.0f e=%.0f%s",
+                          "commit trk=%u score=%.2f miss=%.1f rng=%.0f close=%.1f ttg=%.1f n=%.1f e=%.1f alt=%.1f vn=%.1f ve=%.1f%s",
                           candidate->has_local_id ? candidate->track_id : 0,
                           candidate->closing_score, miss, rng, closing, ttg,
                           candidate->position.x, candidate->position.y,
+                          -candidate->position.z,
+                          candidate->velocity.x, candidate->velocity.y,
                           candidate->has_local_id ? "" : " peer");
         }
     }
@@ -168,7 +193,7 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
         const Vec3 slot = StationAt(
             StationBearing(cfg_.drone_id, cfg_.fleet_size, cfg_.drone_id,
                            heard_, heard_at_, obs.position(), cfg_.comm_radius,
-                           now),
+                           now, confirmed_dead_),
             cfg_.asset, ring_radius_, ring_altitude_);
         if (swarm::Distance(obs.position(), slot) < 8.0f) {
             stance_ = Stance::Picketing;
@@ -189,8 +214,15 @@ uint32_t FacingSlot(const Vec3& position, const Vec3& asset, uint32_t count) {
     if (hx * hx + hy * hy < 1e-8f) return 0;
     float u = std::atan2(hy, hx);
     if (u < 0.0f) u += 2.0f * kPi;
-    return static_cast<uint32_t>(
-        std::lround(u * static_cast<float>(n) / (2.0f * kPi))) % n;
+    const float x = u * static_cast<float>(n) / (2.0f * kPi);
+    // Nearest slot, except a band around the Voronoi edge. lround alone lets
+    // two drones on a bisector inbound each round to themselves (D38).
+    // Clockwise of the pair: same walk as UniqueOwner, and a hole's station
+    // (exact .5 on the live ring) stays the sliding neighbour, not the far one.
+    const float lo = std::floor(x);
+    if (std::fabs(x - (lo + 0.5f)) < kFacingTie)
+        return (static_cast<uint32_t>(lo) + 1u) % n;
+    return static_cast<uint32_t>(std::lround(x)) % n;
 }
 
 bool SlotAlive(uint32_t drone_id, uint32_t self_id, const float* heard, float now) {
@@ -204,37 +236,40 @@ bool SlotAlive(uint32_t drone_id, uint32_t self_id, const float* heard, float no
 
 bool RingAlive(uint32_t drone_id, uint32_t self_id, const float* heard,
                const Vec3* heard_at, const Vec3& self_pos, float comm_radius,
-               float now) {
-    if (SlotAlive(drone_id, self_id, heard, now)) return true;
+               float now, uint32_t fleet_size, uint8_t* confirmed_dead) {
+    (void)fleet_size;
+    if (SlotAlive(drone_id, self_id, heard, now)) {
+        if (confirmed_dead != nullptr && drone_id < kMaxFleet)
+            confirmed_dead[drone_id] = 0;
+        return true;
+    }
     if (drone_id >= kMaxFleet || heard_at == nullptr) return false;
-    // Silent after a heartbeat. Neighbours cannot leave radio in 1.5 s, so
-    // that is a death. Opposite-side drones leave comm range as the ring
-    // spreads — keep their station or the live ring collapses to whoever
-    // we can still hear (D19).
+
     const float dx = heard_at[drone_id].x - self_pos.x;
     const float dy = heard_at[drone_id].y - self_pos.y;
-    const float d = std::sqrt(dx * dx + dy * dy);
-    //
-    // The threshold is the radio itself (D30). It used to be
-    // comm_radius - cruise*silent - 10, allowing for a mate having flown out of
-    // range during the silence -- but on the ring they do not: station-keeping
-    // is a few m/s, not cruise. That 31 m of slack meant only the IMMEDIATE
-    // neighbour ever registered as dead, since the slot chords run 27 / 54 /
-    // 80 m, so each lip of a hole slid half a slot and the gap D21 exists to
-    // close only half closed. Measured on the radio: fixed-sweep floor
-    // -247.9 -> -39.4, s2 4/6 -> 5/6; over 20 unseen ids mean 44.6 -> 89.0,
-    // kills 56 -> 60/65, breaches 9 -> 5.
-    return d > comm_radius;
+    const bool now_in_range = (dx * dx + dy * dy) <= comm_radius * comm_radius;
+    if (now_in_range) {
+        // Nearby silence. Latch so flying out of the stale bubble does not
+        // resurrect them and reverse the slide (D37).
+        if (confirmed_dead != nullptr) confirmed_dead[drone_id] = 1;
+        return false;
+    }
+    // Far silence: interceptor / opposite-side radio loss, unless we already
+    // confirmed the death from inside the bubble.
+    if (confirmed_dead != nullptr && confirmed_dead[drone_id] != 0)
+        return false;
+    return true;
 }
 
 uint32_t CountLive(uint32_t fleet_size, uint32_t self_id, const float* heard,
                    const Vec3* heard_at, const Vec3& self_pos, float comm_radius,
-                   float now) {
+                   float now, uint8_t* confirmed_dead) {
     const uint32_t n = fleet_size > 0 ? fleet_size : 1;
     const uint32_t cap = n < kMaxFleet ? n : kMaxFleet;
     uint32_t live = 0;
     for (uint32_t id = 0; id < cap; ++id) {
-        if (RingAlive(id, self_id, heard, heard_at, self_pos, comm_radius, now))
+        if (RingAlive(id, self_id, heard, heard_at, self_pos, comm_radius, now,
+                      fleet_size, confirmed_dead))
             ++live;
     }
     return live > 0 ? live : 1;
@@ -242,12 +277,13 @@ uint32_t CountLive(uint32_t fleet_size, uint32_t self_id, const float* heard,
 
 uint32_t LiveRank(uint32_t drone_id, uint32_t fleet_size, uint32_t self_id,
                   const float* heard, const Vec3* heard_at, const Vec3& self_pos,
-                  float comm_radius, float now) {
+                  float comm_radius, float now, uint8_t* confirmed_dead) {
     const uint32_t n = fleet_size > 0 ? fleet_size : 1;
     const uint32_t cap = n < kMaxFleet ? n : kMaxFleet;
     uint32_t rank = 0;
     for (uint32_t id = 0; id < cap; ++id) {
-        if (!RingAlive(id, self_id, heard, heard_at, self_pos, comm_radius, now))
+        if (!RingAlive(id, self_id, heard, heard_at, self_pos, comm_radius, now,
+                       fleet_size, confirmed_dead))
             continue;
         if (id == drone_id) return rank;
         ++rank;
@@ -257,15 +293,16 @@ uint32_t LiveRank(uint32_t drone_id, uint32_t fleet_size, uint32_t self_id,
 
 uint32_t LiveId(uint32_t rank, uint32_t fleet_size, uint32_t self_id,
                 const float* heard, const Vec3* heard_at, const Vec3& self_pos,
-                float comm_radius, float now) {
+                float comm_radius, float now, uint8_t* confirmed_dead) {
     const uint32_t live = CountLive(fleet_size, self_id, heard, heard_at,
-                                    self_pos, comm_radius, now);
+                                    self_pos, comm_radius, now, confirmed_dead);
     const uint32_t want = rank % live;
     const uint32_t n = fleet_size > 0 ? fleet_size : 1;
     const uint32_t cap = n < kMaxFleet ? n : kMaxFleet;
     uint32_t i = 0;
     for (uint32_t id = 0; id < cap; ++id) {
-        if (!RingAlive(id, self_id, heard, heard_at, self_pos, comm_radius, now))
+        if (!RingAlive(id, self_id, heard, heard_at, self_pos, comm_radius, now,
+                       fleet_size, confirmed_dead))
             continue;
         if (i == want) return id;
         ++i;
@@ -284,13 +321,15 @@ uint32_t LiveId(uint32_t rank, uint32_t fleet_size, uint32_t self_id,
 ///
 /// Bisect instead. Walk out from our own slot in both directions to the first
 /// drone we still believe is flying, and stand at the midpoint of that gap.
-/// Uses nothing beyond the neighbours we can actually hear, is a pure function
-/// of the liveness bitmap so it cannot oscillate, and is a fixed point when
-/// nobody has died. Neighbours of the hole slide in, their neighbours follow,
-/// and the ring closes by diffusion rather than by consensus.
+/// Uses nothing beyond the neighbours we can actually hear. A nearby death
+/// latches (D37), so leaving the stale bubble cannot flip the bitmap and
+/// reverse the slide. A fixed point when nobody has died. Neighbours of the
+/// hole slide in, their neighbours follow, and the ring closes by diffusion
+/// rather than by consensus.
 float StationBearing(uint32_t id, uint32_t fleet_size, uint32_t self_id,
                      const float* heard, const Vec3* heard_at,
-                     const Vec3& self_pos, float comm_radius, float now) {
+                     const Vec3& self_pos, float comm_radius, float now,
+                     uint8_t* confirmed_dead) {
     const uint32_t n = fleet_size > 0 ? fleet_size : 1;
     const float step = 2.0f * kPi / static_cast<float>(n);
     const float base = step * static_cast<float>(id % n);
@@ -298,9 +337,11 @@ float StationBearing(uint32_t id, uint32_t fleet_size, uint32_t self_id,
 
     uint32_t up = 1, down = 1;
     while (up < n && !RingAlive((id + up) % n, self_id, heard, heard_at,
-                                self_pos, comm_radius, now)) ++up;
+                                self_pos, comm_radius, now, fleet_size,
+                                confirmed_dead)) ++up;
     while (down < n && !RingAlive((id + n - down) % n, self_id, heard,
-                                  heard_at, self_pos, comm_radius, now)) ++down;
+                                  heard_at, self_pos, comm_radius, now,
+                                  fleet_size, confirmed_dead)) ++down;
     // Alone, or the two searches met on the same drone: no gap to bisect.
     if (up >= n || down >= n || up + down >= n) return base;
 
@@ -417,13 +458,35 @@ Vec3 CorridorOrigin(const TrackStore& store, const Track& hostile, const Vec3& s
 
 }  // namespace
 
+int Policy::MateId(const Track& mate) const {
+    const uint32_t n = cfg_.fleet_size < kMaxFleet ? cfg_.fleet_size : kMaxFleet;
+    float best = kMateIdGate;
+    int id = -1;
+    for (uint32_t i = 0; i < n; ++i) {
+        if (i == cfg_.drone_id) continue;
+        if (heard_[i] < kNeverHeard) continue;
+        const float d = swarm::Distance(mate.position, heard_at_[i]);
+        if (d < best) { best = d; id = static_cast<int>(i); }
+    }
+    return id;
+}
+
+bool OtherInterceptorWins(float us_range, uint32_t us_id,
+                          float them_range, int them_id) {
+    if (them_range < us_range - kCloserBy) return true;
+    if (them_id < 0) return false;
+    if (them_range > us_range + kCloserBy) return false;
+    return static_cast<uint32_t>(them_id) < us_id;
+}
+
 bool Policy::CloserChaser(const Track& hostile, const TrackStore& store,
                           const swarm::Observation& obs) const {
     const float us_range = swarm::Distance(obs.position(), hostile.position);
     for (const Track& t : store.tracks()) {
         if (!FlyingAt(t, hostile)) continue;
         const float d = swarm::Distance(t.position, hostile.position);
-        if (d < us_range - kCloserBy) return true;
+        if (OtherInterceptorWins(us_range, cfg_.drone_id, d, MateId(t)))
+            return true;
     }
     return false;
 }
@@ -448,13 +511,10 @@ Vec3 CorridorHorizon(const Vec3& from, const Vec3& hostile_p, const Vec3& hostil
 }
 
 Vec3 StalkAim(const Vec3& slot, const Vec3& target_p, const Vec3& target_v,
-              float speed, float cap) {
-    // Same lead ProNav's midcourse flies: meet them where they will be, not
-    // where they are. No solution (equal-speed stern chase) falls back to
-    // current position, matching TimeToIntercept's -1.
-    const Vec3 los = target_p - slot;
-    const float tau = flight::TimeToIntercept(los, target_v, speed);
-    const Vec3 aim = (tau >= 0.0f) ? target_p + target_v * tau : target_p;
+              float speed, float cap, float lead) {
+    // Same point ProNav midcourse flies (D34/D39): the meeting, pushed
+    // in front of them on their track.
+    const Vec3 aim = flight::BarrierAim(slot, target_p, target_v, speed, lead);
     const Vec3 to_aim = aim - slot;
     const float len = swarm::Length(to_aim);
     if (len < 1.0f) return slot;
@@ -493,7 +553,8 @@ Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) 
     const float now = obs.time();
     const Vec3 slot = StationAt(StationBearing(cfg_.drone_id, cfg_.fleet_size,
                                         cfg_.drone_id, heard_, heard_at_,
-                                        obs.position(), cfg_.comm_radius, now),
+                                        obs.position(), cfg_.comm_radius, now,
+                                        confirmed_dead_),
                           cfg_.asset, ring_radius_, ring_altitude_);
     station_ = slot;
     stalk_ = nullptr;
@@ -516,7 +577,8 @@ Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) 
                          cfg_.asset_radius, kHostileDash) >= kCompactWindow)
             continue;
         const Vec3 aim = StalkAim(slot, t.position, t.velocity,
-                                  cfg_.max_speed, kStalkRange);
+                                  cfg_.max_speed, kStalkRange,
+                                  flight::kBarrierLeadKills * cfg_.kill_radius);
         if (swarm::Distance(aim, slot) < 1.0f) continue;
         goal = aim;
         stalk_ = &t;
@@ -532,7 +594,8 @@ Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) 
                                             heard_, now, receding);
         const Vec3 owner_slot = StationAt(
             StationBearing(owner, cfg_.fleet_size, cfg_.drone_id, heard_,
-                           heard_at_, obs.position(), cfg_.comm_radius, now),
+                           heard_at_, obs.position(), cfg_.comm_radius, now,
+                           confirmed_dead_),
             cfg_.asset, ring_radius_, ring_altitude_);
         const Vec3 from = CorridorOrigin(store, t, owner_slot);
         const Vec3 end = CorridorHorizon(from, t.position, t.velocity);

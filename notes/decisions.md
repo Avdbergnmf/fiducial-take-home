@@ -1474,3 +1474,165 @@ plateau, not slack.
 On a 16 m/s dash that is 10 m. Neighbours still latch in one packet
 (D35). Compact spool still stalks during the wait (D32). The next person
 who wants this shorter needs a who-goes change, not a lower bar.
+
+---
+
+## D37 — Latch a nearby death; do not hop a corpse
+
+**The leak:** after several rams the survivors run toward a silent last-heard
+pose, enter radio of that stale bubble, treat the mate as dead, reverse when
+they leave it, and the gap they were closing opens again. `x1-c7b7bd…` was
+the picture: 18 m late picket, ping-pong on the live ring.
+
+**Options considered**
+
+1. **Hop a DeathNotice.** Same as TrackReport: origin, seq, 4 hops. Honest
+   about "gone". **Rejected.** D11 already starved heartbeats with extra
+   packets; identity is how UniqueOwner works. A new verb on the same budget
+   is the same failure.
+2. **Original ±1 silent ⇒ dead**, heartbeat restores. The user's "supposed
+   to be my neighbour and isn't." **Tried.** s2 6/6 → 5/6 (−44.1): an
+   interceptor who left radio looks exactly like a dead neighbour, and the
+   lip steals their sector.
+3. **Silence is death iff the last heartbeat was in radio**, ignore current
+   range. Stops the reverse. **Tried.** x2-b 3/3 → 2/3 (−72.9): that id's
+   radio is hop-0 and edge-y; a 2D "in range" check on the predicted pose
+   disagreed with "we received the packet", so real nearby deaths never
+   latched.
+4. **D30 until confirmed, then latch.** Silence inside radio of the last
+   pose is a nearby death, and it *stays* a death until a heartbeat — leaving
+   the bubble does not resurrect them. Silence that starts far is still
+   radio loss / an interceptor (D19). No new packet.
+
+**Chosen:** 4. `confirmed_dead_[]` in `RingAlive`. Null pointer keeps the
+pure D30 rule for the tests that do not need the latch.
+
+**Why not 2.** Covering a sortie is the s2 leak D35 just closed. "They flew
+back into range, shift back" is the heartbeat, not a neighbour-id special
+case.
+
+**Viewer, same change.** `fix_sigma` is 0.35 m (`params fix=`). Too small to
+draw; it is a row on the inspector. `commit` / `near` / `ram` now log
+`n=/e=/alt=/vn=/ve=` of the believed target. Cue **Believed aim**: a magenta
+glow-ghost at that pose, coasted on vn/ve while the commit span is open,
+plus a line from the selected drone. Ground truth stays the red Intercept
+line — the offset is the point. Latch flips log `gone id=` / `live id=` and
+draw as purple / green Pings (held 1.4 s, still drawn to a dead mate's last
+pose). Intercept association is horizontal to that believed `n=/e=` (and
+`alt=` when present); 3D nearest-to-ground-NED preferred a 30 m picket over
+a 40 m inbound once those fields landed on every commit. `n=` is parsed as a
+whole token so it does not match inside `vn=`.
+
+**Measured, 8 fixed:** mean **164.6 → 166.4**, floor **20.6 (x1-a)**
+unchanged. s2 **6/6 163.4**, x2-b **3/3 161.7**, s1 **237.0 6/6**. 0 wrong,
+0 waste. The latch is idle on a healthy ring.
+
+**Measured, ping-pong id `x1-c7b7bd…`:** **−406 → −398**, still 2/3 and a
+breach. The latch only fires after someone enters the stale bubble; this
+layout's late picket never gets that close as a *nearby* death. Option 3
+cleared it (−198, 3/3) and broke x2-b. Not a trade.
+
+**Cost accepted:** a live mate whose last pose we later fly through is
+presumed gone until the next heartbeat. On the 8 that is a wash. A DeathNotice
+is still the thing that would close `c7b7bd` without touching x2-b, and it is
+still the D11 tax.
+
+**Determinism:** `--replay` clean on s1, s2, x2-b. Suites pass, including
+the latch (leave the bubble, they stay dead; interceptor far stays live).
+
+---
+
+## D38 — One owner on a bisector; do not brake for the ram
+
+**The leak:** `x1-e1257f87407ee680bda34e3341792187`, hostile_1, breach at
+26.4. The inbound sat on the slot-12/13 bisector. Drone 12's track rounded
+to 12, drone 13's to 13 (`FacingSlot` is `lround`). Both committed at 21.2
+from 49 m. `CloserChaser` needs the other to be 2 m closer *and* already
+flying at 5 m/s — they started together from rest, so neither aborted.
+At 24 s they were 6 m from the hostile and 12 m from each other.
+`EnforceSeparation` panicked. Closing on the inbound went 14 → 6 → −9.
+`abort lost` at the breach.
+
+**Options considered**
+
+1. Keep `lround`, hope `CloserChaser` catches up. It cannot: 0.75 s to
+   5 m/s, and equal range never trips the 2 m rule.
+2. Floor instead of nearest. Moves the discontinuity onto the slot ray
+   (the facing drone's own bearing). A 1 m track error still flips an
+   observer sitting *on* that ray. Worse place to put the edge.
+3. Deadband around the Voronoi edge: within 0.08 slots (~2° on 14 drones,
+   ~3 σ of `fix_sigma` 1.25 m at 50 m) the clockwise id owns it (same
+   walk as UniqueOwner). Both observers compute the same facing. Exact
+   slot rays still map to themselves. Similar-range chasers: clearly
+   closer still wins; a tie yields to the lower fleet id. Interceptor
+   skip of a mate whose time-to-hit is at or after the ram on `exempt`.
+
+**Chosen:** 3.
+
+**Why not "always the closer drone".** At the exact bisector they are the
+same distance. The leak is *disagreement*, not a bad geometric pick.
+
+**Cost accepted:** 0.08 slots past the bisector, the slightly farther of
+the two still owns (~4 m of extra run at 50 m range). A picket who is
+*between* us and the target is still avoided. Two interceptors who both
+slip the deadband can still `pair_friendly` if they arrive together —
+that ram is now preferred to a breach.
+
+**Measured, x1-e1257f:** **−286.5 3/5 → −86.9 4/5**. hostile_1 is a
+kill at 24.23 (drone 13 only). Drone 12's later commit aborted
+`duplicate` at 23.87. Remaining breach is hostile_3, a different inbound.
+0 waste, 0 `pair_friendly`.
+
+**Measured, 8 fixed:** mean **166.4 → 163.9**, floor **20.6 (x1-a)**
+unchanged. Every scenario still clears. s1 **237.0 6/6**, s2 **163.5 6/6**,
+x2-b **139.5 3/3** (was 161.7 — later rams, not a leak). 0 wrong, 0 waste.
+
+**Determinism:** `--replay` clean on s1, s2, x2-b. Suites pass, including
+the bisector agreement, the id tie-break, and the wingman-at-the-ram skip.
+
+---
+
+## D39 — Aim the intercept in front of them, on their track
+
+**The leak:** same id, hostile_3, breach at 40.45. Drone 4 committed at
+35.29 from 50 m (`close=16.3 ttg=5.2 miss=3.8`). Closest approach 2.5 m
+against `kill_radius` 1.85 m, then `abort lost`. Altitudes matched; this
+was horizontal.
+
+At commit they were already **46 m in front** of the inbound and **17 m
+off its ground track**. Midcourse `TimeToIntercept` flew the kinematic
+meeting — close along-track and cross together, meet abeam, they go past.
+
+**Options measured on this id**
+
+1. Keep the rendezvous, hope ZEM pulls the last 0.65 m. They were
+   already opening at the breach.
+2. Sit on the foot of the perpendicular (GoTo / max-speed / Cruise).
+   Same 17 m geometry as hostile_1, which D38 *killed* by flying the
+   rendezvous. Sitting: **4/5 → 1/5** (GoTo) or **3/5** (max-speed and
+   Cruise) — loses hostile_1 and still misses hostile_3. From rest,
+   a stop on the line takes 3.2 s; they arrive in 2.6 s. Flying through
+   the foot is the same abeam miss.
+3. Keep D22's max-speed + ZEM, but put the aim on their ground track
+   `8 · kill_radius` in front of the kinematic meeting. Early → we
+   occupy a point they still have to fly through. Late → still ahead
+   of current position, not beside them. On-bearing pickets still
+   charge (`TestLeadIntercept`).
+
+**Chosen:** 3, at `8 · kill_radius`. 4·kill took the closest approach
+2.5 m → 2.0 m (kill 1.85) and still missed. 8·kill is a ram at 38.4.
+
+**Why not 2.** The 17 m offset is also how a facing drone meets a
+bisector inbound (D38). Sitting is a different miss, not a safer one.
+
+**Measured, x1-e1257f:** **−86.9 4/5 → +110.1 5/5**. hostile_3 is a
+kill at 38.40 (drone 4). 0 waste, 0 wrong.
+
+**Measured, 8 fixed:** mean **163.9 → 161.2**, floor **20.6 → 16.8
+(x1-a)**. Every scenario still clears. s1 **236.0 6/6**, s2 **161.7
+6/6**, x2-b **137.7 3/3**. 0 wrong, 0 waste.
+
+**Determinism:** `--replay` clean on s1, s2, x2-b.
+
+---
+
