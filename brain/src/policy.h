@@ -67,6 +67,15 @@ Vec3 StationAt(float bearing, const Vec3& centre, float radius, float altitude);
 uint32_t UniqueOwner(uint32_t facing, uint32_t fleet_size, uint32_t self_id,
                      const float* heard, float now);
 
+/// Same walk as UniqueOwner, but skip `facing` when that drone is receding
+/// from the inbound (D35). Clockwise neighbour takes it. One skip only —
+/// walking every receding slot would leave nobody.
+uint32_t InboundOwner(uint32_t facing, uint32_t fleet_size, uint32_t self_id,
+                      const float* heard, float now, bool facing_receding);
+
+/// Horizontal component of `velocity` toward `target`. Negative is receding.
+float TowardTarget(const Vec3& position, const Vec3& velocity, const Vec3& target);
+
 /// End of the remaining intercept flight, not the hostile's current pose.
 /// Assumed cruise along LOS, t_meet = range / closing, along = cruise ·
 /// min(t_meet + 0.5 s, abort 12 s). Returns `from` when that cruise is not
@@ -129,8 +138,13 @@ public:
     void NoteAlive(uint8_t drone_id, const Vec3& position, float now);
 
 private:
-    bool ShouldCommit(const Track& t, const swarm::Observation& obs) const;
-    bool OwnsInbound(const Track& t, const swarm::Observation& obs) const;
+    bool ShouldCommit(const Track& t, const TrackStore& store,
+                      const swarm::Observation& obs) const;
+    bool OwnsInbound(const Track& t, const TrackStore& store,
+                     const swarm::Observation& obs) const;
+    bool FacingReceding(uint32_t facing, const Track& hostile,
+                        const TrackStore& store,
+                        const swarm::Observation& obs) const;
     bool CloserChaser(const Track& hostile, const TrackStore& store,
                       const swarm::Observation& obs) const;
     Vec3 PicketGoal(const TrackStore& store, const swarm::Observation& obs);

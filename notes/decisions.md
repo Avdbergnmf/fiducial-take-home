@@ -1364,3 +1364,58 @@ never close inside 4·kill.
 
 **Determinism:** `--replay` clean on s1, s2, x2-b. Suites pass, including
 `TestStalkAimLeadsNotPursues`.
+
+---
+
+## D35 — Neighbour's call is enough; receding facing yields clockwise
+
+**x1-b40377e53070182f8f25674795f451b5**, hostile_1, breach at 37.11. Drone 0
+called at 31.49 (local, 53 m, in sense). Drone 1 is the *facing* owner
+(bearing 27° / 10 slots) and is sitting still on station, 67 m out — just
+outside sense 60.7, inside comm 67.6. Drone 0 is sliding south at 5.5 m/s
+(D19 respace after drone 2 died), receding from the inbound. It never
+committed. Drone 1 committed at 32.61 when the hostile entered *its* sense,
+1.1 s late, close=11, ttg=4.5, and missed by 14 m at the cylinder.
+
+**What was already true, and what was not.** Who-goes is UniqueOwner
+(facing, then clockwise). That already wanted drone 1. Velocity *is* in
+`ClosingSpeed`, but `t_meet`'s `extra = cruise − toward` cancelled an
+outbound velocity and treated a reverse as free. The closing ≥ 1 gate
+uses real relative speed; the time-to-meet did not. Drone 0's motion in
+the viewer is the respace, not an intercept.
+
+**Why drone 1 sat.** A peer Hostile added `confidence/255` to
+`closing_score`. A fresh call sends score·120 ≈ 72, so +0.28 per packet
+against a 0.6 latch. Three 0.5 s reports, and 184 frames dropped to loss
+on this run, so the first two never arrived. Drone 1's first Hostile line
+was local, not `peer origin=0`.
+
+**Chosen**
+
+1. One Hostile report latches (at least `kEvidenceForCall`, and we now
+   send confidence 255). The seer already paid the 0.6 s classify.
+2. Burst the first 1.5 s at 0.1 s; the first frame is priority 6, above
+   heartbeat, so it is not queued behind identity.
+3. If the facing drone is receding from the inbound (toward < −2 m/s) and
+   we can see them, UniqueOwner starts at facing+1. One skip only.
+4. `t_meet` pays `|toward|/lateral` when toward is negative.
+
+Still one interceptor. Hearsay commit was already legal (D18).
+
+**Measured, x1-b403:** −399.6 2/3 → **−199.4 3/3**, asset survived.
+Drone 1 commit **32.61 → 31.52** (`peer origin=0 hops=0`), 0.03 s after
+drone 0's call.
+
+**Measured, 8 fixed:** mean **139.6 → 164.6**, floor **−39.4 → 20.6**
+(x1-a). **s2 5/6 → 6/6 (+163.4)** — the D18 leak (spent facing, successor
+off-axis, catchable only once it is in sense). s1 237.5 → 237.0, still
+6/6. x2-b 3/3. 0 wrong, 0 waste. ae01dd still 3/3.
+
+**Cost accepted:** a false Hostile from a neighbour spends the facing
+owner. UniqueOwner still only one drone. Tier 3 can replay a Hostile;
+that was already the D18 cost, now one packet not three. Burst reports
+nudge comms 39.5 → 39.4. Unseen receding facing still owns — missing a
+skip is "facing goes" not "two go".
+
+**Determinism:** `--replay` clean on s1, s2, x2-b. Suites pass, including
+`TestInboundOwnerSkipsARecedingFacing` and a 72-confidence hearsay latch.

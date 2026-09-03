@@ -11,6 +11,8 @@ namespace {
 constexpr float kHeartbeatHz = 2.0f;
 constexpr float kAbortAfter = 12.0f;        // s; one spawn interval is 14 s
 constexpr float kReportEvery = 0.5f;        // s between reports on one track
+constexpr float kReportBurst = 0.1f;        // s; first 1.5 s after the call (D35)
+constexpr float kReportBurstFor = 1.5f;
 constexpr float kPi = 3.14159265358979f;
 constexpr float kMinClosing = 1.0f;         // m/s; below this is not a closing intercept
 constexpr float kCatchSlack = 0.5f;         // s; must arrive this much before the cylinder
@@ -24,7 +26,9 @@ constexpr float kOwnerSilent = 1.5f;       // s; three missed 2 Hz heartbeats
 constexpr float kNeverHeard = -1.0e8f;
 
 constexpr uint8_t kPrioTrack = 3;
+constexpr uint8_t kPrioTrackFirst = 6;      // first Hostile report, above heartbeat
 constexpr uint8_t kPrioHeartbeat = 5;       // identity first: claims/reports starved this and neighbours stole intercepts
+constexpr float kReceding = 2.0f;           // m/s away; facing owner yields to clockwise
 
 /// Scoring hook, and the only channel the viewer has for "this drone called
 /// enemy." Intercept still uses Track.belief. Local Friendly and Hostile
@@ -129,7 +133,7 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
         Track* candidate = nullptr;
         float best_key = 1.0e6f;
         for (Track& t : store.tracks()) {
-            if (!ShouldCommit(t, obs)) continue;
+            if (!ShouldCommit(t, store, obs)) continue;
             if (CloserChaser(t, store, obs)) continue;
             const float ttg = TimeToCylinder(t.position, t.velocity, cfg_.asset,
                                              cfg_.asset_radius);
@@ -325,13 +329,58 @@ uint32_t UniqueOwner(uint32_t facing, uint32_t fleet_size, uint32_t self_id,
     return facing % n;
 }
 
-bool Policy::OwnsInbound(const Track& t, const swarm::Observation& obs) const {
+uint32_t InboundOwner(uint32_t facing, uint32_t fleet_size, uint32_t self_id,
+                      const float* heard, float now, bool facing_receding) {
+    const uint32_t n = fleet_size > 0 ? fleet_size : 1;
+    uint32_t start = facing % n;
+    if (facing_receding) start = (start + 1) % n;
+    return UniqueOwner(start, fleet_size, self_id, heard, now);
+}
+
+float TowardTarget(const Vec3& position, const Vec3& velocity, const Vec3& target) {
+    const Vec3 los(target.x - position.x, target.y - position.y, 0.0f);
+    const float range = swarm::Length(los);
+    if (range < 1.0f) return 0.0f;
+    return swarm::Dot(Vec3(velocity.x, velocity.y, 0.0f), los / range);
+}
+
+bool Policy::FacingReceding(uint32_t facing, const Track& hostile,
+                            const TrackStore& store,
+                            const swarm::Observation& obs) const {
+    Vec3 p, v;
+    if (facing == cfg_.drone_id) {
+        p = obs.position();
+        v = obs.velocity();
+    } else {
+        // Need a live heartbeat pose so we do not match a Friendly near the
+        // origin (never-heard heard_at is zero). Unseen facing still owns.
+        if (facing >= kMaxFleet) return false;
+        if (heard_[facing] < kNeverHeard) return false;
+        const Track* mate = nullptr;
+        float best = 20.0f;
+        for (const Track& t : store.tracks()) {
+            if (t.belief != Belief::Friendly) continue;
+            const float d = swarm::Distance(t.position, heard_at_[facing]);
+            if (d < best) { best = d; mate = &t; }
+        }
+        if (!mate) return false;
+        p = mate->position;
+        v = mate->velocity;
+    }
+    return TowardTarget(p, v, hostile.position) < -kReceding;
+}
+
+bool Policy::OwnsInbound(const Track& t, const TrackStore& store,
+                         const swarm::Observation& obs) const {
     // Allocation stays on the original id ring: facing slot, then first
     // live clockwise (D15). Stations re-space (D19); who may spend does not,
     // so a ghost far-side silence cannot hand the inbound to nobody.
+    // D35: if that facing drone is flying away from the inbound, the
+    // clockwise neighbour is the one who can still catch it.
     const uint32_t facing = FacingSlot(t.position, cfg_.asset, cfg_.fleet_size);
-    return UniqueOwner(facing, cfg_.fleet_size, cfg_.drone_id, heard_, obs.time())
-           == cfg_.drone_id;
+    const bool receding = FacingReceding(facing, t, store, obs);
+    return InboundOwner(facing, cfg_.fleet_size, cfg_.drone_id, heard_,
+                        obs.time(), receding) == cfg_.drone_id;
 }
 
 namespace {
@@ -460,7 +509,7 @@ Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) 
         if (t.belief == Belief::Friendly || t.belief == Belief::Wreckage) continue;
         if (!LooksDivingAtAsset(t.position, t.velocity, cfg_.asset, cfg_.asset_radius))
             continue;
-        if (!OwnsInbound(t, obs)) continue;
+        if (!OwnsInbound(t, store, obs)) continue;
         const float horiz = swarm::Length(Vec3(t.velocity.x, t.velocity.y, 0.0f));
         if (horiz >= kHostileDash * 0.6f) continue;
         if (ThreatWindow(t.position, t.velocity, cfg_.asset,
@@ -476,10 +525,11 @@ Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) 
 
     for (const Track& t : store.tracks()) {
         if (t.belief != Belief::Hostile) continue;
-        if (OwnsInbound(t, obs)) continue;
+        if (OwnsInbound(t, store, obs)) continue;
         const uint32_t facing = FacingSlot(t.position, cfg_.asset, cfg_.fleet_size);
-        const uint32_t owner = UniqueOwner(facing, cfg_.fleet_size, cfg_.drone_id,
-                                           heard_, now);
+        const bool receding = FacingReceding(facing, t, store, obs);
+        const uint32_t owner = InboundOwner(facing, cfg_.fleet_size, cfg_.drone_id,
+                                            heard_, now, receding);
         const Vec3 owner_slot = StationAt(
             StationBearing(owner, cfg_.fleet_size, cfg_.drone_id, heard_,
                            heard_at_, obs.position(), cfg_.comm_radius, now),
@@ -491,7 +541,8 @@ Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) 
     return goal;
 }
 
-bool Policy::ShouldCommit(const Track& t, const swarm::Observation& obs) const {
+bool Policy::ShouldCommit(const Track& t, const TrackStore& store,
+                          const swarm::Observation& obs) const {
     // Spend the airframe on a fresh Hostile we can catch. Hearsay is allowed
     // on s2: the drone that sees a 220 m inbound is not the one that can
     // intercept it, and a report that stops at one hop never gets there (D18).
@@ -507,7 +558,7 @@ bool Policy::ShouldCommit(const Track& t, const swarm::Observation& obs) const {
         if (t.has_local_id && last_abort_id_ != 0 && t.track_id == last_abort_id_)
             return false;
     }
-    if (!OwnsInbound(t, obs)) return false;
+    if (!OwnsInbound(t, store, obs)) return false;
 
     const float range = swarm::Distance(t.position, obs.position());
     const float closing = ClosingSpeed(obs.position(), obs.velocity(),
@@ -519,20 +570,19 @@ bool Policy::ShouldCommit(const Track& t, const swarm::Observation& obs) const {
     // Stationary t_meet (range/closing) is the picket waiting for them.
     // After a death the live ring slides into the hole (D19); still count
     // cruise along the line of sight if we are not yet on the new station.
-    const Vec3 los = Vec3(t.position.x - obs.position().x,
-                          t.position.y - obs.position().y, 0.0f);
-    const float range_h = swarm::Length(los);
-    float extra = kCruise;
-    if (range_h > 1e-3f) {
-        const float our_toward = swarm::Dot(
-            Vec3(obs.velocity().x, obs.velocity().y, 0.0f), los / range_h);
-        extra = kCruise - our_toward;
-        if (extra < 0.0f) extra = 0.0f;
-    }
+    // extra = cruise - toward used to CANCEL an outbound velocity and treat
+    // a reverse as free. A drone sliding away from the inbound (D19 respace)
+    // then looked as catchable as one sitting still (D35). Pay the reverse.
+    const float our_toward = TowardTarget(obs.position(), obs.velocity(),
+                                          t.position);
+    float extra = kCruise - our_toward;
+    if (extra < 0.0f) extra = 0.0f;
     const float closing_go = closing + extra;
     const float ttg = TimeToCylinder(t.position, t.velocity, cfg_.asset,
                                      cfg_.asset_radius);
-    const float t_meet = range / closing_go;
+    float t_meet = range / closing_go;
+    if (our_toward < 0.0f)
+        t_meet += (-our_toward) / cfg_.lateral_limit;
     return t_meet + kCatchSlack < ttg;
 }
 
@@ -655,7 +705,10 @@ void Policy::Compose(Outbox<24>& outbox, TrackStore& store,
     for (Track& t : store.tracks()) {
         if (t.belief != Belief::Hostile) continue;
         if (!t.has_local_id) continue;    // hearsay rides the author's frame (D18)
-        if (now - t.last_reported < kReportEvery) continue;
+        const bool first = t.last_reported < 0.0f;
+        const float every = (now - t.belief_since < kReportBurstFor)
+                                ? kReportBurst : kReportEvery;
+        if (!first && now - t.last_reported < every) continue;
 
         Writer w(buffer, sizeof(buffer));
         Header h;
@@ -669,11 +722,14 @@ void Policy::Compose(Outbox<24>& outbox, TrackStore& store,
         m.position = t.position;
         m.velocity = t.velocity;
         m.belief = t.belief;
-        m.confidence = static_cast<uint8_t>(
-            t.closing_score > 2.0f ? 255 : static_cast<int>(t.closing_score * 120.0f));
+        // The seer already paid kEvidenceForCall. One packet must be enough
+        // for the facing owner to latch — score*120 was 72 on a fresh call
+        // and needed three reports (D35 / x1-b403).
+        m.confidence = 255;
         m.Write(w);
 
-        if (w.ok() && outbox.Push(buffer, w.size(), kPrioTrack, now)) {
+        const uint8_t prio = first ? kPrioTrackFirst : kPrioTrack;
+        if (w.ok() && outbox.Push(buffer, w.size(), prio, now)) {
             t.last_reported = now;
         }
     }

@@ -313,6 +313,13 @@ static void TestPeerReportAssociatesByGeometry() {
     CHECK(store.FindByStoreId(store.tracks()[0].store_id) == &store.tracks()[0]);
     CHECK(store.Find(0) == nullptr);   // hearsay must not collide with local id 0
 
+    // A fresh call used to send confidence 72 (score*120). One report must
+    // still latch: the facing owner cannot wait for three 0.5 s packets.
+    TrackStore slow;
+    slow.MergePeerReport(p, v, Belief::Hostile, 72, 10.0f, 3, 0);
+    CHECK(slow.tracks().size() == 1);
+    CHECK(slow.tracks()[0].belief == Belief::Hostile);
+
     // Same aircraft, a few metres off (two fix biases). One row.
     store.MergePeerReport(Vec3(174.0f, 2.0f, -40.0f), v, Belief::Hostile, 255,
                           10.4f, 3, 2);

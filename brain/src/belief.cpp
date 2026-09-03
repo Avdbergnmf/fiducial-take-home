@@ -375,13 +375,14 @@ void TrackStore::MergePeerReport(const Vec3& position, const Vec3& velocity,
     t->last_origin = origin;
     t->last_hops = hops;
 
-    // A peer's opinion is evidence, not truth. It moves the score; it does not
-    // set the verdict. From tier 3 on, an unverified peer may be a hostile
-    // replaying your own traffic, and from tier 5 it may be one of yours,
-    // sincerely wrong.
+    // A peer's Hostile call is a completed classify, not 0.28 of one.
+    // score*120 confidence needed three 0.5 s reports before the facing
+    // owner would latch, and the inbound on x1-b403 covered 18 m in that
+    // wait (D35). Still refuse to overwrite a Friendly.
     if (peer_belief == Belief::Hostile) {
-        t->closing_score = Clamp(
-            t->closing_score + static_cast<float>(confidence) / 255.0f, -2.0f, 3.0f);
+        const float bump = static_cast<float>(confidence) / 255.0f;
+        const float add = bump > kEvidenceForCall ? bump : (kEvidenceForCall + 0.01f);
+        t->closing_score = Clamp(t->closing_score + add, -2.0f, 3.0f);
     }
     if (t->closing_score > kEvidenceForCall && t->belief != Belief::Hostile
         && t->belief != Belief::Friendly) {
