@@ -1419,3 +1419,58 @@ skip is "facing goes" not "two go".
 
 **Determinism:** `--replay` clean on s1, s2, x2-b. Suites pass, including
 `TestInboundOwnerSkipsARecedingFacing` and a 72-confidence hearsay latch.
+
+---
+
+## D36 — `kEvidenceForCall` 0.6 is the plateau, not slack
+
+D11 left 0.6 as a guess after 1.2 → 0.6. The remaining fear was G1 civilian
+false positives. The remaining hope was earlier `W_kill` (every 0.1 s is
+~1.6 m of dash). Stalk (D32) already flies during the wait on compact
+spool; D35 already latches a neighbour in one radio frame. This bar only
+delays the *local* classify.
+
+**Options measured** against the fixed 8 plus ae01dd, 814, b403:
+
+| bar | 8-mean | 8-floor | s1 | x1-c | b403 | 814 | notes |
+|---|---|---|---|---|---|---|---|
+| 0.1 | 120.9 | −63.9 | 262.7 6/6 | 2/3 leak | 2/3 | 3/3 | s2 5/6 |
+| 0.3 | 144.0 | −66.7 | 252.9 6/6 | 2/3 leak | 2/3 | 3/3 | |
+| 0.4 | 91.0 | −238.0 | 248.0 6/6 | 2/3 leak | 2/3 | 2/3 | s2 4/6 |
+| 0.5 | 140.1 | −69.5 | 242.4 6/6 | 2/3 leak | 2/3 | 3/3 | |
+| 0.55 | 165.5 | 20.6 | 238.6 6/6 | 3/3 | **2/3** | 3/3 | |
+| 0.58 | 165.0 | 20.7 | 238.1 6/6 | 3/3 | 3/3 −199.4 | 3/3 | |
+| **0.6** | **164.6** | **20.6** | **237.0 6/6** | **3/3** | **3/3 −199.4** | **3/3 172.9** | |
+| 0.65 | 163.6 | 20.7 | 234.2 6/6 | 3/3 | 3/3 | **2/3** | |
+| 0.7 | 162.7 | 20.6 | 232.6 6/6 | 3/3 | 3/3 | 2/3 | |
+
+Civilians stayed 6 on every bar (x1-a 2, ae01dd 2, b403 2). Wrong
+declarations did not climb on the 8; they showed on b403 once that leak
+reopened. G1 was not the cost.
+
+**What the leaks actually are**
+
+- **b403 at ≤0.55:** hostile_1 breaches at **37.11** — the same tick as
+  the pre-D35 leak. Calling ~50 ms earlier fires UniqueOwner before the
+  facing drone is receding (toward < −2), so the skip does not run and
+  the seer who cannot catch owns it.
+- **x1-c at ≤0.5:** hostiles 0 and 1 die ~0.17 s earlier; hostile_2 then
+  breaches. First two still succeed. The third is a ring/radio butterfly
+  (max hops 1 → 0 at 0.3).
+- **814 at ≥0.65:** hostile_1 (t_engage 4.3 / t_free 5.74 at 0.6) is a
+  discrete miss, not 50 ms of extra dash. Compact-spool windows are that
+  tight.
+
+s1's "free" money is real and monotonic: 0.1 → 262.7, 0.6 → 237.0, 0.7 →
+232.6. About 5 points per 0.1 s of earlier `W_kill`. A converted breach
+is 300.
+
+**Chosen:** keep 0.6. 0.58 is the only shorter bar that stayed clean, and
+it is +0.4 mean / +1.1 on s1 — noise, and 20 ms from the b403 cliff.
+0.65 is already the 814 cliff. The round number is the middle of a 20 ms
+plateau, not slack.
+
+**Cost accepted:** 0.6 s of aimed geometry before the local Hostile latch.
+On a 16 m/s dash that is 10 m. Neighbours still latch in one packet
+(D35). Compact spool still stalks during the wait (D32). The next person
+who wants this shorter needs a who-goes change, not a lower bar.

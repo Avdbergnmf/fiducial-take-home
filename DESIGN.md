@@ -115,9 +115,11 @@ interceptor on the way in — same alignment, same closing, same miss — is not
 re-classified as the thing we are defending against. Ballistic wreckage is
 checked first and still wins.
 
-`kEvidenceForCall` is 0.6 s of aimed geometry. That is still a guess. Every
-0.1 s off it is ~1.6 m more intercept window and a civilian chord that looks
-0.1 s more like a dash.
+`kEvidenceForCall` is 0.6 s of aimed geometry. That is measured, not a guess
+(D36): the working window is 0.58–0.60 s. 0.1 s shorter leaks x1-c and b403;
+0.05 s longer misses 814. On a clean layout like s1, each 0.1 s is ~5 points
+of earlier `W_kill` and ~1.6 m of dash — real money that is cheaper than a
+breach.
 
 ## When I spend a drone
 
@@ -290,7 +292,8 @@ collision.
 - **D13 local drop.** Tracks die with the sensor picture. Correct against an
   unpublished `track_drop_time`; it cost ~200 points each on s2, x1-a, x2-a
   until D15 recovered most of it.
-- **`kEvidenceForCall` 0.6** is a guess. Tighter civilian chords are where it
+- **`kEvidenceForCall` 0.6** is measured (D36). The cliff is who-goes timing,
+  not civilian FPs, on the layouts we have. Tighter civilian chords are where it
   will show.
 
 ## LLM use

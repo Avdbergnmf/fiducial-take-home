@@ -4,6 +4,7 @@ namespace sw {
 namespace {
 
 constexpr float kHearsayDrop = 2.0f;       // s; local tracks drop with the sensor picture
+// D36: the working window is 0.58–0.60 s. 0.55 reopens x1-b403; 0.65 misses 814.
 constexpr float kEvidenceForCall = 0.6f;   // s of aimed geometry to name Hostile
 constexpr float kScoreDecay = 0.6f;        // per second, toward zero
 constexpr float kSureHit = 5.0f;           // m; aimed-dash CPA, well above fix_sigma 0.35

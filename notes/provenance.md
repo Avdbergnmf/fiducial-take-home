@@ -66,7 +66,7 @@ closing, so a 16-drone ring of radius 75 (neighbours 29 m) still fits. A static
 | file:line | name | value | category | source | defensible? |
 |---|---|---|---|---|---|
 | belief.cpp:6 | `kHearsayDrop` | 2.0 s | **DERIVED** (weakly) | Local tracks drop when absent from `obs.tracks()` (D13). Hearsay only: four missed 0.5 s reports (`kReportEvery`). | Not the sim's unpublished `track_drop_time`. |
-| belief.cpp:7 | `kEvidenceForCall` | 0.6 | **GUESS**, G3 | Was 1.2. Units are seconds of aimed geometry. D11: moved after the commit rule was spending the facing drone. | s1: 6/6, civ 0, 3 wrong (same as 1.2). *Too low:* civilian FPs on generated chords. |
+| belief.cpp:8 | `kEvidenceForCall` | 0.6 | **MEASURED**, G3 | Seconds of aimed geometry. Swept 0.1–0.7 against the fixed 8 plus ae01dd / 814 / b403 (D36). Plateau is 0.58–0.60. Was 1.2, then 0.6 as a guess (D11). | *Too low (≤0.55):* b403 re-leaks hostile_1 at 37.11 (D35 skip). ≤0.5 also drops x1-c's third. *Too high (≥0.65):* 814 misses hostile_1 (t_free 5.74). Civilian FPs did not move on these 11. |
 | belief.cpp:8 | `kScoreDecay` | 0.6 /s | **GUESS** | none | Asymmetric with the +1.0/s accrual, so evidence builds ~1.7× faster than it decays. That bias is toward false positives. *Too high:* flickering beliefs. *Too low:* a stale hostile call never clears. |
 | belief.cpp:29 | alignment speed deadband | 0.5 m/s | **GUESS** | none | Low-risk. Prevents a divide-by-noise on a hovering track. |
 | belief.cpp:41 | closest-approach deadband | 0.25 (=0.5 m/s)² | **GUESS** | none | Low-risk, same reason. |
