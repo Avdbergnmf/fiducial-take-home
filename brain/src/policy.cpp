@@ -605,7 +605,7 @@ Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) 
     // Fly the committed intercept before Classify has spent its 0.6 s, but
     // stay on a leash so a long-window inbound cannot empty the sector and
     // so we can still reverse if it never latches Hostile (D32/D34). The
-    // aim is the lead point, not the current LOS: sliding toward where they
+    // aim is the predicted hostile origin, not the current LOS: sliding toward where they
     // are put the drone on the inbound bearing with the wrong heading, and
     // the handover to ProNav then had to buy that lead back.
     for (const Track& t : store.tracks()) {

@@ -40,8 +40,8 @@ float TimeToIntercept(const Vec3& to_target, const Vec3& target_velocity,
 /// The closed-form meeting, pushed `lead` metres further in front of
 /// them along their velocity. Early → we get to the chord first and they
 /// fly into us; late → we are still ahead of current position, not abeam.
-/// Default lead is `kBarrierLeadKills · kill_radius`.
-constexpr float kBarrierLeadKills = 8.0f;
+/// No radius-sized offset: midcourse aims for the predicted hostile origin.
+constexpr float kBarrierLeadKills = 0.0f;
 Vec3 BarrierAim(const Vec3& self, const Vec3& target_p, const Vec3& target_v,
                 float speed, float lead);
 
@@ -51,9 +51,9 @@ Vec3 BarrierAim(const Vec3& self, const Vec3& target_p, const Vec3& target_v,
 ///
 /// Two laws, blended by range (D22): a closed-form lead intercept flown at
 /// max_speed while there is still range to cover, handing over to a
-/// zero-effort-miss law for the last 25-70 m. The lead point is on their
-/// ground track, `8 · kill_radius` in front of the kinematic meeting
-/// (D39), so an early drone is a barrier and a late one still clips.
+/// zero-effort-miss law for the last 25-70 m. The aim point is the predicted
+/// hostile origin on their ground track, so the friendly and hostile origins
+/// are what the guidance tries to intersect.
 /// Pure PN commanded almost nothing at a picket already on the inbound
 /// bearing, so the drone sat still and was rammed at our own ring radius.
 ///

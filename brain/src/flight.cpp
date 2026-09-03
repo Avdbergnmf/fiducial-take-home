@@ -156,7 +156,8 @@ Vec3 ProNav(const Vec3& self_position, const Vec3& self_velocity,
     // drone held 0.2-0.4 m/s for four seconds while the hostile closed 86 m
     // and rammed it at our own ring radius. That is the whole score --
     // reward is W_kill*(1 - t_engage/t_free) and we were banking 16% of it.
-    // So solve the lead point in closed form and fly there flat out. Nothing
+    // So solve the predicted center intersection in closed form and fly there
+    // flat out. Nothing
     // is held back for later: a kill is a ram, and the report credits the
     // drone we spend (losses_by_cause pair_hostile, wasted 0).
     const float speed = cfg.max_speed;
@@ -170,7 +171,7 @@ Vec3 ProNav(const Vec3& self_position, const Vec3& self_velocity,
     const Vec3 midcourse = (wanted - self_velocity) * 2.0f;
 
     // --- handover -------------------------------------------------------
-    // The lead point assumes constant target velocity, so it goes stale as
+    // The predicted intersection assumes constant target velocity, so it goes stale as
     // soon as the hostile turns, and at 35 m/s of closing there is no range
     // left to correct: flying the lead point all the way in missed by 1-3 m
     // against a 1 m kill radius on every scenario measured. Hand over while

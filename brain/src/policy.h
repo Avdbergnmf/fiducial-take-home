@@ -106,10 +106,11 @@ Vec3 CorridorHorizon(const Vec3& from, const Vec3& hostile_p, const Vec3& hostil
 /// station if Classify never latches.
 constexpr float kStalkRange = 40.0f;
 
-/// Lead point of the committed intercept, leashed `cap` metres from `slot`.
+/// Predicted hostile-origin point of the committed intercept, leashed `cap`
+/// metres from `slot`.
 /// Same `BarrierAim` ProNav midcourse flies (D34/D39), not the LOS to
 /// where the inbound is now. `lead` is metres in front of them on their
-/// track; default is 8 m (8·kill on s1).
+/// track; the default lead is zero, so the origins are the intersection target.
 Vec3 StalkAim(const Vec3& slot, const Vec3& target_p, const Vec3& target_v,
               float speed, float cap, float lead = 8.0f);
 

@@ -372,7 +372,7 @@ static void TestZeroEffortMissSteersAtTheMiss() {
 }
 
 static void TestBarrierAimSitsOnTheChord() {
-    std::printf("lead intercept is biased in front on the inbound track\n");
+    std::printf("intercept aims at the predicted hostile origin\n");
     Config cfg;
     cfg.max_speed = 20.0f;
     cfg.max_accel = 15.0f;
@@ -384,19 +384,17 @@ static void TestBarrierAimSitsOnTheChord() {
     const Vec3 still(0, 0, 0);
     const Vec3 hostile(50, 0, -15);
     const Vec3 inbound(-16, 0, 0);
-    const float lead = flight::kBarrierLeadKills * cfg.kill_radius;
-
     const float tau = flight::TimeToIntercept(hostile - self, inbound,
                                               cfg.max_speed);
     CHECK(tau > 0.0f);
     const float meet_along = 16.0f * tau;           // dir is -x
     const Vec3 aim = flight::BarrierAim(self, hostile, inbound, cfg.max_speed,
-                                        lead);
+                                        flight::kBarrierLeadKills * cfg.kill_radius);
     CHECK(std::fabs(aim.y) < 0.5f);                 // on their ground track
     CHECK(aim.x > 0.0f);
     CHECK(aim.x < 50.0f);
     const float aim_along = 50.0f - aim.x;
-    CHECK(aim_along > meet_along + lead * 0.5f);
+    CHECK(std::fabs(aim_along - meet_along) < 1e-3f);
 
     // Off-track still spends budget getting onto the chord, not only along LOS.
     const Vec3 accel = flight::ProNav(self, still, hostile, inbound, cfg);
