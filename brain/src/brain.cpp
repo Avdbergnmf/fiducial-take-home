@@ -158,6 +158,20 @@ private:
         if (policy_.stance() == sw::Stance::Committed && target) {
             accel = sw::flight::ProNav(position, velocity, target->position,
                                        target->velocity, cfg_);
+        } else if (const sw::Track* stalk = policy_.stalk()) {
+            // Same law as the committed intercept, on a leash: inside
+            // kStalkRange fly ProNav at the inbound; at the cap hold the
+            // lead-leashed point so we can still reverse onto station if
+            // Classify never latches. Not intercepting and not exempt, so
+            // separation still forbids a ram on an Unknown (D34).
+            const float off = swarm::Distance(position, policy_.station());
+            if (off < sw::kStalkRange) {
+                accel = sw::flight::ProNav(position, velocity, stalk->position,
+                                           stalk->velocity, cfg_);
+            } else {
+                const sw::Vec3 hold = policy_.DesiredPosition(obs);
+                accel = sw::flight::GoTo(hold, position, velocity, cfg_);
+            }
         } else {
             const sw::Vec3 goal = policy_.DesiredPosition(obs);
             const float range = swarm::Distance(position, goal);

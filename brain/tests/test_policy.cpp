@@ -351,6 +351,32 @@ static void TestYieldHorizonIsRemainingFlight() {
     CHECK(Horiz(YieldOffCorridor(far, from, none, clear), far) < 0.1f);
 }
 
+static void TestStalkAimLeadsNotPursues() {
+    std::printf("stalk aim is the intercept lead, leashed to the slot\n");
+    const Vec3 slot(70, 0, -30);
+    const float cap = 40.0f;
+    const float speed = 20.0f;
+
+    // Crossing: flying at where they ARE is +x; the meeting point is off
+    // +y, and that is the heading the committed ProNav already flies.
+    const Vec3 crossing = StalkAim(slot, Vec3(170, 0, -30), Vec3(0, 10, 0),
+                                   speed, cap);
+    CHECK(crossing.y > 5.0f);
+    CHECK(swarm::Distance(crossing, slot) <= cap + 1e-3f);
+    CHECK(crossing.x > slot.x);
+
+    // Head-on inbound: lead and LOS agree, so the slide is along -x of them
+    // / +x of us, no lateral.
+    const Vec3 headon = StalkAim(slot, Vec3(170, 0, -30), Vec3(-15, 0, 0),
+                                 speed, cap);
+    CHECK(std::fabs(headon.y) < 0.5f);
+    CHECK(headon.x > slot.x);
+    CHECK(swarm::Distance(headon, slot) <= cap + 1e-3f);
+
+    // Cap binds: a lead hundreds of metres out still sits 40 m off station.
+    CHECK(std::fabs(swarm::Distance(headon, slot) - cap) < 0.5f);
+}
+
 int main() {
     TestFacingSlotMatchesRing();
     TestUniqueOwnerIsOneDrone();
@@ -360,6 +386,7 @@ int main() {
     TestZeroEffortMissSteersAtTheMiss();
     TestStationBisectsTheGap();
     TestYieldHorizonIsRemainingFlight();
+    TestStalkAimLeadsNotPursues();
 
     if (g_failures == 0) {
         std::printf("policy: all passed\n");

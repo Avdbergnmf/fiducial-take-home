@@ -1220,3 +1220,147 @@ floor; both hard ids unchanged. Small, but it regresses nothing.
 three suites pass, including `TestDiveIsAHostileSignatureWhenTimeIsShort`, which
 pins that a diving track on the cylinder opens the fast path while a level
 civilian on the *same ground track* does not.
+
+---
+
+## D32 — Spawn-inside-sense: the TTG gate could not see the short window
+
+**CHALLENGE.md does not promise a dive.** Hostiles spawn at
+`spawn.enemy_altitude` (40 m on s1, 45 m on s2) against a ground-level asset;
+nothing in the brief says they descend. The dive is emergent. On recorded
+runs it is reliable *so far*: hostiles ramp past +1 m/s down within 0.5 s and
+hold ~3.6; civilians sit at 0.00–0.14. D7 already refused to make that the
+class, because a level dash would still breach the cylinder. D32 does not
+either — it only uses the dive as a *clock* when the existing clock is lying.
+
+**The 2.5–3 s wait on x1-814fd5e is not `kEvidenceForCall`.** That is still
+0.6 s. D31 gated the dive on `TimeToCylinder < 10 s`. That function returns
+**1e6 until horizontal closing exceeds 0.1 m/s**. Hostiles that spawn
+*inside* `sense_radius` of the facing picket (this id: spawn 144 m, ring
+~92 m, sense 60 m → 52 m gap) appear while still spooling up, so the gate
+never opens and we wait for 3D miss to fall under 5 m — most of a ~7 s
+window. Hostiles that enter sense already at dash have a real TTG and were
+already calling in ~0.6 s. That is the "starts inside vs zooms in from
+outside" split.
+
+`ThreatWindow` uses dash speed (16 m/s) as the floor, so a standing spawn at
+144 m is 6.8 s, not infinite. The fast path is then:
+
+```
+AimedAtAsset(3D miss)
+|| (TimeToCylinder < 10 s && diving)          // D31, already at speed
+|| (spooling && ThreatWindow < 8 s && diving) // D32, spawn-inside-sense
+```
+
+s1's inbound, once inside sense, is already at dash so it does not take the
+new branch. The owner also *stalks* (slides up to 40 m toward the inbound,
+still Picketing) only on that same spooling+compact signature, so we buy
+acceleration without a full commit.
+
+**What we did not ship.** Two committers on a short TTG: both went, then
+`EnforceSeparation` held them 19 m apart and neither reached kill radius.
+Unconditional dual also dropped s1 to 5/6. Handover (closer-than-owner) was
+the same bet. Stalking every diving inbound with `ThreatWindow < 8 s`
+*without* the spooling test looked compact at first sight on s1 (they are
+first seen at ~146 m, 7.3 dash-seconds) and emptied sectors for the sixth
+hostile. Stalk is spooling-only.
+
+**x1-814fd5e79a980ae1c11a87a76f49336c:** −513.2 (0/3) → **−47.1 (2/3)**, one
+breach, 0 waste, 0 civilians, 0 wrong. The remaining miss is not detection:
+drones 6 and 7 both called at ~29 s with ttg 6.7–8.7 and still lost it at
+34.55. Intercept geometry after a hole in an 8-drone ring, not the 2.5 s wait.
+
+**Fixed 8** (D31 → D32):
+
+| | D31 | D32 |
+|---|---|---|
+| mean | 125.2 | **139.6** |
+| floor | −39.4 (s2, 5/6) | **−39.4 (s2, 5/6)** |
+| s1 | ~6/6 | **237.5, 6/6** |
+| x2-b | leaking | **147.8, 3/3** |
+
+0 wrong declarations, 0 false accusations on the eight. x1-a still loses two
+civilians at t=1.1 (same spawn overlap as before, no friendly death).
+
+**Cost accepted:** the dive is still not in the spec. A later scenario that
+flies level at 40 m will not take this path (D7). A later civilian that dives
+will. `kDiveRate` 1.0 m/s is 7× the loudest civilian vz measured; that is a
+measurement, not a promise. Did not re-run the 20 fresh ids this pass —
+x1-ae01dd went 2/3 → 1/3 with 3 wrong, so the "better on the id you stared
+at" trap is still live. The remaining breach on 814fd5e is an intercept, not
+a call.
+
+**Determinism:** `--replay` clean on s1, s2, x2-b. All three suites pass,
+including `TestThreatWindowIsFiniteWhileSpooling`.
+
+---
+
+## D33 — EPN / MPC guidance: already flying the useful core; the rest does not pay
+
+Mapped a prompt about Enhanced PN + MPC onto what we fly. We are not facing
+supersonic targets; hostiles evade (s1: 3.5 m/s² weave inside 40 m). Fitting
+that manoeuvre is tier 7.
+
+**Already flying the useful subset:** midcourse is a one-step CV "MPC"
+(`TimeToIntercept`); terminal is ZEM not classic PN (D25); stern chase is
+refused at commit. Full receding-horizon MPC needs a weave model.
+
+**Measured against D32** (mean 139.6, floor −39.4, s1 237.5 6/6, hard id
+814fd5e −47.1 2/3) and reverted:
+
+1. **Augmented PN** (`ZEM + ½ a_t t_go²` from Δv/dt). Fixed 8 wash (139.3).
+   ae01dd 1/3 → 0/3. A weave is not constant accel; N=10 saturates the extra
+   term immediately.
+2. **Handover 40–70** so terminal is full at weave start. Mean 103.6, x1-c
+   3/3 → 2/3, s1 237 → 210. ae01dd went 1/3 → 3/3 — D22's ridge plus the
+   stared-at-id trap. 40 m is also a scenario comment.
+3. **t_go = time of closest approach.** Mean 139.5, hard id bit-identical.
+   Wash.
+
+Remaining misses on the guard set are still not terminal accuracy (D26, D32).
+
+---
+
+## D34 — Stalk is the intercept, leashed, not a slide toward where they are
+
+D32's stalk bought acceleration during the 0.6 s classify wait, but the
+goal was `CorridorHorizon` — cruise along the LOS to the inbound's *current*
+position, then `Cruise`/`GoTo` into a point 40 m off station. That is
+pursuit. The committed law is a lead intercept. On a crossing or
+still-spooling inbound the drone lined up on the current bearing, braked
+into the leash, and ProNav then had to buy back the lead in the last few
+seconds — the same geometry D22 already lost to on a sitting picket.
+
+**Options considered**
+
+1. Leave the slide; only start ProNav after the Hostile latch.
+2. Keep `Cruise` into a *lead* point (`TimeToIntercept`), still stop at 40 m.
+3. Fly ProNav at the inbound while Picketing, leashed to 40 m off station.
+   Not intercepting, not exempt: separation still forbids a ram if it never
+   latches. At the cap, hold the lead-leashed point so the airframe can
+   reverse onto the slot.
+
+**Chosen:** 3.
+
+**Why:** the user was right that the initial step was flying at where they
+are. The cap that was already there (40 m, stopping distance at max_speed
+is ~30 m) is the "can still get out of it" bound; the missing piece was the
+law. Same spooling+compact+owner gate as D32, so s1's already-at-dash
+inbounds still do not stalk.
+
+**Measured, 8 fixed scenarios:** bit-identical to D32. mean **139.6**, floor
+**−39.4** (s2 5/6), s1 **237.5 6/6**, x2-b **147.8 3/3**. 0 wrong, 0 waste.
+
+**x1-ae01dd** (the D32 regression): **1/3 −575 → 3/3 −75.6**, 0 wrong (was 3).
+Asset survived. Two civilians unchanged (same spawn overlap as before).
+
+**x1-814fd5e:** still 2/3, −47.1 → **−50.5**. Same leftover breach; the
+hole-in-the-ring miss is not this wait.
+
+**Cost accepted:** a diving compact spool that is *not* hostile still gets
+40 m of ProNav. Civilians have not produced that signature (D7/D32). The
+leash plus unknown-track arrest is the ram cap, not a promise they will
+never close inside 4·kill.
+
+**Determinism:** `--replay` clean on s1, s2, x2-b. Suites pass, including
+`TestStalkAimLeadsNotPursues`.

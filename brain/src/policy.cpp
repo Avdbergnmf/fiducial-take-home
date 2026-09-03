@@ -85,6 +85,8 @@ void Policy::Configure(const Config& cfg, Rng rng) {
     ring_altitude_ = 30.0f;
     picket_goal_ = flight::RingSlot(cfg.drone_id, cfg.fleet_size, cfg.asset,
                                     ring_radius_, ring_altitude_);
+    station_ = picket_goal_;
+    stalk_ = nullptr;
     for (uint32_t i = 0; i < kMaxFleet; ++i) heard_[i] = -1.0e9f;
 }
 
@@ -172,6 +174,8 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
 
     if (stance_ != Stance::Committed)
         picket_goal_ = PicketGoal(store, obs);
+    else
+        stalk_ = nullptr;
 }
 
 uint32_t FacingSlot(const Vec3& position, const Vec3& asset, uint32_t count) {
@@ -394,6 +398,21 @@ Vec3 CorridorHorizon(const Vec3& from, const Vec3& hostile_p, const Vec3& hostil
     return Vec3(from.x + dir.x * along, from.y + dir.y * along, from.z);
 }
 
+Vec3 StalkAim(const Vec3& slot, const Vec3& target_p, const Vec3& target_v,
+              float speed, float cap) {
+    // Same lead ProNav's midcourse flies: meet them where they will be, not
+    // where they are. No solution (equal-speed stern chase) falls back to
+    // current position, matching TimeToIntercept's -1.
+    const Vec3 los = target_p - slot;
+    const float tau = flight::TimeToIntercept(los, target_v, speed);
+    const Vec3 aim = (tau >= 0.0f) ? target_p + target_v * tau : target_p;
+    const Vec3 to_aim = aim - slot;
+    const float len = swarm::Length(to_aim);
+    if (len < 1.0f) return slot;
+    const float along = (len < cap) ? len : cap;
+    return slot + to_aim * (along / len);
+}
+
 Vec3 YieldOffCorridor(const Vec3& goal, const Vec3& a, const Vec3& b, float clear) {
     const Vec3 ab(b.x - a.x, b.y - a.y, 0.0f);
     const float ab2 = ab.x * ab.x + ab.y * ab.y;
@@ -417,27 +436,55 @@ Vec3 YieldOffCorridor(const Vec3& goal, const Vec3& a, const Vec3& b, float clea
                 goal.z);
 }
 
-Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) const {
+Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) {
     // Hold the live ring, but step off anyone else's *remaining* intercept so
     // we are not the traffic that spoils ProNav. After a nearby death the
     // survivors take evenly spaced stations (D19); yield uses those stations.
     // Past the predicted ram they do not move (D17).
     const float now = obs.time();
-    Vec3 goal = StationAt(StationBearing(cfg_.drone_id, cfg_.fleet_size,
+    const Vec3 slot = StationAt(StationBearing(cfg_.drone_id, cfg_.fleet_size,
                                         cfg_.drone_id, heard_, heard_at_,
                                         obs.position(), cfg_.comm_radius, now),
                           cfg_.asset, ring_radius_, ring_altitude_);
+    station_ = slot;
+    stalk_ = nullptr;
+    Vec3 goal = slot;
+
+    // Fly the committed intercept before Classify has spent its 0.6 s, but
+    // stay on a leash so a long-window inbound cannot empty the sector and
+    // so we can still reverse if it never latches Hostile (D32/D34). The
+    // aim is the lead point, not the current LOS: sliding toward where they
+    // are put the drone on the inbound bearing with the wrong heading, and
+    // the handover to ProNav then had to buy that lead back.
+    for (const Track& t : store.tracks()) {
+        if (t.belief == Belief::Friendly || t.belief == Belief::Wreckage) continue;
+        if (!LooksDivingAtAsset(t.position, t.velocity, cfg_.asset, cfg_.asset_radius))
+            continue;
+        if (!OwnsInbound(t, obs)) continue;
+        const float horiz = swarm::Length(Vec3(t.velocity.x, t.velocity.y, 0.0f));
+        if (horiz >= kHostileDash * 0.6f) continue;
+        if (ThreatWindow(t.position, t.velocity, cfg_.asset,
+                         cfg_.asset_radius, kHostileDash) >= kCompactWindow)
+            continue;
+        const Vec3 aim = StalkAim(slot, t.position, t.velocity,
+                                  cfg_.max_speed, kStalkRange);
+        if (swarm::Distance(aim, slot) < 1.0f) continue;
+        goal = aim;
+        stalk_ = &t;
+        break;
+    }
+
     for (const Track& t : store.tracks()) {
         if (t.belief != Belief::Hostile) continue;
         if (OwnsInbound(t, obs)) continue;
         const uint32_t facing = FacingSlot(t.position, cfg_.asset, cfg_.fleet_size);
         const uint32_t owner = UniqueOwner(facing, cfg_.fleet_size, cfg_.drone_id,
                                            heard_, now);
-        const Vec3 slot = StationAt(
+        const Vec3 owner_slot = StationAt(
             StationBearing(owner, cfg_.fleet_size, cfg_.drone_id, heard_,
                            heard_at_, obs.position(), cfg_.comm_radius, now),
             cfg_.asset, ring_radius_, ring_altitude_);
-        const Vec3 from = CorridorOrigin(store, t, slot);
+        const Vec3 from = CorridorOrigin(store, t, owner_slot);
         const Vec3 end = CorridorHorizon(from, t.position, t.velocity);
         goal = YieldOffCorridor(goal, from, end, cfg_.friendly_margin);
     }
