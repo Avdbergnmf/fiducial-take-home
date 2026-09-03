@@ -6,6 +6,7 @@
 #ifndef SWARM_FLIGHT_H
 #define SWARM_FLIGHT_H
 
+#include "mode.h"
 #include "world.h"
 
 namespace sw {
@@ -41,15 +42,9 @@ Vec3 EstimatedAccel(const Vec3& velocity, const Vec3& last_velocity,
 
 /// Proportional navigation, Zarchan 3-D ZEM form (D42 / D43).
 ///
-/// PN and ZEM are the same law: a = N · ZEMn / t_go² is identical to
-/// a = N · Vc · ω under constant closing. Augmented ZEM adds ½ At t_go²
-/// so a weave that has already started is in the predicted miss.
-///
-/// Lead is on the hostile's predicted trajectory, not on our intercept
-/// path: pretend they have already travelled `lead · kill_radius` metres
-/// along that track (velocity, plus the weave accel), then intercept that
-/// virtual state. A picket starts at rest, so the same command also
-/// accelerates along the LOS until we are flying at them.
+/// Used for Stalking (leashed, short). Scramble / ram use CollisionCourse
+/// (D49): PN's t_go = range/closing is "when they reach us if we sit", and
+/// LimitAccel then dumps the z-budget on that body while xy saturates.
 constexpr float kPnGain = 6.0f;
 constexpr float kPnLeadKillRadii = 0.5f;
 Vec3 ProNav(const Vec3& self_position, const Vec3& self_velocity,
@@ -58,6 +53,35 @@ Vec3 ProNav(const Vec3& self_position, const Vec3& self_velocity,
             const Vec3& target_accel = {},
             float lead_kill_radii = kPnLeadKillRadii,
             float navigation_gain = kPnGain);
+
+/// Vector ZEM intercept for scramble / ram (D49).
+///
+/// Full 3-D ZEM, not ZEMn + along-LOS. t_go is the earliest arrival, not
+/// range/closing. N=2 is the constant-accel intercept on a double
+/// integrator. Saturates with LimitAccel (5.4 cylinder: leftover z does
+/// not steal xy, D51). Do not add g. Do not bake tilt lag into t_go.
+Vec3 CollisionCourse(const Vec3& self_p, const Vec3& self_v,
+                     const Vec3& tgt_p, const Vec3& tgt_v,
+                     const Config& cfg,
+                     const Vec3& tgt_a = {});
+
+/// True if a ram is still possible. Inside 2·kill we stay in the merge.
+/// Past CPA and outside that bubble, or a leftover miss `Reach` (½ a t²
+/// capped by max_speed, LimitAccel along the miss) cannot close, is
+/// `abort uncatchable` on Ramming only (D48).
+bool CatchableRam(const Vec3& self_p, const Vec3& self_v,
+                  const Vec3& tgt_p, const Vec3& tgt_v, const Config& cfg);
+
+/// Accel for the named mode. Constraints (separation, arena) are applied
+/// after this, in Fly.
+Vec3 DesiredAccel(Mode mode, const Vec3& position, const Vec3& velocity,
+                  const Vec3& goal, const Track* focus, bool leashed,
+                  float dt, const Config& cfg);
+
+/// Yaw for the named mode. Outward on station, at the watch target, or
+/// along velocity when intercepting / stalking.
+float DesiredYaw(Mode mode, const Vec3& position, const Vec3& velocity,
+                 const Vec3& asset, const Track* focus);
 
 /// Applied last, over every other decision.
 ///
@@ -84,11 +108,11 @@ Vec3 EnforceSeparation(const Vec3& desired, const Vec3& position, const Vec3& ve
                        const Config& cfg, const Track* exempt,
                        bool intercepting = false);
 
-/// Keep inside the arena. Leaving it is a wasted loss.
+/// Keep inside the arena. Leaving it is a wasted loss (CHALLENGE.md 9.2).
 ///
-/// The band is stopping distance to the actual wall, not a fixed 20 m
-/// halo. Vertical uses `max_accel` (the real bound). A 20 m ground buffer
-/// braked interceptors at 15 m while the hostile dived under them (D45).
+/// The band is stopping distance to the actual wall, not a fixed halo.
+/// Vertical uses `max_accel`. Not called while intercepting: a ram that
+/// can still hit must not be steered around the box (D48).
 Vec3 EnforceArena(const Vec3& desired, const Vec3& position, const Vec3& velocity,
                   const Config& cfg);
 

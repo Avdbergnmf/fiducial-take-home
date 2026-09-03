@@ -2039,3 +2039,251 @@ fixed; the remaining miss is intercept geometry, not a floor brake.
 
 Not a second guidance law. Same PN, with the ram constraint the split
 limit had been violating.
+
+---
+
+## D46 — Named flight modes; ram_likely is a flag, not a Brake state
+
+**The miss.** `Stance` had three values. Real behaviour was
+`stance × stalk × watch × provisional × (off-station < 40 m)`, and `Fly()`
+re-derived that product every tick. “Should I brake?” had no name because
+braking is not a mode — it is a constraint after the mode’s desired accel.
+A Brake state would put arena, separation, and ram in competition and
+recreate the spaghetti.
+
+**Chosen.** One `Mode` in [`brain/src/mode.h`](../brain/src/mode.h): Forming,
+Picketing, Watching, Stalking, Scrambling, Ramming. `Policy::Decide` is the
+transition table. `flight::DesiredAccel` / `DesiredYaw` are a switch.
+Constraints stay last: `EnforceSeparation`, then `EnforceArena`.
+
+Flags inside states, not extra modes:
+
+- `leashed` — Stalking, still inside 40 m of the slot.
+- `ram_likely` — Scrambling / Ramming. Enter when
+  `TimeToClose < 2 s` or `range < 4 · kill_radius` (the range clause is
+  the D45 close pass whose closing had already died). Hysteresis keeps it
+  set until `range > 5 · kill` and `t_close > 2.5 s`, so the floor spring
+  and the `state` log do not chatter at the edge.
+- When `ram_likely`, skip the **ground** axis of `EnforceArena`. XY walls
+  and the ceiling still apply. ProNav still never commands away along the
+  LOS (guidance, D45).
+
+Diagram and the live table: [`notes/state-machine.md`](state-machine.md).
+
+**Logs.** New verb, on mode or `ram_likely` change only:
+`state ram from=watch trk=12 likely=1`. `commit` / `abort` / `picket` stay
+for CommitIndex and the Aim cue. D6 reconstruction is the fallback for old
+traces; the inspector State row reads `state` and click-jumps to that line.
+
+**Measured.** Identity bar is mission counts, not `--replay` hashes.
+
+Eight named scenarios, baseline = Phase A extract = Phase B `ram_likely`:
+mean **98.3**, worst x1-a −195.6 (4/4, 3 civilians, 1 wasted). s1 6/6, s2
+5/6. Hard id `x1-06b926af…` still **1/3, −304**. x1-a civilian rams are
+D44, not reversed.
+
+Phase A (extract, arena unchanged) matched the baseline score table.
+Phase B (`skip_ground` when `ram_likely`) matched again: those eight
+layouts do not put a ram inside stopping distance of the dirt, so the flag
+is a no-op there and a real change only on the terminal dive the hard-id
+canary cares about.
+
+Superseded in part by D47: `ram_likely` is now predicted-CPA-inside-kill,
+and a set flag skips **every** brake, not only the floor. XY walls and the
+ceiling are no longer flown.
+
+---
+
+## D47 — Predicted hit skips every brake; the brain does not fly walls
+
+**The miss.** D46 entered `ram_likely` on `TimeToClose < 2 s` or
+`range < 4 · kill_radius`. That is a close-pass detector, not a hit
+predictor. Drone 7 on the hard id had CPA 3.4 m vs kill 1.9 — already a miss
+— and still got the flag, so the floor spring dropped on a shot that was
+never going to kill. Walls and a ceiling spring were still in `EnforceArena`
+even though CHALLENGE.md never asks the brain to fly the box; leaving the
+arena is a wasted loss, but steering around the walls was braking the ram
+by another name.
+
+**Chosen**
+
+- `ram_likely` is true iff we are already inside the kill sphere, or the
+  constant-velocity closest approach is still ahead (`t_cpa ≥ 0`) and the
+  miss vector is `≤ kill_radius`. Past closest approach, or an obvious miss,
+  leaves brakes on (and is an argument that we should not still be
+  engaging — that is abort, not a Brake state).
+- When set, skip **EnforceSeparation and EnforceArena entirely**. Ground,
+  mates, civilians: be damned if we run into the dirt. A hit inside the
+  sphere is the whole job.
+- `EnforceArena` is ground only. No XY wall springs, no ceiling spring.
+  Pickets still get the floor so they do not dig in on station.
+- The ProNav after-`LimitAccel` along-LOS strip stays (D45). That is the
+  actuator split, not a constraint force. Constraint forces are what
+  `ram_likely` now blocks.
+
+**Logs / viewer.** Same `state … likely=` verb. `likely=1` now means
+“predicted CPA inside kill — no brakes.” Inspector: the mode is a banner
+above the heading viz, not a Now row. Scrambling and Ramming are different
+colours. Hover is the English in [`notes/state-machine.md`](state-machine.md).
+
+**Measured.** Eight named scenarios still mean **98.3**, worst x1-a −195.6
+(4/4, 3 civilians, 1 wasted). Same table as D46: those layouts do not put
+a predicted CPA inside kill at the same time as a brake would have
+mattered. Hard id `x1-06b926af…` still **1/3, −304**. Drone 7’s 3.4 m miss
+is now correctly `likely=0` (brakes stay on). The remaining miss is still
+intercept geometry, not a floor spring.
+
+Superseded by D48: `ram_likely` is gone. Uncatchable aborts. Arena springs
+return for everyone not intercepting.
+
+---
+
+## D48 — Uncatchable aborts; intercepting skips the arena, nothing else
+
+**The miss.** D47 used a `likely` flag to skip brakes when CPA was inside
+kill, and stripped walls/ceiling from the brain entirely. Leaving the
+arena **is** a wasted loss (CHALLENGE.md 9.2). The flag was the wrong
+shape: if the shot is still possible we should not be braking for the
+box; if it is not possible we should not still be in the ram.
+
+**Chosen**
+
+- No `ram_likely`. `state` logs mode only.
+- **Scrambling / Ramming skip `EnforceArena` entirely** (walls, ceiling,
+  ground). Separation still runs (D15 / D38).
+- Everyone else gets the full box: stopping-distance springs on XY walls,
+  ceiling, and ground. Vertical uses `max_accel`.
+- `flight::CatchableRam`: inside 2·kill, stay. Past CPA and outside it,
+  miss. Predicted miss ≤ 2·kill, stay. Still closing ≥ 5 m/s, stay
+  (ProNav has the inbound shot). Otherwise `Reach` at t_cpa … t_cpa+2 s.
+  `abort uncatchable` on **Ramming** after 0.4 s. Not on scramble.
+- `abort uncatchable` on **Ramming** only, after 0.4 s. Scramble just left
+  the ring — CV-CPA there is not a miss, it is the start of the intercept.
+  The hold is D11: one weave beat of receding at 5 m must not dump the ram.
+  Sustained opening is still `not-closing` at 6 s.
+
+**Measured.** Eight named scenarios still mean **98.3**, worst x1-a −195.6
+(4/4, 3 civilians, 1 wasted). Same table as D47: the naive “CV-CPA leftover
+vs ½ a t²” abort dumped inbound rams (s1 6/6 → 4/6) and is not the gate.
+Closing ≥ 5 m/s keeps those. Hard id `x1-06b926af…` still **1/3, −304**.
+
+---
+
+## D49 — Collision course for scramble / ram; ProNav stays on stalk
+
+**The miss.** Hard id `x1-06b926af3deab4600494418d7ece5944`, drone 3 vs
+hostile_0 (track 5). Scramble 17.24, ram 17.74. Hostile flies a straight
+line (vn ≈ −1.2, ve ≈ −17.9, vz = 3.32). Around 18.6–18.8 s the viewer
+accel cue points up while the banner still says Ramming. At 19.26
+`abort uncatchable` then `state watch from=ram`, and station GoTo
+saturates up (−19.7). Hostile_0 still breaches at 21.31.
+
+**Ruled out**
+
+1. **Yield.** Yield lives only in `PicketGoal`. Interceptors never call
+   it. Arena springs are already skipped while intercepting (D48). The
+   brief up at 18.6–19.2 is the ram command, not a floor or a mate shove.
+2. **Sensor noise.** Own-fix σ = 1.25 m. Tracks in the believed frame
+   are exact. Hostile velocity is constant. An 11 m north miss at abort
+   is not a 1 m pose error. Last-tick correction is the *symptom* of
+   (3), not a separate cause.
+4. **Viewer lag.** `state watch from=ram` is at 19.26, the same instant
+   as the abort. The 10 Hz accel cue is differenced velocity, not the
+   command, so 18.6 is when az starts falling (still +5.3) and 18.8 is
+   the first negative sample. The banner matches the log.
+
+**Cause.** ProNav with `t_go = range/closing` is the clock for “when they
+reach us if we sit still.” ZEMn + along-LOS close then aims at the
+*current body* on that clock. `LimitAccel` splits xy (6.7) from z (19.7),
+so the dive takes the leftover vertical budget: vz ramps to 11.5 against
+the hostile’s 3.32. East matches; north leftover is ~11 m; closing dies;
+`CatchableRam` is right to abort. The 18.8 s up-command is ZEMn reversing
+in z after the over-dive — still Ramming, still not the floor.
+`ACCEL_NED` is hover-compensated: command 0 holds velocity. Adding g
+would dump *more* down. Gravity is not the missing term.
+
+A collision course for a constant-velocity target is the earliest point
+`I(t) = tgt + v t + ½ a t²` we can still hit after the real actuators.
+On a double integrator that accel is `2 (I − p − v t) / t²` (N=2).
+Receding-horizon every tick follows a weave. After `LimitAccel`, never
+command away from I (D45 shape, along the intercept not the current
+body — stripping along the body LOS would cancel the cut-off).
+
+**Chosen**
+
+- `flight::CollisionCourse` for Scrambling and Ramming.
+- ProNav stays on Stalking (leashed, 40 m; a far intercept would fight
+  the leash).
+- Do not add g. Do not put yield on interceptors.
+- Yaw along leftover picket velocity stays. Yawing along the xy command
+  cost s1 a civilian ram. Gating z on heading alignment delayed dives
+  that were already on course (hard id 1/3 → 0/3).
+
+**Cost accepted:** weaves that need a high-N miss-null in the last
+metres lose the old PN gain. The search is 19 times, 100 Hz, cheap.
+Identity is the bar: eight named must not drop; x1-a civilian rams
+(D44) stay.
+
+**Measured.** Eight named, mean **98.3 → 123.2**, worst **x1-a −195.6 → s2 −30.6**.
+s1 still 6/6 (221.0). x1-a 4/4, civilians 3 → 2, wasted 1 → 0
+(D44 not reversed). Hard id still **1/3, −304**: drone 3 no longer
+over-dives or commands up while ramming (vz peaks ~6 not 11.5; az stays
+down until the 19.48 abort), but the north cut-off is still ~10 m short.
+Tilt takes ~0.4 s to deliver the xy command; thrust delivers z immediately.
+Gating z on heading alignment made the eight-set nicer and the hard id
+**0/3**. Yawing along the xy command cost s1 a civilian ram. Left both
+off. The 19.48 `uncatchable` is still a missed intercept, not a floor.
+
+---
+
+## D50 — Vector ZEM through LimitEgg; no extra g, no attitude loop
+
+**The plan.** A 3-D vector-ZEM loop with gravity compensation, an
+asymmetric “egg” thrust envelope, then an attitude/torque cascade for
+rotational inertia. Written for a raw-thrust quad in Z-up. This
+challenge is hover-compensated `ACCEL_NED` in NED. The state machine
+already isolates scramble/ram; only that command changes.
+
+**Translated**
+
+| Step | Their plant | Here |
+|---|---|---|
+| 1. Vector ZEM | `a = 3 ZEM / t_go²`, ZEM = r + v t | Same ZEM. `t_go` is still the earliest arrival, not range/closing (D49). **N=2** arrives at I on a double integrator. |
+| 2. Add g | `a += (0,0,9.81)` | **Do not.** Command 0 already hovers. Adding g dumps extra down. |
+| 3. Egg | 15 xy / 25 climb / 4 descend, scale the 3-vector | `LimitEgg`: ellipsoid on `lateral_limit` and `max_accel`, both z-sides (hover-compensated, not their raw-thrust 4 vs 25). Station keeping still uses the independent `LimitAccel` box — a wall spring must not cut hover. |
+| 4–5. Attitude, lag | Nested torque loop; lag in t_go | **Do not.** CHALLENGE.md: enter at `ACCEL_NED`, inner loop is theirs, “no actuator delay.” Baking 0.35 s of xy lag into every t_go made the hard id **0/3**. Gating z on heading did the same. |
+
+**Measured, rejected.** N=3 (their true-PN gain) rammed civilians: s1
+6/6 but `pair_neutral`, x1-a back to 3 civ + 1 wasted, mean **79.4**.
+Tilt-lag-in-t_go and z-gating each dropped the hard id to 0/3.
+
+**Chosen.** Scramble/ram: full 3-D ZEM, N=2, `LimitEgg`, no g. Stalking
+still ProNav. Same modes.
+
+**Measured.** Eight named mean **123.2 → 124.3**, worst s2 **−31.0**.
+s1 6/6 (219.8). x1-a 4/4, 2 civilians, 0 wasted (D44 not reversed).
+Hard id still **1/3, −304**.
+
+---
+
+## D51 — No egg. 5.4 cylinder, leftover z is free
+
+**Fear.** Vertical overshoot was stealing horizontal, so a direction
+saturator (`LimitEgg`) kept ZEM’s ratio by giving up the cylinder’s
+corners.
+
+**Plant.** CHALLENGE.md 5.4 is independent clips: `hypot(ax,ay) ≤
+g tan(max_tilt)` and `|az| ≤ max_accel`. Extra down does not reduce xy.
+A hook is cosmetics if receding-horizon still hits the kill sphere.
+Drone 3’s miss was tilt delivering z immediately and xy late, not z
+taxing xy. Ray-scale / egg / z-gate only helped that as a proxy, and
+hurt identity when we modeled the lag.
+
+**Chosen.** Delete `LimitEgg`. Scramble/ram still CollisionCourse (full
+ZEM, N=2, earliest t) and `LimitAccel`. Same saturator as station. No
+attitude in the loop; yaw stays cosmetic.
+
+**Measured.** Back to the D49 identity: eight named mean **124.3 → 123.2**,
+worst s2 **−30.6**. s1 6/6 (221.0). x1-a 4/4, 2 civilians, 0 wasted.
+Hard id still **1/3, −304**. Egg was a 1-point mean with no intercept
+change.

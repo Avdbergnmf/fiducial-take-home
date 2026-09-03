@@ -122,6 +122,8 @@ closing, so a 16-drone ring of radius 75 (neighbours 29 m) still fits. A static
 | policy.cpp | `kChasingToward` | 5.0 m/s | **DERIVED** | Below cruise 14, above picket station-keeping. D15. | A mate flying at the hostile is the interceptor. |
 | policy.cpp | corridor yield | `friendly_margin` off remaining flight (cruise × min(t_meet+0.5 s, 12 s)) | **DERIVED** | D15 keep-out, D17 horizon. Same cruise / slack / abort as commit. Neighbours at 29 m on s1 do not move. | Pickets on the remaining path step aside. Past the predicted ram they do not. |
 | policy.cpp:AbortReason | non-closing abort | after 6.0 s, `closing < 1.0` | **GUESS** | D11. Immediate receding abort dropped an interceptor 5 m out on a weave. | |
+| policy.cpp:AbortReason | `uncatchable` | `!CatchableRam` after 0.4 s | **DERIVED** | D48. ½ a t_cpa² along the miss vs leftover to kill. 0.4 s is one weave beat (D11). | A 10 m miss at 1.3 s aborts; the same miss at 5 s stays. |
+| flight.cpp:CatchableRam | catchable ram | `divert ≥ miss − kill`, t_cpa ≥ 0 | **DERIVED** | D48. a is `LimitAccel` along the miss (lateral xy, max_accel z). 2·kill is the obvious leftover at the merge, not a long-range cap. | Past CPA or parked relative is a miss. |
 | policy.cpp:confidence | confidence encode | `>2.0 ? 255 : score·120` | **GUESS** | none | `score·120` saturates the `uint8_t` at score 2.125, and the branch caps at 2.0, so the mapping is continuous by luck rather than by construction. |
 | policy.cpp:outbox | outbox max age | 2.0 s | **GUESS** | none | Sensible. |
 | policy.cpp:tx | tx headroom | `len + 64` | **GUESS** | none | Reserves 64 B. Never binds on s1: measured usage is 704 B/s against a 4096 B/s budget, and `frames_dropped_budget = 0` in both reports. |

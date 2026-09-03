@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 
 namespace sw {
 namespace {
@@ -16,11 +17,12 @@ constexpr float kReportBurstFor = 1.5f;
 constexpr float kPi = 3.14159265358979f;
 constexpr float kMinClosing = 1.0f;         // m/s; below this is not a closing intercept
 constexpr float kCatchSlack = 0.5f;         // s; must arrive this much before the cylinder
-constexpr float kCruise = 14.0f;            // must match Fly() in brain.cpp
+constexpr float kCruise = 14.0f;            // must match flight::DesiredAccel
 constexpr float kFreshHostile = 6.0f;       // s; older Hostile calls are latch-ghosts
 constexpr float kRecommitHold = 2.0f;       // s; do not re-chase a track we just aborted
 constexpr float kScrambleDrop = 0.02f;     // abort the early chase if that LOS is gone
 constexpr float kScrambleCivHold = 1.0f;   // s; level overflight never dives
+constexpr float kUncatchableHold = 0.4f;   // s; one weave beat must not abort (D11)
 
 constexpr float kChasingToward = 5.0f;     // m/s along LOS; pickets sit below this
 constexpr float kCloserBy = 2.0f;          // m; farther duplicate aborts
@@ -135,7 +137,11 @@ void Policy::Configure(const Config& cfg, Rng rng) {
     station_ = picket_goal_;
     stalk_ = nullptr;
     watch_ = nullptr;
-    provisional_ = false;
+    leashed_ = false;
+    announced_picket_ = false;
+    mode_logged_ = false;
+    logged_mode_ = Mode::Forming;
+    mode_ = Mode::Forming;
     for (uint32_t i = 0; i < kMaxFleet; ++i) {
         heard_[i] = -1.0e9f;
         confirmed_dead_[i] = 0;
@@ -174,10 +180,10 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
     // are erased. Hearsay has no local id, so we key on store_id and
     // re-associate by geometry if a local track absorbed the row (D18).
     target_ = nullptr;
-    if (stance_ == Stance::Committed) {
+    if (Intercepting(mode_)) {
         target_ = ResolveTarget(store);
-        if (target_ && provisional_ && target_->belief == Belief::Hostile)
-            provisional_ = false;
+        if (target_ && mode_ == Mode::Scrambling && target_->belief == Belief::Hostile)
+            mode_ = Mode::Ramming;
         const char* why = nullptr;
         if (!target_)
             why = "lost";
@@ -191,14 +197,13 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
             last_abort_store_id_ = target_store_id_;
             last_abort_at_ = now;
             BindTarget(nullptr);
-            provisional_ = false;
-            stance_ = Stance::Picketing;
+            mode_ = Mode::Picketing;
         } else {
             BindTarget(target_);
         }
     }
 
-    if (stance_ != Stance::Committed) {
+    if (!Intercepting(mode_)) {
         Track* candidate = nullptr;
         float best_key = 1.0e6f;
         bool early = false;
@@ -219,8 +224,7 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
         if (candidate) {
             BindTarget(candidate);
             committed_at_ = now;
-            stance_ = Stance::Committed;
-            provisional_ = early;
+            mode_ = early ? Mode::Scrambling : Mode::Ramming;
             const float rng = swarm::Distance(candidate->position, obs.position());
             const float closing = ClosingSpeed(obs.position(), obs.velocity(),
                                                candidate->position, candidate->velocity);
@@ -240,7 +244,7 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
         }
     }
 
-    if (stance_ == Stance::Forming) {
+    if (!announced_picket_ && !Intercepting(mode_)) {
         // The same station function PicketGoal flies to. They agree at boot,
         // when nobody has died; they would not after a loss, and a drone that
         // re-forms would call itself on picket at a slot it is not holding.
@@ -250,16 +254,21 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
                            now, confirmed_dead_),
             cfg_.asset, ring_radius_, ring_altitude_);
         if (swarm::Distance(obs.position(), slot) < 8.0f) {
-            stance_ = Stance::Picketing;
-            std::snprintf(last_log_, sizeof(last_log_), "picket");
+            announced_picket_ = true;
+            if (mode_ == Mode::Forming) mode_ = Mode::Picketing;
+            // Do not overwrite commit/abort on the same tick (D3).
+            if (last_log_[0] == '\0')
+                std::snprintf(last_log_, sizeof(last_log_), "picket");
         }
     }
 
-    if (stance_ != Stance::Committed)
+    if (!Intercepting(mode_)) {
         picket_goal_ = PicketGoal(store, obs);
-    else {
+        AssignStationMode(obs);
+    } else {
         stalk_ = nullptr;
         watch_ = nullptr;
+        leashed_ = false;
     }
 }
 
@@ -771,7 +780,7 @@ bool Policy::ShouldScramble(const Track& t, const TrackStore& store,
 const char* Policy::AbortReason(const Track& t, const swarm::Observation& obs) const {
     const float now = obs.time();
     if (now - committed_at_ > kAbortAfter) return "timeout";
-    if (provisional_) {
+    if (mode_ == Mode::Scrambling) {
         if (t.belief == Belief::Friendly || t.belief == Belief::Wreckage)
             return "not-hostile";
         if (t.cylinder_score < kScrambleDrop && now - committed_at_ > 0.3f)
@@ -791,6 +800,10 @@ const char* Policy::AbortReason(const Track& t, const swarm::Observation& obs) c
     // Immediate receding abort dropped s1 hostile_4 with the interceptor
     // 5 m out. Six seconds is a fair chance to close; after that, give up.
     if (now - committed_at_ > 6.0f && closing < kMinClosing) return "not-closing";
+    if (now - committed_at_ > kUncatchableHold &&
+        !flight::CatchableRam(obs.position(), obs.velocity(),
+                              t.position, t.velocity, cfg_))
+        return "uncatchable";
     return nullptr;
 }
 
@@ -813,17 +826,53 @@ void Policy::LogAbort(const char* why, uint32_t trk, const Track* t,
 }
 
 Vec3 Policy::DesiredPosition(const swarm::Observation& obs) const {
-    switch (stance_) {
-        case Stance::Committed:
-            if (target_) return target_->position;
-            break;
-        case Stance::Forming:
-        case Stance::Picketing:
-        default:
-            break;
-    }
+    if (Intercepting(mode_) && target_) return target_->position;
     (void)obs;
     return picket_goal_;
+}
+
+const Track* Policy::focus() const {
+    if (Intercepting(mode_)) return target_;
+    if (mode_ == Mode::Stalking) return stalk_;
+    return watch_;
+}
+
+void Policy::AssignStationMode(const swarm::Observation& obs) {
+    leashed_ = stalk_ != nullptr &&
+               swarm::Distance(obs.position(), station_) < kStalkRange;
+    if (stalk_) {
+        mode_ = Mode::Stalking;
+        return;
+    }
+    if (watch_ && announced_picket_) {
+        mode_ = Mode::Watching;
+        return;
+    }
+    if (announced_picket_)
+        mode_ = Mode::Picketing;
+    else
+        mode_ = Mode::Forming;
+}
+
+void Policy::LogMode(const swarm::Host& host) {
+    if (mode_logged_ && mode_ == logged_mode_)
+        return;
+    const char* from = mode_logged_ ? ModeName(logged_mode_) : "";
+    const Track* f = focus();
+    const uint32_t trk = (f && f->has_local_id) ? f->track_id : 0;
+    char extra[96]{};
+    if (from[0] != '\0')
+        std::snprintf(extra, sizeof(extra), " from=%s", from);
+    if (mode_ == Mode::Stalking) {
+        const size_t n = std::strlen(extra);
+        std::snprintf(extra + n, sizeof(extra) - n, " leashed=%d", leashed_ ? 1 : 0);
+    }
+    if (f)
+        host.Logf("state %s trk=%u%s", ModeName(mode_), trk, extra);
+    else
+        host.Logf("state %s%s", ModeName(mode_), extra);
+    logged_mode_ = mode_;
+    mode_logged_ = true;
 }
 
 Track* Policy::ResolveTarget(TrackStore& store) {
@@ -841,7 +890,6 @@ void Policy::BindTarget(Track* t) {
     if (!t) {
         target_id_ = 0;
         target_store_id_ = 0;
-        provisional_ = false;
         return;
     }
     target_id_ = t->has_local_id ? t->track_id : 0;

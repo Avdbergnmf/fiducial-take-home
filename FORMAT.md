@@ -203,6 +203,24 @@ Logs are whatever the brains wrote through `host->log`, full rate, plus the
 simulator itself at `drone == -1` (log-budget overflow). Telemetry is 1 Hz,
 one row per drone, `bytes_sent` cumulative and `budget_remaining` instantaneous.
 
+The sidecar does not parse `text`. Known verbs this brain writes:
+
+| verb | when |
+|---|---|
+| `drone` / `params` / `radio` | boot |
+| `call` / `drop` / `wreck` | classification change |
+| `picket` / `commit` / `abort` | intercept lifecycle (CommitIndex, Aim cue) |
+| `state` | flight-mode change (D46). `state ram from=watch trk=12` |
+| `near` / `ram` | proximity bands; last 1 s of a chase also every 0.1 s |
+| `gone` / `live` | nearby-death latch |
+
+`state` is on change only. `from=` is the previous mode. Intercepting skips
+the arena; if the ram is physically uncatchable the brain writes
+`abort … uncatchable` and returns to picket (D48).
+The viewer reconstructs the live mode from the last `state` line; older traces
+without it still reconstruct Forming / Picketing / Committed from
+`picket` / `commit` / `abort`.
+
 ---
 
 ## Coordinate conversion

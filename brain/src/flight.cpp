@@ -14,6 +14,46 @@ float ArrestDistance(float closing, const Config& cfg) {
            + 4.0f * cfg.kill_radius;
 }
 
+/// How far we can divert in time `t` at accel `a`, capped by `vmax`.
+float Reach(float t, float a, float vmax) {
+    if (t <= 0.0f || a < 1e-6f) return 0.0f;
+    if (vmax < 1e-3f) return 0.5f * a * t * t;
+    const float t_v = vmax / a;
+    if (t <= t_v) return 0.5f * a * t * t;
+    return vmax * t - 0.5f * vmax * vmax / a;
+}
+
+/// Position after constant accel `a` for time `t`, coasting once |v|
+/// hits `vmax`. Used to score an intercept, not as a second plant.
+Vec3 PredictedPosition(const Vec3& p, const Vec3& v, const Vec3& a,
+                       float t, float vmax) {
+    const float a2 = swarm::LengthSq(a);
+    const float v2 = swarm::LengthSq(v);
+    const float vmax2 = vmax * vmax;
+    float t_boost = t;
+    if (vmax > 1e-3f) {
+        if (v2 >= vmax2 - 1e-4f) {
+            t_boost = 0.0f;
+        } else if (a2 > 1e-8f) {
+            const float qb = 2.0f * swarm::Dot(v, a);
+            const float qc = v2 - vmax2;
+            const float disc = qb * qb - 4.0f * a2 * qc;
+            if (disc >= 0.0f) {
+                const float root = (-qb + std::sqrt(disc)) / (2.0f * a2);
+                if (root >= 0.0f && root < t_boost) t_boost = root;
+            }
+        }
+    }
+    const Vec3 boosted = p + v * t_boost + a * (0.5f * t_boost * t_boost);
+    if (t_boost >= t - 1e-6f) return boosted;
+    const Vec3 v_coast = v + a * t_boost;
+    const float sp = swarm::Length(v_coast);
+    if (sp < 1e-3f) return boosted;
+    float coast = sp;
+    if (vmax > 1e-3f && coast > vmax) coast = vmax;
+    return boosted + v_coast * ((t - t_boost) * (coast / sp));
+}
+
 }  // namespace
 
 float TimeToClose(const Vec3& p, const Vec3& v, const Vec3& q, const Vec3& w,
@@ -158,6 +198,160 @@ Vec3 ProNav(const Vec3& self_position, const Vec3& self_velocity,
     return accel;
 }
 
+Vec3 CollisionCourse(const Vec3& self_p, const Vec3& self_v,
+                     const Vec3& tgt_p, const Vec3& tgt_v,
+                     const Config& cfg, const Vec3& tgt_a) {
+    const Vec3 los = tgt_p - self_p;
+    const float range = swarm::Length(los);
+    if (range < 1e-3f) return Vec3();
+
+    // Vector ZEM: ZEM = r + v_rel t + ½ At t². Not ZEMn, not range/closing.
+    // N=2 arrives at I. LimitAccel is the 5.4 cylinder (D51). Do not add g.
+    static constexpr float kTs[] = {
+        0.25f, 0.40f, 0.55f, 0.70f, 0.85f, 1.00f,
+        1.20f, 1.45f, 1.70f, 2.00f, 2.40f, 2.80f,
+        3.30f, 3.80f, 4.50f, 5.50f, 7.00f, 9.00f, 12.00f};
+
+    const float kill = cfg.kill_radius > 0.1f ? cfg.kill_radius : 0.1f;
+    float best_miss = 1.0e9f;
+    Vec3 best_a = LimitAccel(los * (cfg.max_accel / range), cfg);
+    Vec3 best_I = tgt_p;
+
+    for (float t : kTs) {
+        const Vec3 I = tgt_p + tgt_v * t + tgt_a * (0.5f * t * t);
+        const Vec3 zem = I - self_p - self_v * t;
+        const Vec3 arrive = LimitAccel(zem * (2.0f / (t * t)), cfg);
+        const float miss = swarm::Length(
+            PredictedPosition(self_p, self_v, arrive, t, cfg.max_speed) - I);
+        if (miss < best_miss) {
+            best_miss = miss;
+            best_a = arrive;
+            best_I = I;
+        }
+        if (miss <= kill) break;
+    }
+
+    Vec3 accel = best_a;
+
+    // Never command away from the intercept (D45, along I not the body).
+    const Vec3 to_I = best_I - self_p;
+    const float dI = swarm::Length(to_I);
+    if (dI > 1e-3f) {
+        const Vec3 unit = to_I / dI;
+        const float along = swarm::Dot(accel, unit);
+        if (along < 0.0f) {
+            accel = accel - unit * along;
+            accel = LimitAccel(accel, cfg);
+        }
+    }
+    return accel;
+}
+
+bool CatchableRam(const Vec3& self_p, const Vec3& self_v,
+                  const Vec3& tgt_p, const Vec3& tgt_v, const Config& cfg) {
+    const float kill = cfg.kill_radius;
+    const float obvious = 2.0f * kill;
+    const Vec3 rel_p = tgt_p - self_p;
+    const float range = swarm::Length(rel_p);
+    // Still in the merge bubble: keep going. 2·kill is the obvious-miss
+    // threshold, not a "already hitting" test.
+    if (obvious > 0.0f && range <= obvious) return true;
+
+    const Vec3 rel_v = tgt_v - self_v;
+    const float v2 = swarm::LengthSq(rel_v);
+    if (v2 < 1e-8f) return false;
+
+    const float t_cpa = -swarm::Dot(rel_p, rel_v) / v2;
+    if (t_cpa <= 0.0f) return false;
+
+    const Vec3 miss_vec = rel_p + rel_v * t_cpa;
+    if (swarm::Length(miss_vec) <= obvious) return true;
+
+    // Still slamming in: the intercept has the shot. Do not abort a 13 m,
+    // 22 m/s merge because leftover lateral is 5 m and ½ a t² looks small.
+    const float closing = -swarm::Dot(rel_v, rel_p) / range;
+    if (closing >= 5.0f) return true;
+
+    auto reachable = [&](float t) {
+        if (t < 0.05f) return false;
+        const Vec3 sep = rel_p + rel_v * t;
+        const float d = swarm::Length(sep);
+        if (d <= obvious) return true;
+        const Vec3 unit = sep / d;
+        float a = swarm::Dot(
+            LimitAccel(unit * (cfg.max_accel + cfg.lateral_limit), cfg), unit);
+        if (a < 0.1f) return false;
+        return Reach(t, a, cfg.max_speed) >= d - kill;
+    };
+
+    if (reachable(t_cpa)) return true;
+    // A cut-off a couple of seconds past CPA is still a ram. A 12 s
+    // stern chase is not — that is not-closing.
+    const float t_hi = t_cpa + 2.0f;
+    if (reachable(t_hi)) return true;
+    static constexpr float kTs[] = {
+        0.5f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 8.0f, 10.0f};
+    for (float t : kTs) {
+        if (t > t_hi) break;
+        if (reachable(t)) return true;
+    }
+    return false;
+}
+
+Vec3 DesiredAccel(Mode mode, const Vec3& position, const Vec3& velocity,
+                  const Vec3& goal, const Track* focus, bool leashed,
+                  float dt, const Config& cfg) {
+    auto weave_of = [&](const Track& t) {
+        return EstimatedAccel(t.velocity, t.last_velocity, dt,
+                              cfg.lateral_limit);
+    };
+
+    switch (mode) {
+        case Mode::Scrambling:
+        case Mode::Ramming:
+            if (focus) {
+                return CollisionCourse(position, velocity, focus->position,
+                                       focus->velocity, cfg, weave_of(*focus));
+            }
+            break;
+        case Mode::Stalking:
+            if (focus && leashed) {
+                return ProNav(position, velocity, focus->position,
+                              focus->velocity, cfg, weave_of(*focus));
+            }
+            return GoTo(goal, position, velocity, cfg);
+        case Mode::Forming:
+        case Mode::Picketing:
+        case Mode::Watching:
+            break;
+    }
+
+    // Must match kCruise in policy.cpp.
+    constexpr float kStationCruise = 14.0f;
+    const float range = swarm::Distance(position, goal);
+    return (range > 25.0f)
+               ? Cruise(goal, position, velocity, kStationCruise, cfg)
+               : GoTo(goal, position, velocity, cfg);
+}
+
+float DesiredYaw(Mode mode, const Vec3& position, const Vec3& velocity,
+                 const Vec3& asset, const Track* focus) {
+    const bool along_velocity = Intercepting(mode) || mode == Mode::Stalking;
+    if (!along_velocity) {
+        if (focus && (mode == Mode::Watching || mode == Mode::Forming)) {
+            return std::atan2(focus->position.y - position.y,
+                              focus->position.x - position.x);
+        }
+        const float dx = position.x - asset.x;
+        const float dy = position.y - asset.y;
+        if (dx * dx + dy * dy > 1.0f)
+            return std::atan2(dy, dx);
+    }
+    if (swarm::LengthSq(velocity) > 1.0f)
+        return std::atan2(velocity.y, velocity.x);
+    return 0.0f;
+}
+
 Vec3 EnforceSeparation(const Vec3& desired, const Vec3& position, const Vec3& velocity,
                        const FixedVec<Track, kMaxTracks>& tracks,
                        const Config& cfg, const Track* exempt, bool intercepting) {
@@ -235,7 +429,7 @@ Vec3 EnforceArena(const Vec3& desired, const Vec3& position, const Vec3& velocit
     constexpr float kSlack = 2.0f;
     Vec3 push;
 
-    auto axis = [&](float p, float lo, float hi, float v, float bound, float& out) {
+    auto wall = [&](float p, float lo, float hi, float v, float bound, float& out) {
         float stop_lo = kSlack;
         float stop_hi = kSlack;
         if (bound > 0.1f) {
@@ -246,15 +440,12 @@ Vec3 EnforceArena(const Vec3& desired, const Vec3& position, const Vec3& velocit
         else if (p > hi - stop_hi) out -= (p - (hi - stop_hi)) * 0.5f + v * 0.8f;
     };
 
-    axis(position.x, cfg.arena_min.x, cfg.arena_max.x, velocity.x,
+    wall(position.x, cfg.arena_min.x, cfg.arena_max.x, velocity.x,
          cfg.lateral_limit, push.x);
-    axis(position.y, cfg.arena_min.y, cfg.arena_max.y, velocity.y,
+    wall(position.y, cfg.arena_min.y, cfg.arena_max.y, velocity.y,
          cfg.lateral_limit, push.y);
-
     // NED: z is down. arena_min.z is the ceiling, arena_max.z is the ground.
-    // Vertical authority is max_accel, not the tilt cap — using 20 m + 6.7
-    // treated 15 m intercepts as a crash into the floor (D45).
-    axis(position.z, cfg.arena_min.z, cfg.arena_max.z, velocity.z,
+    wall(position.z, cfg.arena_min.z, cfg.arena_max.z, velocity.z,
          cfg.max_accel, push.z);
 
     if (swarm::LengthSq(push) < 1e-6f) return desired;

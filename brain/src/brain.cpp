@@ -43,6 +43,7 @@ public:
         if (policy_.last_log()[0] != '\0')
             host().Log(policy_.last_log());
         policy_.LogRing(host());
+        policy_.LogMode(host());
         policy_.Declare(host(), store_);
 
         // 4. OUTBOUND: what is worth saying, then say at most one thing
@@ -167,66 +168,27 @@ private:
     swarm::Command Fly(const swarm::Observation& obs) {
         const sw::Vec3 position = obs.position();
         const sw::Vec3 velocity = obs.velocity();
+        const sw::Mode mode = policy_.mode();
         const sw::Track* target = policy_.target();
+        const sw::Track* focus = policy_.focus();
 
-        sw::Vec3 accel;
-        if (policy_.stance() == sw::Stance::Committed && target) {
-            const sw::Vec3 weave = sw::flight::EstimatedAccel(
-                target->velocity, target->last_velocity, obs.dt(),
-                cfg_.lateral_limit);
-            accel = sw::flight::ProNav(position, velocity, target->position,
-                                       target->velocity, cfg_, weave);
-        } else if (const sw::Track* stalk = policy_.stalk()) {
-            // Same ProNav law, still leashed to the slot.
-            const float off = swarm::Distance(position, policy_.station());
-            if (off < sw::kStalkRange) {
-                const sw::Vec3 weave = sw::flight::EstimatedAccel(
-                    stalk->velocity, stalk->last_velocity, obs.dt(),
-                    cfg_.lateral_limit);
-                accel = sw::flight::ProNav(position, velocity, stalk->position,
-                                           stalk->velocity, cfg_, weave);
-            } else {
-                const sw::Vec3 hold = policy_.DesiredPosition(obs);
-                accel = sw::flight::GoTo(hold, position, velocity, cfg_);
-            }
-        } else {
-            const sw::Vec3 goal = policy_.DesiredPosition(obs);
-            const float range = swarm::Distance(position, goal);
-            accel = (range > 25.0f)
-                        ? sw::flight::Cruise(goal, position, velocity, 14.0f, cfg_)
-                        : sw::flight::GoTo(goal, position, velocity, cfg_);
-        }
+        sw::Vec3 accel = sw::flight::DesiredAccel(
+            mode, position, velocity, policy_.DesiredPosition(obs),
+            focus, policy_.leashed(), obs.dt(), cfg_);
 
-        // Constraints last, and in this order: separation over everything
-        // (a friendly-friendly collision costs two drones), then the arena.
         accel = sw::flight::EnforceSeparation(accel, position, velocity,
                                               store_.tracks(), cfg_, target,
-                                              policy_.stance() == sw::Stance::Committed
-                                                  && target != nullptr);
-        accel = sw::flight::EnforceArena(accel, position, velocity, cfg_);
+                                              sw::Intercepting(mode));
+        // Intercepting skips the box. Leaving the arena is a wasted loss on
+        // station; a ram that can still hit must not be steered around a
+        // wall, the ceiling, or the dirt (D48). Uncatchable aborts first.
+        if (!sw::Intercepting(mode))
+            accel = sw::flight::EnforceArena(accel, position, velocity, cfg_);
 
         LogProximity(obs, target);
 
-        // Ring repositioning uses world-frame ACCEL_NED, so yaw does not need
-        // to follow the inward velocity. Face outward while closing a hole;
-        // face a watched inbound the instant it appears (D44); when stalking
-        // or intercepting, face the flight path.
-        float yaw = 0.0f;
-        const bool face_outward = policy_.stance() != sw::Stance::Committed &&
-                                  policy_.stalk() == nullptr &&
-                                  policy_.watch() == nullptr;
-        const float dx = position.x - cfg_.asset.x;
-        const float dy = position.y - cfg_.asset.y;
-        if (face_outward && dx * dx + dy * dy > 1.0f)
-            yaw = std::atan2(dy, dx);
-        else if (const sw::Track* watched = policy_.watch();
-                 watched && policy_.stance() != sw::Stance::Committed &&
-                 policy_.stalk() == nullptr) {
-            yaw = std::atan2(watched->position.y - position.y,
-                             watched->position.x - position.x);
-        } else if (swarm::LengthSq(velocity) > 1.0f)
-            yaw = std::atan2(velocity.y, velocity.x);
-
+        const float yaw = sw::flight::DesiredYaw(mode, position, velocity,
+                                                 cfg_.asset, focus);
         return swarm::Command::Acceleration(accel, yaw);
     }
 
@@ -269,7 +231,7 @@ private:
         const sw::Vec3 position = obs.position();
         const sw::Vec3 velocity = obs.velocity();
         const float now = obs.time();
-        const bool chasing = policy_.stance() == sw::Stance::Committed && target;
+        const bool chasing = sw::Intercepting(policy_.mode()) && target;
         if (!chasing) last_aim_log_at_ = -1.0f;
 
         for (sw::Track& t : store_.tracks()) {

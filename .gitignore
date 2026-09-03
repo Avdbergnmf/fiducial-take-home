@@ -23,7 +23,7 @@ runs/*.png
 !runs/fixture.meta.json
 
 # Ablation traces and viewer sidecars. Regenerable; too large for git.
-runs/ablation/
+runs/*/
 
 # Unity (viewer/<project>/). Nested so a Hub project under viewer/ is covered.
 viewer/**/Library/

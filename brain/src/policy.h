@@ -8,15 +8,10 @@
 #define SWARM_POLICY_H
 
 #include "belief.h"
+#include "mode.h"
 #include "protocol.h"
 
 namespace sw {
-
-enum class Stance : uint8_t {
-    Forming,      // take up a ring slot
-    Picketing,    // hold the ring, watch
-    Committed,    // running an intercept on a specific track
-};
 
 /// Facing ring slot for a world position. Same angle convention as RingSlot.
 /// `count` is the number of stations (live fleet after D19, original size
@@ -126,19 +121,21 @@ class Policy {
 public:
     void Configure(const Config& cfg, Rng rng);
 
-    /// Decide the stance and target for this tick.
+    /// Decide the mode and target for this tick.
     void Decide(TrackStore& store, const swarm::Observation& obs);
 
-    /// Where flight should take us, given the stance.
+    /// Where station-keeping should take us, given the mode.
     Vec3 DesiredPosition(const swarm::Observation& obs) const;
 
-    Stance stance() const { return stance_; }
+    Mode mode() const { return mode_; }
     const Track* target() const { return target_; }
-    /// Not-yet-Hostile inbound we are already closing on, still Picketing.
-    /// Null on station. Same ProNav law as a commit, leashed to `station()`.
+    /// Watch, stalk, or intercept track — the one Fly should look at.
+    const Track* focus() const;
+    /// Not-yet-Hostile inbound we are already closing on. Null on station.
     const Track* stalk() const { return stalk_; }
     /// Inbound we own and are facing while we ID it. Null if none. Yaw only.
     const Track* watch() const { return watch_; }
+    bool leashed() const { return leashed_; }
     Vec3 station() const { return station_; }
     const char* last_log() const { return last_log_; }
     float ring_radius() const { return ring_radius_; }
@@ -166,6 +163,10 @@ public:
     /// from last_log_ so a commit on the same tick is not overwritten.
     void LogRing(const swarm::Host& host);
 
+    /// `state` verb on mode change. Separate from last_log_ so a commit on
+    /// the same tick is not overwritten (D46).
+    void LogMode(const swarm::Host& host);
+
 private:
     bool ShouldCommit(const Track& t, const TrackStore& store,
                       const swarm::Observation& obs) const;
@@ -188,11 +189,12 @@ private:
     Track* ResolveTarget(TrackStore& store);
     void BindTarget(Track* t);
     int MateId(const Track& mate) const;
+    void AssignStationMode(const swarm::Observation& obs);
 
     Config cfg_;
     Rng rng_;                 // unused today; the hook for jittering send times
 
-    Stance stance_ = Stance::Forming;
+    Mode mode_ = Mode::Forming;
     Track* target_ = nullptr;
     uint32_t target_id_ = 0;
     uint32_t target_store_id_ = 0;
@@ -211,7 +213,10 @@ private:
     Vec3 station_{};
     const Track* stalk_ = nullptr;
     const Track* watch_ = nullptr;
-    bool provisional_ = false;
+    bool leashed_ = false;
+    bool announced_picket_ = false;
+    bool mode_logged_ = false;
+    Mode logged_mode_ = Mode::Forming;
     float heard_[kMaxFleet]{};
     Vec3 heard_at_[kMaxFleet]{};
     uint8_t confirmed_dead_[kMaxFleet]{};

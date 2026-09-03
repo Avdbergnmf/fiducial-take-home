@@ -412,6 +412,60 @@ static void TestProNavDoesNotBrakeAlongTheLos() {
     CHECK(a.z > 0.0f);
 }
 
+static void TestCollisionCourseCutsOffACrossingInbound() {
+    std::printf("collision course aims at the meeting point, not the current body\n");
+    Config cfg;
+    cfg.max_speed = 24.6f;
+    cfg.max_accel = 19.7f;
+    cfg.lateral_limit = 6.71f;
+    cfg.kill_radius = 1.907f;
+
+    // Head-on from rest: intercept is along the LOS, so +x, not a dive.
+    const Vec3 sit = flight::CollisionCourse(
+        Vec3(70, 0, -30), Vec3(), Vec3(170, 0, -30), Vec3(-15, 0, 0), cfg);
+    CHECK(sit.x > 0.5f * cfg.lateral_limit);
+    CHECK(std::fabs(sit.y) < 0.2f * cfg.lateral_limit);
+    CHECK(std::fabs(sit.z) < 0.3f * cfg.max_accel);
+
+    // Drone 3 vs hostile_0 on x1-06b926af at ~17.5 s (NED). Hostile flies
+    // west/down in a straight line. Current body is still east of us;
+    // the meeting point is west. PN N=6 + along-LOS close saturates z
+    // (19.7) and over-dives; collision course aims at I, not the body.
+    const Vec3 self(-7.45f, 57.2f, -32.5f);
+    const Vec3 self_v(0.0f, 2.5f, 2.3f);
+    const Vec3 tgt(6.87f, 90.5f, -17.1f);
+    const Vec3 tgt_v(-1.2f, -17.9f, 3.32f);
+    const Vec3 los = tgt - self;
+    const Vec3 cc = flight::CollisionCourse(self, self_v, tgt, tgt_v, cfg);
+    const Vec3 pn = flight::ProNav(self, self_v, tgt, tgt_v, cfg);
+    CHECK(cc.x > 0.5f);          // north, onto their track
+    CHECK(cc.y < 0.0f);          // west, to the intercept ahead of the body
+    CHECK(cc.y * los.y < 0.0f);  // not pursuing the current east LOS
+    CHECK(cc.z > 0.0f);          // down, but not the leftover z-budget
+    CHECK(cc.z < pn.z - 4.0f);
+    CHECK(pn.z > 15.0f);
+
+    Track focus;
+    focus.position = tgt;
+    focus.velocity = tgt_v;
+    focus.last_velocity = tgt_v;
+    const Vec3 ram = flight::DesiredAccel(
+        Mode::Ramming, self, self_v, Vec3(), &focus, false, 0.01f, cfg);
+    CHECK(swarm::Distance(ram, cc) < 1e-4f);
+    const Vec3 scramble = flight::DesiredAccel(
+        Mode::Scrambling, self, self_v, Vec3(), &focus, false, 0.01f, cfg);
+    CHECK(swarm::Distance(scramble, cc) < 1e-4f);
+
+    // Drone 7 / hostile_1 at t=27.8: 3.4 m, closing gone. Command must
+    // still point at the intercept, not up off it (D45).
+    const Vec3 a7 = flight::CollisionCourse(
+        Vec3(-37.9f, -39.5f, -11.3f), Vec3(-1.0f, 5.0f, 5.06f),
+        Vec3(-38.8f, -36.4f, -10.0f), Vec3(12.7f, 12.2f, 3.32f), cfg);
+    const Vec3 to_tgt = Vec3(-38.8f, -36.4f, -10.0f)
+                        - Vec3(-37.9f, -39.5f, -11.3f);
+    CHECK(swarm::Dot(a7, to_tgt) > 0.0f);
+}
+
 static void TestStationBisectsTheGap() {
     std::printf("station bisects the gap a run of deaths leaves\n");
     // The s2 leak, in numbers. Ring 70 m, 16 drones, comm 75. Slots 0, 1 and 2
@@ -599,6 +653,116 @@ static void TestBornOutsideRing() {
     CHECK(kScrambleEvidence > 0.05f && kScrambleEvidence < 0.2f);
 }
 
+static Config TestCfg() {
+    Config cfg;
+    cfg.drone_id = 0;
+    cfg.fleet_size = 1;
+    cfg.asset = Vec3(0, 0, 0);
+    cfg.asset_radius = 30.0f;
+    cfg.comm_radius = 90.0f;
+    cfg.kill_radius = 1.907f;
+    cfg.max_speed = 24.6f;
+    cfg.max_accel = 19.7f;
+    cfg.lateral_limit = 6.71f;
+    cfg.arena_min = Vec3(-200, -200, -100);
+    cfg.arena_max = Vec3(200, 200, 0);
+    return cfg;
+}
+
+static swarm::Observation MakeObs(SwObservation& raw, const Vec3& p,
+                                  const Vec3& v, float t) {
+    raw = {};
+    raw.struct_size = sizeof(SwObservation);
+    raw.time = t;
+    raw.dt = 0.01f;
+    raw.self.position = p;
+    raw.self.velocity = v;
+    return swarm::Observation(raw);
+}
+
+static void TestFormingBecomesPicketingAtEightMetres() {
+    std::printf("forming becomes picketing within 8 m of the slot\n");
+    Policy p;
+    p.Configure(TestCfg(), Rng());
+    TrackStore store;
+    const Vec3 slot = p.station();
+    SwObservation raw{};
+    auto obs = MakeObs(raw, slot + Vec3(20.0f, 0, 0), Vec3(), 1.0f);
+    p.Decide(store, obs);
+    CHECK(p.mode() == Mode::Forming);
+
+    obs = MakeObs(raw, slot + Vec3(3.0f, 0, 0), Vec3(), 1.1f);
+    p.Decide(store, obs);
+    CHECK(p.mode() == Mode::Picketing);
+    CHECK(std::strcmp(p.last_log(), "picket") == 0);
+}
+
+static void TestCatchableRamUsesDivert() {
+    std::printf("a ram is catchable inside 2·kill, or if reach can close the leftover\n");
+    Config cfg = TestCfg();
+
+    CHECK(flight::CatchableRam(
+        Vec3(20.0f, 0, -30.0f), Vec3(-15.0f, 0, 0),
+        Vec3(0, 0, -30.0f), Vec3(), cfg));
+
+    CHECK(flight::CatchableRam(
+        Vec3(0, 0, -30.0f), Vec3(),
+        Vec3(1.0f, 0, -30.0f), Vec3(), cfg));
+
+    // Drone 7 at 3.4 m: still inside 2·kill (~3.8 m). Stay in the merge.
+    CHECK(flight::CatchableRam(
+        Vec3(-37.9f, -39.5f, -11.3f), Vec3(-1.0f, 5.0f, 5.06f),
+        Vec3(-38.8f, -36.4f, -10.0f), Vec3(12.7f, 12.2f, 3.32f), cfg));
+
+    // Same geometry, already past and 10 m out: obvious miss.
+    CHECK(!flight::CatchableRam(
+        Vec3(80.0f, 0, -30.0f), Vec3(),
+        Vec3(0, 0, -30.0f), Vec3(-1.0f, 0, 0), cfg));
+
+    // 10 m parallel, 80 m out: time to divert.
+    CHECK(flight::CatchableRam(
+        Vec3(80.0f, 10.0f, -30.0f), Vec3(-15.0f, 0, 0),
+        Vec3(0, 0, -30.0f), Vec3(), cfg));
+
+    // 40 m abeam, parked, target flying past: already at CPA, outside 2·kill.
+    CHECK(!flight::CatchableRam(
+        Vec3(0, 40.0f, -30.0f), Vec3(),
+        Vec3(0, 0, -30.0f), Vec3(20.0f, 0, 0), cfg));
+}
+
+static void TestArenaSpringsOnStation() {
+    std::printf("on station, walls ceiling and ground all push; intercepts skip them\n");
+    Config cfg;
+    cfg.max_accel = 19.7f;
+    cfg.lateral_limit = 6.71f;
+    cfg.arena_min = Vec3(-200, -200, -100);
+    cfg.arena_max = Vec3(200, 200, 0);
+
+    const Vec3 wall = flight::EnforceArena(
+        Vec3(10.0f, 0, 0), Vec3(198.0f, 0, -30.0f), Vec3(5.0f, 0, 0), cfg);
+    CHECK(wall.x < 9.0f);
+
+    const Vec3 roof = flight::EnforceArena(
+        Vec3(0, 0, -10.0f), Vec3(0, 0, -98.0f), Vec3(0, 0, -8.0f), cfg);
+    CHECK(roof.z > -10.0f);
+
+    const Vec3 floor = flight::EnforceArena(
+        Vec3(0, 0, 15.0f), Vec3(0, 0, -2.0f), Vec3(0, 0, 10.0f), cfg);
+    CHECK(floor.z < 14.0f);
+}
+
+static void TestModeNames() {
+    std::printf("mode names match the state log tokens\n");
+    CHECK(std::strcmp(ModeName(Mode::Forming), "forming") == 0);
+    CHECK(std::strcmp(ModeName(Mode::Picketing), "picket") == 0);
+    CHECK(std::strcmp(ModeName(Mode::Watching), "watch") == 0);
+    CHECK(std::strcmp(ModeName(Mode::Stalking), "stalk") == 0);
+    CHECK(std::strcmp(ModeName(Mode::Scrambling), "scramble") == 0);
+    CHECK(std::strcmp(ModeName(Mode::Ramming), "ram") == 0);
+    CHECK(Intercepting(Mode::Scrambling) && Intercepting(Mode::Ramming));
+    CHECK(!Intercepting(Mode::Watching) && !Intercepting(Mode::Stalking));
+}
+
 int main() {
     TestFacingSlotMatchesRing();
     TestFacingSlotAgreesOnABisector();
@@ -611,6 +775,7 @@ int main() {
     TestProNavSteersAtTheZem();
     TestArenaAllowsADiveIntercept();
     TestProNavDoesNotBrakeAlongTheLos();
+    TestCollisionCourseCutsOffACrossingInbound();
     TestStationBisectsTheGap();
     TestSilentNeighbourIsGoneEvenFar();
     TestApproachingFarSilenceDoesNotKill();
@@ -618,6 +783,10 @@ int main() {
     TestStalkAimLeadsNotPursues();
     TestInterceptorKeepsGoingAtTheMerge();
     TestBornOutsideRing();
+    TestFormingBecomesPicketingAtEightMetres();
+    TestCatchableRamUsesDivert();
+    TestArenaSpringsOnStation();
+    TestModeNames();
 
     if (g_failures == 0) {
         std::printf("policy: all passed\n");
