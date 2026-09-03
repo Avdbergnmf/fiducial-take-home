@@ -85,6 +85,22 @@ void Policy::Configure(const Config& cfg, Rng rng) {
     const float spawn_radius = 0.80f * arena_half;
     const float ring_cap = spawn_radius * 0.65f;
     if (ring_radius_ > ring_cap) ring_radius_ = ring_cap;
+
+    // And leave enough FLIGHT TIME between the spawn circle and the picket, not
+    // just enough distance (D33). The ratio above catches a ring parked on top
+    // of the spawn circle; it does not catch one that is nominally inside it but
+    // only a couple of seconds away at closing speed, which is the same failure
+    // wearing a different number. Measured: x1-814fd5e7 sits at 0.625 of the
+    // spawn radius -- under the cap -- yet leaves only 54 m, about 2.8 s, which
+    // is barely the time to classify at all; hostiles there spawn already inside
+    // sense range and it scores 0/3. Healthy layouts leave 4.9 s.
+    //
+    // Enemy speed is not in SwBootInfo, but ours is and the airframes are
+    // comparable (measured 19-21 m/s against our 17-24), so max_speed is the
+    // proxy. This is the same reasoning as the spawn radius itself: a number the
+    // brain is not given, derived from one it is.
+    const float react_cap = spawn_radius - 3.5f * cfg.max_speed;
+    if (ring_radius_ > react_cap) ring_radius_ = react_cap;
     // Never inside the thing we are defending.
     const float floor_r = cfg.asset_radius + 10.0f;
     if (ring_radius_ < floor_r) ring_radius_ = floor_r;

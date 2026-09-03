@@ -1220,7 +1220,6 @@ floor; both hard ids unchanged. Small, but it regresses nothing.
 three suites pass, including `TestDiveIsAHostileSignatureWhenTimeIsShort`, which
 pins that a diving track on the cylinder opens the fast path while a level
 civilian on the *same ground track* does not.
-
 ---
 
 ## D32 — Spawn-inside-sense: the TTG gate could not see the short window
@@ -1636,3 +1635,208 @@ kill at 38.40 (drone 4). 0 waste, 0 wrong.
 
 ---
 
+
+## D39 — Is the dive reliable? And leaning on it: measured, rejected
+
+**The question:** the D31 dive discriminator was measured on two runs. Is
+"hostiles dive, civilians do not" a property of the generator, or did I fit two
+scenarios?
+
+**CHALLENGE.md says nothing about it.** It documents `spawn.enemy_altitude`
+(40 m) and the NED frame; there is no statement about what a hostile does with
+its altitude afterwards, and `_evasion` describes only a horizontal weave. The
+dive is an **observed regularity, not a promised one**, so it needs evidence.
+
+**Checked across 21 scenarios** — the eight fixed, ten fresh ids and three
+reported bad runs — every hostile and every civilian:
+
+| | |
+|---|---|
+| hostiles descending faster than 1.0 m/s | **78 of 78 (100 %)** |
+| hostile peak descent rate | min **2.12**, median 3.14, max 4.55 m/s |
+| time from spawn to crossing the gate | min 0.20, median 0.40, **max 0.70 s** |
+| civilian peak descent rate | **max 0.43** over 192 civilians |
+
+A 4.9x margin between the slowest-diving hostile and the fastest-descending
+civilian, and the flag is up within 0.7 s against 2.5-3 s for the patient test.
+The discriminator is safe to rely on, with the caveat that it is generator
+behaviour rather than a documented contract — if a future tier flies hostiles
+level, `DivingAtAsset` silently stops firing and the patient test carries the
+load, which is the right failure direction.
+
+**Leaning on the early flag: rejected.** The obvious way to spend the 2 s is to
+*pre-position* without committing — move partway toward the intercept point on
+the dive flag, so that when `ShouldCommit` fires we are already carrying speed
+instead of accelerating from rest (measured: reaching cruise from a standstill
+takes about 2 s and 14 m, out of a window of a few seconds).
+
+Implemented and swept at lean distances 20 / 40 / 70 m. All three lose:
+
+| lean | sweep mean | 72362d4f | ae01dd1d |
+|---|---|---|---|
+| none | **127.4** | 226.3 (5/5) | −160.3 (3/3) |
+| 20 m | 118.1 | 61.9 (4/5) | −822.4 (0/3) |
+| 40 m | 121.4 | −182.1 (3/5) | −823.4 (0/3) |
+| 70 m | 121.4 | −182.1 (3/5) | −822.9 (0/3) |
+
+**Why:** leaning does not avoid D31's cost, it relocates it. The drone still
+leaves its station for something unconfirmed; the only thing that changed is the
+name of the state it does it in. `ae01dd1d` collapsing from 3/3 to 0/3 is the
+picket abandoning coverage for a track it had not yet earned the right to chase.
+
+The 2 s is real and the flag is trustworthy, but there is no way found to spend
+it that does not cost more elsewhere. **Nothing adopted from this entry** beyond
+factoring `DivingAtAsset` out of `Classify` into `belief.h`, so the signature has
+one definition.
+---
+
+## D37 — Standoff needs a time margin, not just a ratio
+
+**The run:** `x1-814fd5e79a980ae1c11a87a76f49336c`, 0/3 with three breaches at
+−513.2. Reported as "2.5-3 s of the hostile being in range before it responds,
+and by the time it has accelerated the hostile just zooms past".
+
+```
+ring = 90.1   spawn = 144.2   ring/spawn = 0.625   (D28's cap is 0.65: does NOT bind)
+sense = 71.4  ->  hostiles spawn 58-64 m from the nearest drone, already INSIDE sense
+hostile life 7.8 s;  commit at +2.7 s;  ram logged at rng 2.7 m -> miss;  abort "lost"
+```
+
+**D28's ratio cap is the right idea measured the wrong way.** It catches a ring
+parked *on* the spawn circle (0.78, 0.66). It cannot catch one that is nominally
+inside it but only `(144.2 − 90.1)/19 ≈ 2.8 s` away at closing speed — barely
+the time to classify at all. Healthy layouts leave about 4.9 s.
+
+**So bound the flight time, not the distance.** Enemy speed is not in
+`SwBootInfo`, but ours is and the airframes are comparable (measured hostiles
+19-21 m/s against our `max_speed` 17-24), so `max_speed` is the proxy — the same
+move D28 made for the spawn radius itself: a number the brain is not given,
+derived from one it is.
+
+```cpp
+const float react_cap = spawn_radius - kReactSeconds * cfg.max_speed;
+```
+
+**Swept** (hard = the three reported bad runs; fresh = 20 unseen ids):
+
+| | 814fd5e7 | 72362d4f | fixed mean | fresh mean | fresh floor | fresh kills |
+|---|---|---|---|---|---|---|
+| ratio cap only | −513.2 **0/3** | 226.3 | **127.4** | 89.2 | −309.5 | 60/65 |
+| + 2.5 s | −305.0 (1/3) | 220.9 | 127.4 | 89.3 | −309.5 | 60/65 |
+| **+ 3.5 s** | **+90.0 (3/3)** | 188.0 | 126.1 | **97.5** | **−112.3** | **61/65** |
+| + 4.5 s | +93.1 (3/3) | 164.5 | 111.6 | 95.5 | −110.7 | 61/65 |
+
+**Chosen:** 3.5 s.
+
+**Why:** it is the only change in a while that improves the *unbiased* estimate
+and the hand-picked bad runs at the same time — fresh mean 89.2 → 97.5 and, more
+tellingly, the fresh **floor** −309.5 → −112.3. A thin standoff margin was
+quietly costing the worst runs, not just the three noticed by eye. 4.5 s buys
+nothing more on fresh ids and starts costing the fixed set.
+
+**Also tried:** simply tightening D28's ratio to 0.45 / 0.50 / 0.55 / 0.60. 0.50
+fixes 814fd5e7 to 2/3 but costs fresh mean (89.2 → 87.4) — it takes standoff away
+from layouts that had no problem, because a ratio cannot tell a thin margin from
+a wide one. The time bound binds only where the margin is actually thin.
+
+**Cost accepted:** `72362d4f` gives back 38 points (226.3 → 188.0, still 5/5) and
+x1-a 10 (−25.2 → −35.5, still 4/4). Both keep every kill; it is reward given up
+for standoff, and it buys three breaches back elsewhere.
+
+**Determinism:** `--replay` clean on s1, s2, x1-a, x2-b and all three reported
+ids. All three suites pass, with a test pinning that a ring inside the ratio cap
+is still pulled in when the time margin is thin, and that neither cap bites on a
+roomy arena.
+
+**Re-measured after merging D32-D35.** The table above was taken against the
+pre-merge brain, so it no longer describes the shipped one. Against D32-D35's
+head, the time margin is worth much more than it looked, and the split is the
+same one this log keeps finding:
+
+| | fixed mean | fixed floor | hard 3 | **fresh mean** | **fresh floor** | fresh kills | fresh breaches |
+|---|---|---|---|---|---|---|---|
+| D32-D35 head | **164.6** | **20.6** | **134.9** | 54.7 | −523.4 | 57/65 | 8 |
+| + time margin | 163.6 | 13.1 | 88.1 | **96.6** | **−112.9** | **61/65** | **4** |
+
+D32-D35 is the stronger brain on the eight fixed scenarios and on the three runs
+picked out by eye — both of which it was developed against — and gives up 42
+points a run on twenty ids it has never seen, with four more breaches and a floor
+410 points lower. Weighted evenly over all 31 runs: 90.8 against **113.1**. The
+merge keeps both.---
+
+## D40 — What sets the floor, and why the ring cannot lower it further
+
+Asked to optimise the **floor** rather than the mean, and to test the rule "keep
+the picket far enough in that hostiles never spawn inside sense range", since
+that is where the near-misses were seen.
+
+**First, the reported run is already fixed.** `x1-bd34b277be45b2319f3419b1acdb3d81`
+scores **+191.6, 3/3, zero breaches, no misses** on the merged head. The whiffs
+predate D37: the time margin now sets its ring at 73.6 m
+(`154.5 − 3.5 × 23.1 = 73.7`), and that is what closed it.
+
+**The rule, tested at three strengths** (`ring ≤ spawn_radius − sense·f`),
+scored on floor across the fixed eight, twenty fresh ids and four reported runs:
+
+| | fixed min | fresh min | hard min | **global min** |
+|---|---|---|---|---|
+| current | **13.1** | −112.9 | **−83.6** | **−112.9** |
+| f = 1.00 | −32.2 | −112.9 | −118.9 | −118.9 |
+| f = 0.85 | −18.1 | −112.9 | −83.6 | −112.9 |
+| f = 0.70 | −2.6 | −112.9 | −83.6 | −112.9 |
+
+**No improvement at any strength**, and the full rule is worse. f = 0.85 lifts
+the fresh *mean* by 11.6, but the entire gain is one id
+(`x2-f29b16af`, −28.5 → +197.0, a single marginal breach flipping) against a
+31-point loss on x1-a; every other id moves by exactly 0.0. That is a coin
+flip, not a mechanism.
+
+**Why the rule cannot help: the floor scenario already obeys it.**
+`x2-147e7e55` runs `ring 56.5, sense 72.8, spawn 142.4`, so `ring + sense =
+129.3 < 142.4` — hostiles there are already first seen crossing into detection.
+Its −112.9 is built differently:
+
+```
+rewards: [0.0, 0.0]      urgency_ratio: [1.052, 1.072]
+mission = 0 + 0 - 200
+```
+
+Both kills scored **zero** reward: `urgency_ratio` above 1.0 means the hostile
+was destroyed *after* the moment it would have reached the asset unopposed, and
+`reward = W_kill·clamp(1 − ratio)` clamps to nothing. The run is two worthless
+kills and one breach.
+
+**So the ring there is too far IN, not too far out** — and it is D37's own time
+margin holding it at 56.5 (`142.4 − 3.5 × 24.5 = 56.6`). The margin uses *our*
+`max_speed` as a stand-in for the hostile's, and at 24.5 against a hostile that
+flies about 19 it over-reserves by nearly a third.
+
+**Bounding the reservation** (`react_margin ≤ spawn_radius · f`) to give the
+standoff back:
+
+| | global min | fresh mean | x2-147e |
+|---|---|---|---|
+| current (unbounded) | **−112.9** | 96.6 | **−113 (2/3)** |
+| f = 0.55 | −112.7 | 98.0 | −113 (2/3) |
+| f = 0.45 | −295.3 | 89.7 | −295 (1/3) |
+| f = 0.35 | −523.4 | 54.7 | −295 (1/3) |
+
+The floor scenario is **already at its optimum**: every loosening makes it
+worse, every tightening leaves it unchanged. f = 0.35 reproduces the pre-D37
+floor of −523.4, which confirms the margin is doing the work it was added for.
+
+**Nothing changed.** Six variants across two principled rules, none improves the
+floor. The ring geometry is exhausted as a lever for it.
+
+**What the floor is actually made of**, worth knowing rather than fixing:
+
+| run | score | mission | what it is |
+|---|---|---|---|
+| x2-147e7e55 | −112.9 | 2/3, 1 breach | two zero-reward kills; ring already optimal |
+| x1-19941165 | −108.7 | **3/3, 0 breaches** | a perfect mission, minus 300 for two civilians that die at **t = 0** (D29) |
+| x2-5995abce | −94.2 | 4/5, 1 breach | |
+| x2-8e0cbbb1 | −79.3 | 2/3, 1 breach | |
+
+Two of the four worst runs are dominated by a penalty with no available action:
+x1-19941165 kills everything, breaches nothing, and still scores −108.7. The
+floor is close to what this scoring function allows.
