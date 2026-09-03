@@ -159,6 +159,27 @@ static void TestRingStaysInsideTheSpawnCircle() {
     CHECK(p.ring_radius() <= spawn_radius * 0.65f + 1e-3f);
     CHECK(p.ring_radius() > cfg.asset_radius);
 
+    // A ring can be comfortably inside the spawn circle by ratio and still be
+    // only a couple of seconds away from it at closing speed, which is the same
+    // failure wearing a different number. x1-814fd5e7: spawn 144 m, ring 90 m,
+    // so 0.62 of the spawn radius -- under the ratio cap -- but 54 m of margin,
+    // about 2.8 s, barely the time to classify. It scored 0/3 with 3 breaches.
+    Config tight;
+    tight.drone_id = 0;
+    tight.fleet_size = 16;
+    tight.asset = Vec3(0, 0, 0);
+    tight.asset_radius = 30.0f;
+    tight.comm_radius = 87.5f;
+    tight.sense_radius = 71.4f;
+    tight.max_speed = 24.2f;
+    tight.arena_min = Vec3(-180, -180, -120);
+    tight.arena_max = Vec3(180, 180, 0);
+    Policy narrow;
+    narrow.Configure(tight, Rng());
+    const float spawn = 0.80f * 180.0f;
+    CHECK(narrow.ring_radius() < spawn * 0.65f);      // ratio alone would allow more
+    CHECK(spawn - narrow.ring_radius() >= 3.5f * tight.max_speed - 1e-3f);
+
     // A big arena leaves the radio rule in charge: the cap must not bite when
     // there is plenty of room, or it would give away standoff for nothing.
     cfg.arena_min = Vec3(-400, -400, -120);
