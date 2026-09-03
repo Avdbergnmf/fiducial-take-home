@@ -70,6 +70,33 @@ static void TestTimeToCylinder() {
     CHECK(TimeToCylinder(Vec3(160, 0, 0), Vec3(0, 16, 0), kAsset, 30.0f) > 1000.0f);
 }
 
+static void TestThreatWindowIsFiniteWhileSpooling() {
+    std::printf("ThreatWindow uses dash speed while TimeToCylinder is huge\n");
+    // Spawn-inside-sense: still accelerating, almost no horizontal closing.
+    const Vec3 p(144.0f, 0.0f, -40.0f);
+    const Vec3 v(-2.0f, 0.0f, 1.67f);
+    CHECK(TimeToCylinder(p, v, kAsset, 35.0f) > 40.0f);
+    const float w = ThreatWindow(p, v, kAsset, 35.0f, kHostileDash);
+    // (144-35)/16 = 6.81 s — the short window D31's TTG gate could not see.
+    CHECK(w > 6.5f && w < 7.2f);
+
+    // s1-sized inbound already at dash: just above the compact gate.
+    const float s1 = ThreatWindow(Vec3(170, 0, -40), Vec3(-16, 0, 0), kAsset,
+                                  30.0f, kHostileDash);
+    CHECK(s1 > kCompactWindow && s1 < 9.5f);
+
+    // s2-sized inbound already at dash: still above the 10 s early-call gate.
+    const float s2 = ThreatWindow(Vec3(220, 0, -45), Vec3(-16, 0, 0), kAsset,
+                                  30.0f, kHostileDash);
+    CHECK(s2 > 11.0f && s2 < 13.0f);
+}
+
+static void TestLooksDivingAtAsset() {
+    std::printf("dive + ground track is a hostile posture, a level chord is not\n");
+    CHECK(LooksDivingAtAsset(Vec3(120, 0, -39.5f), Vec3(-19, 0, 1.67f), kAsset, 30.0f));
+    CHECK(!LooksDivingAtAsset(Vec3(120, 0, -50), Vec3(-19, 0, 0.02f), kAsset, 30.0f));
+}
+
 static void TestClosingSpeed() {
     std::printf("relative closing uses both velocities\n");
     const Vec3 us(75, 0, -30);
@@ -205,6 +232,14 @@ static void TestDiveIsAHostileSignatureWhenTimeIsShort() {
     CHECK(h_ground < asset_radius);                         // dive test says yes
     CHECK(h_vel.z > 1.0f);
     CHECK(TimeToCylinder(h_pos, h_vel, asset, asset_radius) < 10.0f);
+    CHECK(LooksDivingAtAsset(h_pos, h_vel, asset, asset_radius));
+
+    // The spawn-inside-sense clock: almost no horizontal closing yet, so
+    // TimeToCylinder is infinite, but they are diving at the cylinder.
+    const Vec3 spool_pos(144.0f, 0.0f, -39.5f);
+    const Vec3 spool_vel(-2.0f, 0.0f, 1.67f);
+    CHECK(TimeToCylinder(spool_pos, spool_vel, asset, asset_radius) > 40.0f);
+    CHECK(LooksDivingAtAsset(spool_pos, spool_vel, asset, asset_radius));
 
     // Civilian overflying the same ground track, level at 50 m. Its ground miss
     // is just as small -- which is exactly why the ground track alone cannot be
@@ -278,6 +313,13 @@ static void TestPeerReportAssociatesByGeometry() {
     CHECK(store.FindByStoreId(store.tracks()[0].store_id) == &store.tracks()[0]);
     CHECK(store.Find(0) == nullptr);   // hearsay must not collide with local id 0
 
+    // A fresh call used to send confidence 72 (score*120). One report must
+    // still latch: the facing owner cannot wait for three 0.5 s packets.
+    TrackStore slow;
+    slow.MergePeerReport(p, v, Belief::Hostile, 72, 10.0f, 3, 0);
+    CHECK(slow.tracks().size() == 1);
+    CHECK(slow.tracks()[0].belief == Belief::Hostile);
+
     // Same aircraft, a few metres off (two fix biases). One row.
     store.MergePeerReport(Vec3(174.0f, 2.0f, -40.0f), v, Belief::Hostile, 255,
                           10.4f, 3, 2);
@@ -294,6 +336,8 @@ int main() {
     TestApproachAlignment();
     TestTimeToTarget();
     TestTimeToCylinder();
+    TestThreatWindowIsFiniteWhileSpooling();
+    TestLooksDivingAtAsset();
     TestClosingSpeed();
     TestBallistic();
     TestMissDistanceSeparatesTheHardCase();

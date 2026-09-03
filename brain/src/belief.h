@@ -85,6 +85,29 @@ float TimeToTarget(const Vec3& position, const Vec3& velocity, const Vec3& targe
 float TimeToCylinder(const Vec3& position, const Vec3& velocity,
                      const Vec3& centre, float radius);
 
+/// Published `enemy_dash_speed` on the hand-written scenarios, and the
+/// speed a hostile reaches within ~2 s of spawn. Used as the floor on
+/// ThreatWindow so a standing spawn is not "infinite time-to-go".
+constexpr float kHostileDash = 16.0f;
+
+/// Dash-seconds to the cylinder below which the inbound is a short window
+/// (spawn-inside-sense, compact arenas). Above this, wait for the patient
+/// 3D-miss test rather than leaving station early (D31/D32).
+constexpr float kCompactWindow = 8.0f;
+
+/// Seconds to the cylinder if this inbound dashes at `dash_speed`, or at
+/// its current closing speed if that is already faster. Finite while it is
+/// still spooling up; TimeToCylinder is not (it returns 1e6 until closing
+/// exceeds 0.1 m/s).
+float ThreatWindow(const Vec3& position, const Vec3& velocity,
+                   const Vec3& centre, float radius, float dash_speed);
+
+/// Descending, and the ground track enters the cylinder. Hostiles ramp past
+/// 1 m/s down within 0.5 s; civilians on recorded runs sit at 0.00–0.14.
+/// A posture, not a class — Classify still integrates evidence.
+bool LooksDivingAtAsset(const Vec3& position, const Vec3& velocity,
+                        const Vec3& asset, float asset_radius);
+
 /// Horizontal closing speed of `target` on `observer`, using both
 /// velocities. Positive means the range is shrinking. RangeRate only sees
 /// the target's velocity, so a picket chasing an outbound looks "closing"

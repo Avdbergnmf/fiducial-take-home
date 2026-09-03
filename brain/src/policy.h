@@ -67,11 +67,32 @@ Vec3 StationAt(float bearing, const Vec3& centre, float radius, float altitude);
 uint32_t UniqueOwner(uint32_t facing, uint32_t fleet_size, uint32_t self_id,
                      const float* heard, float now);
 
+/// Same walk as UniqueOwner, but skip `facing` when that drone is receding
+/// from the inbound (D35). Clockwise neighbour takes it. One skip only —
+/// walking every receding slot would leave nobody.
+uint32_t InboundOwner(uint32_t facing, uint32_t fleet_size, uint32_t self_id,
+                      const float* heard, float now, bool facing_receding);
+
+/// Horizontal component of `velocity` toward `target`. Negative is receding.
+float TowardTarget(const Vec3& position, const Vec3& velocity, const Vec3& target);
+
 /// End of the remaining intercept flight, not the hostile's current pose.
 /// Assumed cruise along LOS, t_meet = range / closing, along = cruise ·
 /// min(t_meet + 0.5 s, abort 12 s). Returns `from` when that cruise is not
 /// closing — there is no intercept to yield for (D17).
 Vec3 CorridorHorizon(const Vec3& from, const Vec3& hostile_p, const Vec3& hostile_v);
+
+/// How far a picket may leave its slot toward a not-yet-Hostile inbound.
+/// Stopping distance at max_speed is ~30 m, so 40 m still reverses onto
+/// station if Classify never latches.
+constexpr float kStalkRange = 40.0f;
+
+/// Lead point of the committed intercept, leashed `cap` metres from `slot`.
+/// TimeToIntercept at `speed`; current position if no meeting exists.
+/// This is the stalk: same geometry as ProNav midcourse, not the LOS to
+/// where the inbound is now (D34).
+Vec3 StalkAim(const Vec3& slot, const Vec3& target_p, const Vec3& target_v,
+              float speed, float cap);
 
 /// Push `goal` off the horizontal segment a→b when inside `clear`.
 Vec3 YieldOffCorridor(const Vec3& goal, const Vec3& a, const Vec3& b, float clear);
@@ -88,6 +109,11 @@ public:
 
     Stance stance() const { return stance_; }
     const Track* target() const { return target_; }
+    /// Not-yet-Hostile inbound we are already flying an intercept at, still
+    /// Picketing. Null when holding station. Fly uses ProNav on this with a
+    /// leash at `station()`; not an exempt intercept target.
+    const Track* stalk() const { return stalk_; }
+    Vec3 station() const { return station_; }
     const char* last_log() const { return last_log_; }
     float ring_radius() const { return ring_radius_; }
     float ring_altitude() const { return ring_altitude_; }
@@ -112,11 +138,16 @@ public:
     void NoteAlive(uint8_t drone_id, const Vec3& position, float now);
 
 private:
-    bool ShouldCommit(const Track& t, const swarm::Observation& obs) const;
-    bool OwnsInbound(const Track& t, const swarm::Observation& obs) const;
+    bool ShouldCommit(const Track& t, const TrackStore& store,
+                      const swarm::Observation& obs) const;
+    bool OwnsInbound(const Track& t, const TrackStore& store,
+                     const swarm::Observation& obs) const;
+    bool FacingReceding(uint32_t facing, const Track& hostile,
+                        const TrackStore& store,
+                        const swarm::Observation& obs) const;
     bool CloserChaser(const Track& hostile, const TrackStore& store,
                       const swarm::Observation& obs) const;
-    Vec3 PicketGoal(const TrackStore& store, const swarm::Observation& obs) const;
+    Vec3 PicketGoal(const TrackStore& store, const swarm::Observation& obs);
     const char* AbortReason(const Track& t, const swarm::Observation& obs) const;
     void LogAbort(const char* why, uint32_t trk, const Track* t,
                   const swarm::Observation& obs);
@@ -142,6 +173,8 @@ private:
     float ring_radius_ = 60.0f;
     float ring_altitude_ = 30.0f;
     Vec3 picket_goal_{};
+    Vec3 station_{};
+    const Track* stalk_ = nullptr;
     float heard_[kMaxFleet]{};
     Vec3 heard_at_[kMaxFleet]{};
 };

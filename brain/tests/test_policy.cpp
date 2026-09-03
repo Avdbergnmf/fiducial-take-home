@@ -67,6 +67,31 @@ static void TestUniqueOwnerIsOneDrone() {
     CHECK(UniqueOwner(15, n, 14, heard, now) == 0);
 }
 
+static void TestInboundOwnerSkipsARecedingFacing() {
+    std::printf("receding facing yields to the first live clockwise\n");
+    float heard[kMaxFleet];
+    for (uint32_t i = 0; i < kMaxFleet; ++i) heard[i] = -1.0e9f;
+    const uint32_t n = 10;
+    const float now = 20.0f;
+
+    CHECK(InboundOwner(0, n, 0, heard, now, false) == 0);
+    CHECK(InboundOwner(0, n, 1, heard, now, false) == 0);
+    CHECK(InboundOwner(0, n, 1, heard, now, true) == 1);
+    CHECK(InboundOwner(0, n, 0, heard, now, true) == 1);
+
+    // Clockwise neighbour dead: walk continues, still not the receding facing.
+    heard[1] = now - 2.0f;
+    CHECK(InboundOwner(0, n, 2, heard, now, true) == 2);
+    CHECK(InboundOwner(0, n, 0, heard, now, true) == 2);
+
+    // x1-b403 numbers: drone 0 at (78.5, 15.9) going (1.1, -5.4), hostile
+    // at (111.9, 57.3). Toward is negative; a picket at rest is not.
+    CHECK(TowardTarget(Vec3(78.5f, 15.9f, -30.0f), Vec3(1.1f, -5.4f, 0.0f),
+                       Vec3(111.9f, 57.3f, -40.0f)) < -2.0f);
+    CHECK(TowardTarget(Vec3(45.8f, 66.0f, -30.0f), Vec3(0.2f, 0.3f, 0.0f),
+                       Vec3(111.9f, 57.3f, -40.0f)) > 0.0f);
+}
+
 static void InitHeard(float* heard) {
     for (uint32_t i = 0; i < kMaxFleet; ++i) heard[i] = -1.0e9f;
 }
@@ -372,15 +397,43 @@ static void TestYieldHorizonIsRemainingFlight() {
     CHECK(Horiz(YieldOffCorridor(far, from, none, clear), far) < 0.1f);
 }
 
+static void TestStalkAimLeadsNotPursues() {
+    std::printf("stalk aim is the intercept lead, leashed to the slot\n");
+    const Vec3 slot(70, 0, -30);
+    const float cap = 40.0f;
+    const float speed = 20.0f;
+
+    // Crossing: flying at where they ARE is +x; the meeting point is off
+    // +y, and that is the heading the committed ProNav already flies.
+    const Vec3 crossing = StalkAim(slot, Vec3(170, 0, -30), Vec3(0, 10, 0),
+                                   speed, cap);
+    CHECK(crossing.y > 5.0f);
+    CHECK(swarm::Distance(crossing, slot) <= cap + 1e-3f);
+    CHECK(crossing.x > slot.x);
+
+    // Head-on inbound: lead and LOS agree, so the slide is along -x of them
+    // / +x of us, no lateral.
+    const Vec3 headon = StalkAim(slot, Vec3(170, 0, -30), Vec3(-15, 0, 0),
+                                 speed, cap);
+    CHECK(std::fabs(headon.y) < 0.5f);
+    CHECK(headon.x > slot.x);
+    CHECK(swarm::Distance(headon, slot) <= cap + 1e-3f);
+
+    // Cap binds: a lead hundreds of metres out still sits 40 m off station.
+    CHECK(std::fabs(swarm::Distance(headon, slot) - cap) < 0.5f);
+}
+
 int main() {
     TestFacingSlotMatchesRing();
     TestUniqueOwnerIsOneDrone();
+    TestInboundOwnerSkipsARecedingFacing();
     TestLiveRingRespaces();
     TestRingStaysInsideTheSpawnCircle();
     TestLeadIntercept();
     TestZeroEffortMissSteersAtTheMiss();
     TestStationBisectsTheGap();
     TestYieldHorizonIsRemainingFlight();
+    TestStalkAimLeadsNotPursues();
 
     if (g_failures == 0) {
         std::printf("policy: all passed\n");

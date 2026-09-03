@@ -401,8 +401,10 @@ def build_scoring(arr, times, entities, report):
     def nearest_friendly_to_any_civilian(t):
         f = frame_before(t)
         if f is None or not friendly_slots or not civ_slots:
-            return None
+            return None, None, None
         best = None
+        best_d = None
+        best_c = None
         for c in civ_slots:
             if arr[f, c, 10] <= 0.0:      # alive flag
                 continue
@@ -411,17 +413,32 @@ def build_scoring(arr, times, entities, report):
                     continue
                 gap = float(np.linalg.norm(arr[f, c, 0:3] - arr[f, d, 0:3]))
                 if best is None or gap < best:
-                    best = gap
-        return best
+                    best, best_d, best_c = gap, d, c
+        return best, best_d, best_c
 
     by_hostile = {i.get("hostile"): i for i in mission.get("intercepts", [])}
+    hostiles = [e for e in entities if e["kind"] == "hostile"]
+    by_drone = {e["drone_id"]: e["slot"] for e in entities
+                if e["kind"] == "friendly" and e.get("drone_id", -1) >= 0}
+
+    def hostile_slot(name):
+        if not name or not str(name).startswith("hostile_"):
+            return None
+        try:
+            idx = int(str(name).split("_", 1)[1])
+        except ValueError:
+            return None
+        if 0 <= idx < len(hostiles):
+            return hostiles[idx]["slot"]
+        return None
+
     ledger = []
 
     for ev in report.get("events", []):
         t = ev["t"]
         kind = ev["type"]
         entry = {"t": t, "frame": frame_at(times, t), "kind": kind,
-                 "points": 0.0, "attributable": True, "detail": {}}
+                 "points": 0.0, "attributable": True, "detail": {}, "slots": []}
 
         if kind == "intercept":
             hit = by_hostile.get(ev.get("target"), {})
@@ -433,18 +450,25 @@ def build_scoring(arr, times, entities, report):
             entry["detail"] = {k: hit[k] for k in
                                ("urgency_ratio", "t_engage_s", "t_free_s", "t_spawn")
                                if k in hit}
-            # Reward is what is left of kill_max after the urgency scaling, so
-            # the gap between them is the cost of engaging late. Worth showing.
             entry["detail"]["forgone_by_engaging_late"] = round(
                 SCORE_WEIGHTS["kill_max"] - entry["points"], 2)
+            hs = hostile_slot(ev.get("target"))
+            if hs is not None:
+                entry["slots"].append(hs)
+            for d in drones:
+                if d in by_drone:
+                    entry["slots"].append(by_drone[d])
 
         elif kind == "breach":
             entry["points"] = SCORE_WEIGHTS["breach"]
             entry["text"] = "%s reached the asset" % ev.get("target", "hostile")
+            hs = hostile_slot(ev.get("target"))
+            if hs is not None:
+                entry["slots"].append(hs)
 
         elif kind == "civilian_lost":
             entry["points"] = SCORE_WEIGHTS["civilian"]
-            near = nearest_friendly_to_any_civilian(t)
+            near, dslot, cslot = nearest_friendly_to_any_civilian(t)
             if near is None:
                 entry["attributable"] = False
                 entry["text"] = ("civilian lost before the first recorded frame "
@@ -457,20 +481,61 @@ def build_scoring(arr, times, entities, report):
                                     else " - not ours"))
                 entry["detail"] = {"nearest_friendly_m": round(near, 1),
                                    "blame_radius_m": CIVILIAN_BLAME_M}
+                if cslot is not None:
+                    entry["slots"].append(cslot)
+                if dslot is not None:
+                    entry["slots"].append(dslot)
 
         elif kind == "friendly_lost":
-            # A drone spent on a hostile is credited, not wasted, and costs
-            # nothing; only an uncredited loss carries the penalty.
             wasted = ev.get("target") != "pair_hostile"
             entry["points"] = SCORE_WEIGHTS["wasted_friendly"] if wasted else 0.0
             entry["text"] = "drone %s lost (%s)" % (ev.get("drone", "?"),
                                                     ev.get("target", "unknown"))
             entry["detail"] = {"credited": not wasted}
+            d = ev.get("drone")
+            if d in by_drone:
+                entry["slots"].append(by_drone[d])
 
         else:
             entry["text"] = kind
 
         ledger.append(entry)
+
+    t_end = float(times[-1]) if times else 0.0
+    frame_end = frame_at(times, t_end) if times else 0
+    aware = score.get("awareness")
+    if aware is not None:
+        a = report.get("awareness") or {}
+        ledger.append({
+            "t": t_end, "frame": frame_end, "kind": "awareness",
+            "points": float(aware), "attributable": True, "slots": [],
+            "text": "awareness (declare_track over the whole run)",
+            "detail": {k: a[k] for k in
+                       ("correct_declarations", "wrong_declarations", "samples",
+                        "belief_accuracy") if k in a},
+        })
+    comms = score.get("comms")
+    if comms is not None:
+        c = report.get("comms") or {}
+        ledger.append({
+            "t": t_end, "frame": frame_end, "kind": "comms",
+            "points": float(comms), "attributable": True, "slots": [],
+            "text": "comms (bytes per drone per second, whole run)",
+            "detail": {k: c[k] for k in
+                       ("bytes_per_drone_per_s", "frames_sent",
+                        "frames_dropped_budget", "propagation_p95_s") if k in c},
+        })
+    detect = score.get("detection")
+    if detect is not None:
+        a = report.get("awareness") or {}
+        ledger.append({
+            "t": t_end, "frame": frame_end, "kind": "detection",
+            "points": float(detect), "attributable": True, "slots": [],
+            "text": "compromise detection",
+            "detail": {k: a[k] for k in
+                       ("compromises", "compromises_detected", "false_accusations",
+                        "compromise_detect_latency_s") if k in a},
+        })
 
     ledger.sort(key=lambda e: (e["t"], e["kind"]))
 
@@ -479,7 +544,9 @@ def build_scoring(arr, times, entities, report):
         total += e["points"]
         running.append({"t": e["t"], "mission": round(total, 2)})
 
-    ours = [e for e in ledger if e["attributable"]]
+    mission_kinds = {"intercept", "breach", "civilian_lost", "friendly_lost"}
+    mission_sum = round(sum(e["points"] for e in ledger if e["kind"] in mission_kinds), 2)
+    ours = [e for e in ledger if e["attributable"] and e["kind"] in mission_kinds]
     theirs = [e for e in ledger if not e["attributable"]]
     reported = float(score.get("mission", 0.0))
 
@@ -492,10 +559,10 @@ def build_scoring(arr, times, entities, report):
             "awareness": score.get("awareness"),
             "comms": score.get("comms"),
             "total": score.get("total"),
-            "ledger_sum": round(total, 2),
-            # If this goes false the scoring rules moved and the ledger is
-            # describing a formula the simulator no longer uses.
-            "verified": abs(total - reported) < 0.15,
+            "ledger_sum": mission_sum,
+            # Mission events only. Awareness/comms sit on the ledger too but
+            # are scored once at the end, so they are not part of this check.
+            "verified": abs(mission_sum - reported) < 0.15,
         },
         "attributable": {"count": len(ours),
                          "points": round(sum(e["points"] for e in ours), 2)},

@@ -76,6 +76,25 @@ float TimeToCylinder(const Vec3& position, const Vec3& velocity,
     return (ground - radius) / closing;
 }
 
+float ThreatWindow(const Vec3& position, const Vec3& velocity,
+                   const Vec3& centre, float radius, float dash_speed) {
+    const Vec3 flat = Flat(position - centre);
+    const float ground = swarm::Length(flat);
+    if (ground <= radius) return 0.0f;
+    const float closing = -RangeRate(position, velocity, centre);
+    float speed = dash_speed > 0.1f ? dash_speed : kHostileDash;
+    if (closing > speed) speed = closing;
+    return (ground - radius) / speed;
+}
+
+bool LooksDivingAtAsset(const Vec3& position, const Vec3& velocity,
+                        const Vec3& asset, float asset_radius) {
+    if (velocity.z <= kDiveRate) return false;
+    const float ground_miss = ClosestApproachDistance(
+        Flat(position), Flat(velocity), Flat(asset));
+    return ground_miss < asset_radius;
+}
+
 float ClosingSpeed(const Vec3& observer_p, const Vec3& observer_v,
                    const Vec3& target_p, const Vec3& target_v) {
     const Vec3 los = Flat(target_p - observer_p);
@@ -247,20 +266,32 @@ void TrackStore::Classify(Track& t, float now, float dt) {
     // GROUND track enters the cylinder is a hostile now -- and the breach is a
     // cylinder at any altitude (D10), so the ground track is the right test for
     // it. Wreckage falls too, but the ballistic test above has already returned.
-    const float ground_miss = ClosestApproachDistance(
-        Flat(t.position), Flat(t.velocity), Flat(cfg_.asset));
     // Only when there is no time left to wait for it, though. Calling early is
     // not free: the owner commits early, leaves station early and is away
     // longer, which on a spawner that enters where nobody is standing costs
-    // more than the early call wins. Measured, the unconditional version gained
-    // on every layout with a short window and lost more on the ones with a long
-    // one. So the dive is the answer to "I cannot afford to wait", not a
-    // replacement for the patient test.
-    const bool diving = t.velocity.z > kDiveRate;
-    const bool urgent = TimeToCylinder(t.position, t.velocity, cfg_.asset,
-                                       cfg_.asset_radius) < 10.0f;
+    // more than the early call wins (D31). TimeToCylinder is the wrong clock
+    // for that decision when the hostile is still spooling up: it returns 1e6
+    // until horizontal closing exceeds 0.1 m/s, which is exactly the
+    // spawn-inside-sense case (first seen while accelerating from rest). Those
+    // inbounds are the short window — ThreatWindow using dash speed is ~7 s —
+    // and waiting for 3D miss to fall under 5 m spends most of it. A hostile
+    // already at dash that we first see coming in from outside has a real TTG
+    // and the original gate is enough.
+    const bool diving = LooksDivingAtAsset(t.position, t.velocity,
+                                          cfg_.asset, cfg_.asset_radius);
+    const float horiz_speed = swarm::Length(Flat(t.velocity));
+    const bool spooling = horiz_speed < kHostileDash * 0.6f;
+    const float window = ThreatWindow(t.position, t.velocity, cfg_.asset,
+                                      cfg_.asset_radius, kHostileDash);
+    // Compact spawn-inside-sense: window ~7 s, and they are still spooling
+    // when first seen. s1's 170 m inbound is ~8.8 s — leave that to the
+    // patient TTG gate so we do not empty a sector for a long intercept (D31).
+    const bool compact_spool = spooling && window < kCompactWindow;
+    const bool short_window =
+        TimeToCylinder(t.position, t.velocity, cfg_.asset, cfg_.asset_radius) < 10.0f
+        || compact_spool;
     const bool aimed = AimedAtAsset(miss, t.miss_at_first, cfg_.asset_radius)
-                       || (urgent && diving && ground_miss < cfg_.asset_radius);
+                       || (short_window && diving);
 
     if (aimed && alignment > 0.8f && closing > 4.0f) {
         t.closing_score = Clamp(t.closing_score + dt, -2.0f, 3.0f);
@@ -344,13 +375,14 @@ void TrackStore::MergePeerReport(const Vec3& position, const Vec3& velocity,
     t->last_origin = origin;
     t->last_hops = hops;
 
-    // A peer's opinion is evidence, not truth. It moves the score; it does not
-    // set the verdict. From tier 3 on, an unverified peer may be a hostile
-    // replaying your own traffic, and from tier 5 it may be one of yours,
-    // sincerely wrong.
+    // A peer's Hostile call is a completed classify, not 0.28 of one.
+    // score*120 confidence needed three 0.5 s reports before the facing
+    // owner would latch, and the inbound on x1-b403 covered 18 m in that
+    // wait (D35). Still refuse to overwrite a Friendly.
     if (peer_belief == Belief::Hostile) {
-        t->closing_score = Clamp(
-            t->closing_score + static_cast<float>(confidence) / 255.0f, -2.0f, 3.0f);
+        const float bump = static_cast<float>(confidence) / 255.0f;
+        const float add = bump > kEvidenceForCall ? bump : (kEvidenceForCall + 0.01f);
+        t->closing_score = Clamp(t->closing_score + add, -2.0f, 3.0f);
     }
     if (t->closing_score > kEvidenceForCall && t->belief != Belief::Hostile
         && t->belief != Belief::Friendly) {
