@@ -297,113 +297,77 @@ static void TestRingStaysInsideTheSpawnCircle() {
                     std::sin(3.14159265358979f / 15.0f)) < 1e-3f);
 }
 
-static void TestLeadIntercept() {
-    std::printf("lead intercept solves the meeting point, and closes range\n");
-    Config cfg;
-    cfg.max_speed = 20.0f;
-    cfg.max_accel = 15.0f;
-    cfg.lateral_limit = 6.71f;
-
-    // Head-on: target 100 m away closing at 20, we fly at 20. Closing speed is
-    // 40, so they meet in 2.5 s.
-    float tau = flight::TimeToIntercept(Vec3(100, 0, 0), Vec3(-20, 0, 0), 20.0f);
-    CHECK(std::fabs(tau - 2.5f) < 1e-2f);
-
-    // Crossing, target slower than us: there is a lead point, and flying to
-    // it at our speed arrives exactly when the target does.
-    tau = flight::TimeToIntercept(Vec3(100, 0, 0), Vec3(0, 10, 0), 20.0f);
-    CHECK(tau > 0.0f);
-    const Vec3 meet(100.0f, 10.0f * tau, 0.0f);
-    CHECK(std::fabs(swarm::Length(meet) - 20.0f * tau) < 0.5f);
-
-    // Crossing at OUR speed is a different answer, and the right one is "no".
-    // Equal airframes make the quadratic linear, and with no component of the
-    // target's velocity toward us there is no meeting point at all -- the same
-    // reason a stern chase never converges. Returning a lead point here would
-    // send an interceptor after something it can never reach.
-    CHECK(flight::TimeToIntercept(Vec3(100, 0, 0), Vec3(0, 20, 0), 20.0f) < 0.0f);
-
-    // Opening faster than we fly: no meeting point exists, and saying so is
-    // the point -- a stern chase against an equal airframe never converges.
-    CHECK(flight::TimeToIntercept(Vec3(100, 0, 0), Vec3(25, 0, 0), 20.0f) < 0.0f);
-
-    // The bug this replaced: a picket sitting still on the hostile's inbound
-    // bearing sees no line-of-sight rotation, so pure PN commanded nothing and
-    // it was rammed at its own station. Measured on s1 at 0.2-0.4 m/s for four
-    // seconds. Command must now point AT the target, not across it.
-    const Vec3 self(70, 0, -30);
-    const Vec3 still(0, 0, 0);
-    const Vec3 hostile(170, 0, -30);
-    const Vec3 inbound(-15, 0, 0);
-    const Vec3 accel = flight::ProNav(self, still, hostile, inbound, cfg);
-    const Vec3 los = hostile - self;
-    const float range = swarm::Length(los);
-    CHECK(range > 1.0f);
-    const float along = swarm::Dot(accel, los / range);
-    CHECK(along > 0.5f * cfg.lateral_limit);   // most of the budget, outbound
-    CHECK(accel.x > 0.0f);
+static void TestAimAheadUsesConfiguredDistance() {
+    std::printf("aim lead moves the target estimate along its velocity\n");
+    const Vec3 target(10, 20, -30);
+    const Vec3 velocity(3, 4, 0);
+    const Vec3 aimed = flight::AimAhead(target, velocity, 1.0f);
+    CHECK(std::fabs(aimed.x - 10.6f) < 1e-4f);
+    CHECK(std::fabs(aimed.y - 20.8f) < 1e-4f);
+    CHECK(std::fabs(aimed.z + 30.0f) < 1e-4f);
+    CHECK(std::fabs(swarm::Distance(aimed, target) - 1.0f) < 1e-4f);
+    CHECK(swarm::Distance(flight::AimAhead(target, Vec3(), 1.0f), target) < 1e-4f);
 }
 
-static void TestZeroEffortMissSteersAtTheMiss() {
-    std::printf("terminal guidance steers at the predicted miss\n");
+static void TestProNavSteersAtTheZem() {
+    std::printf("ProNav is ZEM across the LOS; a weave shows up in AZEM\n");
     Config cfg;
     cfg.max_speed = 20.0f;
     cfg.max_accel = 15.0f;
     cfg.lateral_limit = 6.71f;
     cfg.kill_radius = 1.0f;
 
-    // Inside the 25 m handover, and on-track enough that D39 does not sit.
-    // A 10 m miss at 100 m is a barrier (ahead + off the chord), not ZEM.
     const Vec3 self(0, 0, -30);
     const Vec3 self_v(20, 0, 0);
     const Vec3 tgt(20, 1.5f, -30);
     const Vec3 tgt_v(-20, 0, 0);
     const Vec3 accel = flight::ProNav(self, self_v, tgt, tgt_v, cfg);
-    CHECK(accel.y > 0.5f * cfg.lateral_limit);   // toward the miss, hard
-    CHECK(std::fabs(accel.x) < accel.y);         // across the LOS, not along it
+    CHECK(accel.y > 0.5f * cfg.lateral_limit);
 
-    const Vec3 mirrored = flight::ProNav(self, self_v, Vec3(20, -1.5f, -30),
-                                         tgt_v, cfg);
+    const Vec3 explicit_lead = flight::ProNav(
+        self, self_v, tgt, tgt_v, cfg, Vec3(), flight::kPnLeadKillRadii);
+    CHECK(swarm::Distance(accel, explicit_lead) < 1e-5f);
+
+    const Vec3 no_lead = flight::ProNav(self, self_v, tgt, tgt_v, cfg, Vec3(), 0.0f);
+    CHECK(swarm::Distance(accel, no_lead) > 1e-4f);
+
+    const Vec3 mirrored = flight::ProNav(
+        self, self_v, Vec3(20, -1.5f, -30), tgt_v, cfg);
     CHECK(mirrored.y < -0.5f * cfg.lateral_limit);
 
-    const Vec3 straight = flight::ProNav(self, self_v, Vec3(20, 0, -30),
-                                         tgt_v, cfg);
+    const Vec3 straight = flight::ProNav(
+        self, self_v, Vec3(20, 0, -30), tgt_v, cfg);
     CHECK(std::fabs(straight.y) < 0.1f * cfg.lateral_limit);
-}
 
-static void TestBarrierAimSitsOnTheChord() {
-    std::printf("intercept aims at the predicted hostile origin\n");
-    Config cfg;
-    cfg.max_speed = 20.0f;
-    cfg.max_accel = 15.0f;
-    cfg.lateral_limit = 6.71f;
-    cfg.kill_radius = 1.85f;
+    // Collision course from rest: ZEMn is ~0. We still accelerate along the
+    // LOS so we are a ram, not a sitting target. A weave adds AZEM across it.
+    const Vec3 sit = flight::ProNav(Vec3(70, 0, -30), Vec3(),
+                                    Vec3(170, 0, -30), Vec3(-15, 0, 0), cfg);
+    CHECK(sit.x > 0.5f * cfg.lateral_limit);
+    CHECK(std::fabs(sit.y) < 0.2f * cfg.lateral_limit);
 
-    // x1-e1257f hostile_3 at commit: ~50 m in front, 17 m abeam.
-    const Vec3 self(0, 17, -15);
-    const Vec3 still(0, 0, 0);
-    const Vec3 hostile(50, 0, -15);
-    const Vec3 inbound(-16, 0, 0);
-    const float tau = flight::TimeToIntercept(hostile - self, inbound,
-                                              cfg.max_speed);
-    CHECK(tau > 0.0f);
-    const float meet_along = 16.0f * tau;           // dir is -x
-    const Vec3 aim = flight::BarrierAim(self, hostile, inbound, cfg.max_speed,
-                                        flight::kBarrierLeadKills * cfg.kill_radius);
-    CHECK(std::fabs(aim.y) < 0.5f);                 // on their ground track
-    CHECK(aim.x > 0.0f);
-    CHECK(aim.x < 50.0f);
-    const float aim_along = 50.0f - aim.x;
-    CHECK(std::fabs(aim_along - meet_along) < 1e-3f);
+    const Vec3 weave = flight::ProNav(Vec3(70, 0, -30), Vec3(),
+                                      Vec3(170, 0, -30), Vec3(-15, 0, 0), cfg,
+                                      Vec3(0, 6.0f, 0));
+    CHECK(weave.y > 0.1f * cfg.lateral_limit);
 
-    // Off-track still spends budget getting onto the chord, not only along LOS.
-    const Vec3 accel = flight::ProNav(self, still, hostile, inbound, cfg);
-    CHECK(accel.y < -0.3f * cfg.lateral_limit);
+    // Lead is "they have already flown 0.5 kr along their track", then
+    // intercept that state — the same command as ProNav on AimAhead with
+    // lead 0. It is not an extra 0.5 kr past the intercept of the real body.
+    const float lead_m = flight::kPnLeadKillRadii * cfg.kill_radius;
+    const Vec3 shifted = flight::AimAhead(tgt, tgt_v, lead_m);
+    const Vec3 via_shift = flight::ProNav(
+        self, self_v, shifted, tgt_v, cfg, Vec3(), 0.0f);
+    CHECK(swarm::Distance(accel, via_shift) < 1e-4f);
 
-    // On the bearing, still in front: D22 still charges along the LOS.
-    const Vec3 on_line = flight::ProNav(Vec3(0, 0, -15), still, hostile,
-                                        inbound, cfg);
-    CHECK(on_line.x > 0.5f * cfg.lateral_limit);
+    // A weave already in the predicted trajectory is part of that same
+    // lead: advancing along p + v t + ½ a t², not along v alone.
+    const Vec3 weave_a(0, 6.0f, 0);
+    const Vec3 with_traj = flight::ProNav(
+        self, self_v, tgt, tgt_v, cfg, weave_a, flight::kPnLeadKillRadii);
+    const Vec3 along_v_only = flight::ProNav(
+        self, self_v, shifted, tgt_v, cfg, weave_a, 0.0f);
+    CHECK(swarm::Distance(with_traj, along_v_only) > 1e-4f);
 }
 
 static void TestStationBisectsTheGap() {
@@ -562,23 +526,20 @@ static void TestYieldHorizonIsRemainingFlight() {
 }
 
 static void TestStalkAimLeadsNotPursues() {
-    std::printf("stalk aim is the intercept lead, leashed to the slot\n");
+    std::printf("stalk aim uses the same small lead and stays leashed\n");
     const Vec3 slot(70, 0, -30);
     const float cap = 40.0f;
-    const float speed = 20.0f;
+    const float lead = 0.5f;
 
-    // Crossing: flying at where they ARE is +x; the meeting point is off
-    // +y, and that is the heading the committed ProNav already flies.
+    // A crossing target shifts the leashed goal slightly along +y.
     const Vec3 crossing = StalkAim(slot, Vec3(170, 0, -30), Vec3(0, 10, 0),
-                                   speed, cap);
-    CHECK(crossing.y > 5.0f);
+                                   cap, lead);
+    CHECK(crossing.y > 0.1f);
     CHECK(swarm::Distance(crossing, slot) <= cap + 1e-3f);
     CHECK(crossing.x > slot.x);
 
-    // Head-on inbound: lead and LOS agree, so the slide is along -x of them
-    // / +x of us, no lateral.
     const Vec3 headon = StalkAim(slot, Vec3(170, 0, -30), Vec3(-15, 0, 0),
-                                 speed, cap);
+                                 cap, lead);
     CHECK(std::fabs(headon.y) < 0.5f);
     CHECK(headon.x > slot.x);
     CHECK(swarm::Distance(headon, slot) <= cap + 1e-3f);
@@ -595,9 +556,8 @@ int main() {
     TestInboundOwnerSkipsARecedingFacing();
     TestLiveRingRespaces();
     TestRingStaysInsideTheSpawnCircle();
-    TestLeadIntercept();
-    TestZeroEffortMissSteersAtTheMiss();
-    TestBarrierAimSitsOnTheChord();
+    TestAimAheadUsesConfiguredDistance();
+    TestProNavSteersAtTheZem();
     TestStationBisectsTheGap();
     TestSilentNeighbourIsGoneEvenFar();
     TestApproachingFarSilenceDoesNotKill();

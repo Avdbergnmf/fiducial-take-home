@@ -14,8 +14,8 @@ float ArrestDistance(float closing, const Config& cfg) {
            + 4.0f * cfg.kill_radius;
 }
 
-/// Seconds until the pair is inside `radius`, using relative closing.
-/// 0 if already inside; large if not approaching.
+}  // namespace
+
 float TimeToClose(const Vec3& p, const Vec3& v, const Vec3& q, const Vec3& w,
                   float radius) {
     const Vec3 offset = p - q;
@@ -27,59 +27,20 @@ float TimeToClose(const Vec3& p, const Vec3& v, const Vec3& q, const Vec3& w,
     return (d - radius) / closing;
 }
 
-}  // namespace
-
-/// Time until we and a constant-velocity target can occupy the same point, if
-/// we fly at `speed`. |d + w*t| = speed*t squares to a quadratic in t:
-///     (|w|^2 - speed^2) t^2 + 2 (d.w) t + |d|^2 = 0
-/// Returns -1 when no positive root exists -- the target outruns us and is
-/// opening, so there is no lead point and the caller falls back to pursuit.
-float TimeToIntercept(const Vec3& d, const Vec3& w, float speed) {
-    const float c = swarm::Dot(d, d);
-    if (c < 1e-6f) return 0.0f;
-    const float a = swarm::Dot(w, w) - speed * speed;
-    const float b = 2.0f * swarm::Dot(d, w);
-    if (std::fabs(a) < 1e-3f) {          // same speed: the quadratic is linear
-        return b < -1e-6f ? -c / b : -1.0f;
-    }
-    const float disc = b * b - 4.0f * a * c;
-    if (disc < 0.0f) return -1.0f;
-    const float root = std::sqrt(disc);
-    const float t1 = (-b - root) / (2.0f * a);
-    const float t2 = (-b + root) / (2.0f * a);
-    float best = -1.0f;
-    if (t1 > 1e-3f) best = t1;
-    if (t2 > 1e-3f && (best < 0.0f || t2 < best)) best = t2;
-    return best;
+Vec3 AimAhead(const Vec3& position, const Vec3& velocity, float distance) {
+    if (distance <= 0.0f) return position;
+    const float speed = swarm::Length(velocity);
+    if (speed < 1e-3f) return position;
+    return position + velocity * (distance / speed);
 }
 
-Vec3 BarrierAim(const Vec3& self, const Vec3& target_p, const Vec3& target_v,
-                float speed, float lead) {
-    if (lead < 0.0f) lead = 0.0f;
-    const Vec3 v(target_v.x, target_v.y, 0.0f);
-    const float vlen = swarm::Length(v);
-    if (vlen < 0.5f) {
-        const Vec3 los = target_p - self;
-        const float tau = TimeToIntercept(los, target_v, speed);
-        return (tau >= 0.0f) ? target_p + target_v * tau : target_p;
-    }
-    const Vec3 dir = v / vlen;
-
-    auto at_along = [&](float s) {
-        return Vec3(target_p.x + dir.x * s, target_p.y + dir.y * s, target_p.z);
-    };
-
-    const Vec3 los = target_p - self;
-    const float tau = TimeToIntercept(los, target_v, speed);
-    Vec3 meet = (tau >= 0.0f) ? target_p + target_v * tau : at_along(lead);
-    const float meet_along = swarm::Dot(
-        Vec3(meet.x - target_p.x, meet.y - target_p.y, 0.0f), dir);
-    // Slightly in front of the meeting, hence of them (D39). Early → we
-    // arrive on the chord and they fly into us; late → still ahead of
-    // current position, not abeam. Never behind `lead`.
-    float s = meet_along + lead;
-    if (s < lead) s = lead;
-    return at_along(s);
+Vec3 EstimatedAccel(const Vec3& velocity, const Vec3& last_velocity,
+                    float dt, float cap) {
+    if (dt < 1e-3f) return Vec3();
+    Vec3 accel = (velocity - last_velocity) / dt;
+    const float mag = swarm::Length(accel);
+    if (cap > 0.0f && mag > cap) accel = accel * (cap / mag);
+    return accel;
 }
 
 Vec3 LimitAccel(const Vec3& desired, const Config& cfg) {
@@ -123,66 +84,55 @@ Vec3 Cruise(const Vec3& target, const Vec3& position, const Vec3& velocity,
 
 Vec3 ProNav(const Vec3& self_position, const Vec3& self_velocity,
             const Vec3& target_position, const Vec3& target_velocity,
-            const Config& cfg, float navigation_gain) {
-    const Vec3 los = target_position - self_position;
+            const Config& cfg, const Vec3& target_accel,
+            float lead_kill_radii, float navigation_gain) {
+    // 1. Pretend they have already travelled `lead` metres along the
+    //    trajectory we can predict, then intercept that virtual state.
+    //    Not "0.5 kr past the ProNav intercept of the real body".
+    const float lead = lead_kill_radii > 0.0f
+        ? lead_kill_radii * cfg.kill_radius
+        : 0.0f;
+    Vec3 aimed = target_position;
+    Vec3 aimed_v = target_velocity;
+    if (lead > 0.0f) {
+        const float speed = swarm::Length(target_velocity);
+        if (speed > 1e-3f) {
+            const float t_lead = lead / speed;
+            aimed = target_position + target_velocity * t_lead
+                    + target_accel * (0.5f * t_lead * t_lead);
+            aimed_v = target_velocity + target_accel * t_lead;
+        }
+    }
+
+    // 2. Line of sight and relative velocity (inertial, target minus us).
+    const Vec3 los = aimed - self_position;
     const float range = swarm::Length(los);
     if (range < 1e-3f) return Vec3();
     const Vec3 unit = los / range;
+    const Vec3 rel_velocity = aimed_v - self_velocity;
 
-    const Vec3 rel_velocity = target_velocity - self_velocity;
+    // 3. Closing speed and time-to-go. If they are not closing, there is no
+    //    intercept time — use our dash speed so the law still has a horizon.
     const float closing = -swarm::Dot(rel_velocity, unit);
+    const float t_go = (closing > 1.0f)
+        ? range / closing
+        : range / (cfg.max_speed > 1.0f ? cfg.max_speed : 1.0f);
 
-    // --- terminal: zero-effort miss (D25) -------------------------------
-    // Where the target would pass us if neither of us accelerated again. That
-    // vector IS the miss, so steer to null it: a = N * ZEM / t_go^2.
-    //
-    // Classic proportional navigation nulls the line-of-sight rotation rate
-    // instead, which is the same thing only while the closing rate is steady.
-    // Ours is not: the midcourse leg hands over still accelerating, so PN was
-    // solving a slightly wrong problem exactly when it mattered. Measured over
-    // 20 unseen ids, swapping the law converted 2 breaches into kills and took
-    // the tier-2 mean from -84.1 to -38.5 at no cost on the fixed set.
-    const float rate = closing > 1.0f ? closing : 1.0f;
-    const float t_go = range / rate;
-    const Vec3 zem = los + rel_velocity * t_go;
-    const Vec3 zem_perp = zem - unit * swarm::Dot(zem, unit);
-    Vec3 terminal = zem_perp * (navigation_gain / (t_go * t_go));
-    if (closing < 12.0f) terminal = terminal + unit * (cfg.lateral_limit * 0.6f);
+    // 4. Zero-effort miss, then augmented ZEM if we have their acceleration:
+    //    where they pass us if nobody (else) steers, plus ½ At t_go².
+    const Vec3 zem = los + rel_velocity * t_go
+                     + target_accel * (0.5f * t_go * t_go);
 
-    // --- midcourse: close the range, do not wait ------------------------
-    // PN alone commands acceleration only ACROSS the line of sight. A picket
-    // already sitting on the hostile's inbound bearing sees almost no LOS
-    // rotation, so it commands almost nothing: measured on s1, a committed
-    // drone held 0.2-0.4 m/s for four seconds while the hostile closed 86 m
-    // and rammed it at our own ring radius. That is the whole score --
-    // reward is W_kill*(1 - t_engage/t_free) and we were banking 16% of it.
-    // So solve the predicted center intersection in closed form and fly there
-    // flat out. Nothing
-    // is held back for later: a kill is a ram, and the report credits the
-    // drone we spend (losses_by_cause pair_hostile, wasted 0).
-    const float speed = cfg.max_speed;
-    const float lead = kBarrierLeadKills * cfg.kill_radius;
-    const Vec3 aim = BarrierAim(self_position, target_position, target_velocity,
-                                speed, lead);
-    const Vec3 to_aim = aim - self_position;
-    const float aim_range = swarm::Length(to_aim);
-    const Vec3 wanted = (aim_range > 1e-3f) ? (to_aim / aim_range) * speed
-                                            : unit * speed;
-    const Vec3 midcourse = (wanted - self_velocity) * 2.0f;
+    // 5. Component normal to the LOS. Along-LOS is closing, not a steer.
+    const Vec3 zemn = zem - unit * swarm::Dot(zem, unit);
 
-    // --- handover -------------------------------------------------------
-    // The predicted intersection assumes constant target velocity, so it goes stale as
-    // soon as the hostile turns, and at 35 m/s of closing there is no range
-    // left to correct: flying the lead point all the way in missed by 1-3 m
-    // against a 1 m kill radius on every scenario measured. Hand over while
-    // there is still time to null the error -- 6.71 m/s^2 needs about a
-    // second to move 3 m, which at this closing speed is a few tens of
-    // metres of range.
-    float w = (range - 25.0f) / (70.0f - 25.0f);
-    if (w < 0.0f) w = 0.0f;
-    if (w > 1.0f) w = 1.0f;
-    const Vec3 accel = midcourse * w + terminal * (1.0f - w);
+    // 6. ProNav: a = N * ZEMn / t_go². Same as a = N * Vc * ω.
+    Vec3 accel = zemn * (navigation_gain / (t_go * t_go));
 
+    // 7. A missile already has closing speed. We start at rest, so add a
+    //    modest close along the LOS. Sized under the lateral cap so ZEMn
+    //    still has authority against a weave.
+    accel = accel + unit * (cfg.lateral_limit * 0.6f);
     return LimitAccel(accel, cfg);
 }
 

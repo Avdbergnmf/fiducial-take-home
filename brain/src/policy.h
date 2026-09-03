@@ -106,13 +106,10 @@ Vec3 CorridorHorizon(const Vec3& from, const Vec3& hostile_p, const Vec3& hostil
 /// station if Classify never latches.
 constexpr float kStalkRange = 40.0f;
 
-/// Predicted hostile-origin point of the committed intercept, leashed `cap`
-/// metres from `slot`.
-/// Same `BarrierAim` ProNav midcourse flies (D34/D39), not the LOS to
-/// where the inbound is now. `lead` is metres in front of them on their
-/// track; the default lead is zero, so the origins are the intersection target.
+/// Target pose shifted `lead` metres along its track, then capped at `cap`
+/// from `slot` so a picket can still reverse home.
 Vec3 StalkAim(const Vec3& slot, const Vec3& target_p, const Vec3& target_v,
-              float speed, float cap, float lead = 8.0f);
+              float cap, float lead);
 
 /// Push `goal` off the horizontal segment a→b when inside `clear`.
 Vec3 YieldOffCorridor(const Vec3& goal, const Vec3& a, const Vec3& b, float clear);
@@ -129,9 +126,8 @@ public:
 
     Stance stance() const { return stance_; }
     const Track* target() const { return target_; }
-    /// Not-yet-Hostile inbound we are already flying an intercept at, still
-    /// Picketing. Null when holding station. Fly uses ProNav on this with a
-    /// leash at `station()`; not an exempt intercept target.
+    /// Not-yet-Hostile inbound we are already closing on, still Picketing.
+    /// Null on station. Same ProNav law as a commit, leashed to `station()`.
     const Track* stalk() const { return stalk_; }
     Vec3 station() const { return station_; }
     const char* last_log() const { return last_log_; }

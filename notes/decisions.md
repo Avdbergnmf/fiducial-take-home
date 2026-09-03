@@ -1840,3 +1840,117 @@ floor. The ring geometry is exhausted as a lever for it.
 Two of the four worst runs are dominated by a penalty with no available action:
 x1-19941165 kills everything, breaches nothing, and still scores −108.7. The
 floor is close to what this scoring function allows.
+
+---
+
+## D41 — Intercept is ZEM, with a half-radius lead
+
+**What was wrong.** D22 stacked two laws: a closed-form lead intercept at
+max speed, then a range blend into zero-effort miss at 25–70 m. D39 then
+pushed that midcourse point `8 · kill_radius` along the hostile track.
+`kill_radius` was never the collision goal — the sim still kills when the
+two centres come within one radius of each other. The 8× term was only a
+barrier offset, and the blend was a second strategy.
+
+**What we want.** One law. Pretend the hostile is `0.5 · kill_radius`
+farther along its current velocity, compute the zero-effort miss against
+that pose, and steer the miss to zero.
+
+**The one extra term that is not a second strategy.** Pure ZEM only
+accelerates *across* the line of sight. A picket already sitting on the
+inbound bearing has almost no miss, so it sits and is rammed at the ring
+(the D22 measurement). The same command therefore always includes a small
+close along the LOS. There is no range handover.
+
+**Measured, 8 fixed:**
+
+| | mean | worst | kills |
+|---|---:|---:|---|
+| old blend + 8× barrier | 139.0 | −1.8 (x1-a) | 30/30 |
+| ZEM, lead 0 | 140.1 | −7.0 (x1-a) | 30/30 |
+| **ZEM, lead 0.5** | **139.9** | **−7.2 (x1-a)** | **30/30** |
+
+Every named scenario still clears. x1-a is 4/4 with the same two
+civilian-pair floor losses; the few points are reward timing, not a miss.
+s1 202.0 6/6, s2 151.3 6/6, x2-b 123.6 3/3.
+
+**The named failure is not this law.**
+`x1-06b926af3deab4600494418d7ece5944` is 0/3, −504.2 under lead 0, lead
+0.5, and the old 8× barrier. No intercepts are logged at all — three
+breaches, eleven friendlies still up, `max_hops = 0`. That is allocation /
+radio, not a 0.5 m aim bias.
+
+**Chosen:** ZEM + `0.5 · kill_radius` lead. Superseded the same day by D42:
+PN *is* that ZEM law, not a second strategy we had deleted.
+
+---
+
+## D42 — ProNav is ZEM; one 3-D law
+
+**The confusion.** PN and ZEM are the same guidance law. True proportional
+navigation `a = N · Vc · ω` is identical to the zero-effort-miss form
+`a = N · ZEMn / t_go²` when closing is steady. [Zarchan's 3-D recipe](https://www.youtube.com/watch?v=CMOh2xWk_qA)
+computes ZEMn in inertial axes and that *is* ProNav. The midcourse /
+25–70 m handover was a second law glued on, not a textbook split.
+
+**The law, in order**
+
+1. Treat the hostile as `0.5 · kill_radius` farther along **its predicted
+   trajectory** (D43), then intercept that virtual state.
+2. LOS and relative velocity (target minus us).
+3. `t_go = range / Vc` (or range / max_speed if they are not closing).
+4. ZEM `R + V t_go`, then augmented ZEM `+ ½ At t_go²` from a clamped
+   finite-difference of their velocity — the usual weave correction
+   (Zarchan APN; [He, IEEE TAES 2021](https://doi.org/10.1109/taes.2021.3067656)
+   is the 3-D PN-against-manoeuvre paper).
+5. Keep only the component normal to the LOS.
+6. `a = N · ZEMn / t_go²`.
+7. A missile already has closing speed. A picket starts at rest, so add
+   `0.6 · lateral_limit` along the LOS. Sized under the cap so ZEMn still
+   has authority. No range switch.
+
+**Tuned on breaches only.** N below 6 leaks x2-b. N = 6 is the smallest
+that zeros the eight fixtures. Lead 0 at N = 6 reopens that x2-b breach;
+lead 0.5 closes it.
+
+| N | lead / kill | fixed breaches |
+|---:|---:|---:|
+| 4 | 0.5 | 3 (s2, x2-a, x2-b) — no LOS close |
+| 5 | 0.5 | 1 (x2-b) |
+| **6** | **0.5** | **0** |
+| 6 | 0.0 | 1 (x2-b) |
+| 7 | 0.5 | 0 |
+| 10 | 0.5 | 0 |
+
+`x1-06b926af3deab4600494418d7ece5944` stays 0/3, 3 breaches — still no
+intercepts. That is not this law.
+
+**Chosen:** N = 6, lead = 0.5 kill-radii, augmented ZEM on.
+
+---
+
+## D43 — Lead is along the hostile track; terminal aim logs at 10 Hz
+
+**Lead.** D42's `AimAhead` along current velocity, then ProNav, is the same
+command as intercepting a body that has already flown `0.5 · kill_radius`
+along a straight track. Two readings of that were easy to mix:
+
+1. Offset the *intercept* 0.5 kr past the ProNav meeting of the real body.
+2. Advance the hostile 0.5 kr along **its predicted trajectory**, then
+   intercept that virtual state.
+
+(2) is what was meant. The predicted trajectory is `p + v t + ½ a t²`
+with the same clamped weave accel already in AZEM, so a turn that has
+started is in the lead point, not only in the miss. Relative velocity is
+taken at that virtual state. Constant-v intercepts are unchanged.
+
+**Terminal believed-aim.** The Aim cue only moves on `commit` / `near` /
+`ram`. A chase that never crossed 12 m, or crossed once, left the sphere
+on the commit pose until it faded. While `Committed` and `TimeToClose` to
+the kill radius is ≤ 1 s, write the same `near`/`ram` line every 0.1 s
+(~10 extra lines per intercept). Still bounded; not a per-tick dump (D3).
+
+**Closed loop, unchanged.** `Fly` recomputes ProNav every tick (100 Hz)
+from the current self pose and the current track. A heading change or a
+fix update is in the next command ~10 ms later. Documented here so it is
+not "fixed" into a slower guidance loop.

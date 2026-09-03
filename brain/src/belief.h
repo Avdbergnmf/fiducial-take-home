@@ -111,7 +111,7 @@ bool LooksDivingAtAsset(const Vec3& position, const Vec3& velocity,
 /// Horizontal closing speed of `target` on `observer`, using both
 /// velocities. Positive means the range is shrinking. RangeRate only sees
 /// the target's velocity, so a picket chasing an outbound looks "closing"
-/// when the interceptor is the one moving. ProNav flies the relative
+/// when the interceptor is the one moving. Guidance uses the relative
 /// geometry; commit has to as well (D11).
 float ClosingSpeed(const Vec3& observer_p, const Vec3& observer_v,
                    const Vec3& target_p, const Vec3& target_v);

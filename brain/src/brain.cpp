@@ -171,18 +171,20 @@ private:
 
         sw::Vec3 accel;
         if (policy_.stance() == sw::Stance::Committed && target) {
+            const sw::Vec3 weave = sw::flight::EstimatedAccel(
+                target->velocity, target->last_velocity, obs.dt(),
+                cfg_.lateral_limit);
             accel = sw::flight::ProNav(position, velocity, target->position,
-                                       target->velocity, cfg_);
+                                       target->velocity, cfg_, weave);
         } else if (const sw::Track* stalk = policy_.stalk()) {
-            // Same law as the committed intercept, on a leash: inside
-            // kStalkRange fly ProNav at the inbound; at the cap hold the
-            // lead-leashed point so we can still reverse onto station if
-            // Classify never latches. Not intercepting and not exempt, so
-            // separation still forbids a ram on an Unknown (D34).
+            // Same ProNav law, still leashed to the slot.
             const float off = swarm::Distance(position, policy_.station());
             if (off < sw::kStalkRange) {
+                const sw::Vec3 weave = sw::flight::EstimatedAccel(
+                    stalk->velocity, stalk->last_velocity, obs.dt(),
+                    cfg_.lateral_limit);
                 accel = sw::flight::ProNav(position, velocity, stalk->position,
-                                           stalk->velocity, cfg_);
+                                           stalk->velocity, cfg_, weave);
             } else {
                 const sw::Vec3 hold = policy_.DesiredPosition(obs);
                 accel = sw::flight::GoTo(hold, position, velocity, cfg_);
@@ -260,25 +262,37 @@ private:
     void LogProximity(const swarm::Observation& obs, const sw::Track* target) {
         const sw::Vec3 position = obs.position();
         const sw::Vec3 velocity = obs.velocity();
+        const float now = obs.time();
+        const bool chasing = policy_.stance() == sw::Stance::Committed && target;
+        if (!chasing) last_aim_log_at_ = -1.0f;
+
         for (sw::Track& t : store_.tracks()) {
             const float d = swarm::Distance(position, t.position);
             const int band = NearBand(d);
-            if (band == 0) {
-                t.near_band = 0;
-                continue;
-            }
-            if (band <= t.near_band) continue;
-            t.near_band = static_cast<uint8_t>(band);
+            if (band == 0) t.near_band = 0;
+
+            const bool intercept = target != nullptr &&
+                                   ((t.has_local_id && target->has_local_id &&
+                                     t.track_id == target->track_id) ||
+                                    target == &t);
 
             const sw::Vec3 offset = position - t.position;
             float closing = 0.0f;
             if (d > 1e-4f)
                 closing = -swarm::Dot(velocity - t.velocity, offset / d);
 
-            const bool intercept = target != nullptr &&
-                                   ((t.has_local_id && target->has_local_id &&
-                                     t.track_id == target->track_id) ||
-                                    target == &t);
+            const bool band_step = band > 0 && band > t.near_band;
+            if (band_step) t.near_band = static_cast<uint8_t>(band);
+
+            // Last 1 s of a chase: refresh believed n/e/alt every 0.1 s so
+            // the Aim cue tracks instead of sitting on the commit pose.
+            const float ttg = sw::flight::TimeToClose(
+                position, velocity, t.position, t.velocity, cfg_.kill_radius);
+            const bool terminal_aim = chasing && intercept && ttg <= 1.0f &&
+                (last_aim_log_at_ < 0.0f || now - last_aim_log_at_ >= 0.1f);
+
+            if (!band_step && !terminal_aim) continue;
+
             // "ram" is reserved for the last metres of a committed intercept.
             // A 12 m pass of a civilian we are trying not to hit is "near".
             const char* verb = (intercept && band >= 3) ? "ram" : "near";
@@ -288,6 +302,7 @@ private:
                         sw::BeliefName(t.belief), d, closing,
                         t.position.x, t.position.y, -t.position.z,
                         t.velocity.x, t.velocity.y);
+            if (terminal_aim) last_aim_log_at_ = now;
         }
     }
 
@@ -303,6 +318,7 @@ private:
     bool announced_ = false;
     float logged_ring_radius_ = -1.0f;
     bool radio_logged_ = false;
+    float last_aim_log_at_ = -1.0f;
 };
 
 }  // namespace

@@ -26,44 +26,38 @@ Vec3 GoTo(const Vec3& target, const Vec3& position, const Vec3& velocity,
 Vec3 Cruise(const Vec3& target, const Vec3& position, const Vec3& velocity,
             float cruise_speed, const Config& cfg);
 
-/// Proportional navigation. The natural law for an intercept: it nulls the
-/// line-of-sight rate rather than chasing the target's current position, which
-/// is why it beats pursuit against anything moving.
-///
-/// Time until we and a constant-velocity target can occupy the same point, if
-/// we fly at `speed`. Closed form; -1 when no positive root exists, i.e. the
-/// target outruns us and is opening.
-float TimeToIntercept(const Vec3& to_target, const Vec3& target_velocity,
-                      float speed);
+/// Shift a pose `distance` metres along its velocity. Zero if it is parked.
+Vec3 AimAhead(const Vec3& position, const Vec3& velocity, float distance);
 
-/// Point on the inbound's ground track we actually fly at (D39).
-/// The closed-form meeting, pushed `lead` metres further in front of
-/// them along their velocity. Early → we get to the chord first and they
-/// fly into us; late → we are still ahead of current position, not abeam.
-/// No radius-sized offset: midcourse aims for the predicted hostile origin.
-constexpr float kBarrierLeadKills = 0.0f;
-Vec3 BarrierAim(const Vec3& self, const Vec3& target_p, const Vec3& target_v,
-                float speed, float lead);
+/// Seconds until `p` is inside `radius` of `q`, using relative closing.
+/// 0 if already inside; large if not approaching.
+float TimeToClose(const Vec3& p, const Vec3& v, const Vec3& q, const Vec3& w,
+                  float radius);
 
-/// A stern chase against an equally capable evader does NOT converge -- both
-/// airframes have the same 6.7 m/s^2 lateral bound. Arrive from a geometry that
-/// already leads, or do not commit.
+/// Finite-difference acceleration, clamped to `cap` so a first-sight jump
+/// cannot look like a 100 m/s² weave.
+Vec3 EstimatedAccel(const Vec3& velocity, const Vec3& last_velocity,
+                    float dt, float cap);
+
+/// Proportional navigation, Zarchan 3-D ZEM form (D42 / D43).
 ///
-/// Two laws, blended by range (D22): a closed-form lead intercept flown at
-/// max_speed while there is still range to cover, handing over to a
-/// zero-effort-miss law for the last 25-70 m. The aim point is the predicted
-/// hostile origin on their ground track, so the friendly and hostile origins
-/// are what the guidance tries to intersect.
-/// Pure PN commanded almost nothing at a picket already on the inbound
-/// bearing, so the drone sat still and was rammed at our own ring radius.
+/// PN and ZEM are the same law: a = N · ZEMn / t_go² is identical to
+/// a = N · Vc · ω under constant closing. Augmented ZEM adds ½ At t_go²
+/// so a weave that has already started is in the predicted miss.
 ///
-/// `navigation_gain` is the terminal gain, now on a zero-effort-miss law
-/// rather than classic PN (D25): a = N * ZEM / t_go^2. 10 measured -- escapes
-/// fall monotonically from N=3 to N=10 and the fixed-set score is flat, while
-/// N=14 starts costing kills.
+/// Lead is on the hostile's predicted trajectory, not on our intercept
+/// path: pretend they have already travelled `lead · kill_radius` metres
+/// along that track (velocity, plus the weave accel), then intercept that
+/// virtual state. A picket starts at rest, so the same command also
+/// accelerates along the LOS until we are flying at them.
+constexpr float kPnGain = 6.0f;
+constexpr float kPnLeadKillRadii = 0.5f;
 Vec3 ProNav(const Vec3& self_position, const Vec3& self_velocity,
             const Vec3& target_position, const Vec3& target_velocity,
-            const Config& cfg, float navigation_gain = 10.0f);
+            const Config& cfg,
+            const Vec3& target_accel = {},
+            float lead_kill_radii = kPnLeadKillRadii,
+            float navigation_gain = kPnGain);
 
 /// Applied last, over every other decision.
 ///
@@ -74,7 +68,7 @@ Vec3 ProNav(const Vec3& self_position, const Vec3& self_velocity,
 /// or v_close²/(2a)+4·kill when closing faster than cruise. A *picket*
 /// cancels the closing component of its command against a mate, and panics
 /// inside 3 kill-radii. An *interceptor* (`intercepting`) does not cancel:
-/// that was ProNav being overwritten by a picket on the line of sight (D15).
+/// that would overwrite its guidance near the target (D15).
 /// If the ram on `exempt` is at the same time as a mate collision, or
 /// first, the mate is ignored — braking then misses the hostile (D38).
 /// A picket still in front of the intercept is traffic and is still avoided.

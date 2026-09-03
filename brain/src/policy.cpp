@@ -550,10 +550,8 @@ Vec3 CorridorHorizon(const Vec3& from, const Vec3& hostile_p, const Vec3& hostil
 }
 
 Vec3 StalkAim(const Vec3& slot, const Vec3& target_p, const Vec3& target_v,
-              float speed, float cap, float lead) {
-    // Same point ProNav midcourse flies (D34/D39): the meeting, pushed
-    // in front of them on their track.
-    const Vec3 aim = flight::BarrierAim(slot, target_p, target_v, speed, lead);
+              float cap, float lead) {
+    const Vec3 aim = flight::AimAhead(target_p, target_v, lead);
     const Vec3 to_aim = aim - slot;
     const float len = swarm::Length(to_aim);
     if (len < 1.0f) return slot;
@@ -585,10 +583,9 @@ Vec3 YieldOffCorridor(const Vec3& goal, const Vec3& a, const Vec3& b, float clea
 }
 
 Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) {
-    // Hold the live ring, but step off anyone else's *remaining* intercept so
-    // we are not the traffic that spoils ProNav. After a nearby death the
-    // survivors take evenly spaced stations (D19); yield uses those stations.
-    // Past the predicted ram they do not move (D17).
+    // Hold the live ring, but step off anyone else's remaining intercept.
+    // After a nearby death the survivors re-space (D19). Past the predicted
+    // ram they stay put (D17).
     const float now = obs.time();
     ring_radius_ = PicketRadius(
         cfg_, CountLive(cfg_.fleet_size, cfg_.drone_id, heard_, heard_at_,
@@ -602,12 +599,8 @@ Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) 
     stalk_ = nullptr;
     Vec3 goal = slot;
 
-    // Fly the committed intercept before Classify has spent its 0.6 s, but
-    // stay on a leash so a long-window inbound cannot empty the sector and
-    // so we can still reverse if it never latches Hostile (D32/D34). The
-    // aim is the predicted hostile origin, not the current LOS: sliding toward where they
-    // are put the drone on the inbound bearing with the wrong heading, and
-    // the handover to ProNav then had to buy that lead back.
+    // Ease toward a likely inbound before the Hostile latch, still close
+    // enough to get back on station if it never confirms.
     for (const Track& t : store.tracks()) {
         if (t.belief == Belief::Friendly || t.belief == Belief::Wreckage) continue;
         if (!LooksDivingAtAsset(t.position, t.velocity, cfg_.asset, cfg_.asset_radius))
@@ -618,9 +611,9 @@ Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) 
         if (ThreatWindow(t.position, t.velocity, cfg_.asset,
                          cfg_.asset_radius, kHostileDash) >= kCompactWindow)
             continue;
-        const Vec3 aim = StalkAim(slot, t.position, t.velocity,
-                                  cfg_.max_speed, kStalkRange,
-                                  flight::kBarrierLeadKills * cfg_.kill_radius);
+        const Vec3 aim = StalkAim(
+            slot, t.position, t.velocity, kStalkRange,
+            flight::kPnLeadKillRadii * cfg_.kill_radius);
         if (swarm::Distance(aim, slot) < 1.0f) continue;
         goal = aim;
         stalk_ = &t;
