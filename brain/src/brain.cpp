@@ -71,6 +71,11 @@ private:
         const float now = obs.time();
 
         for (const SwRxFrame& f : obs.rx()) {
+            if (!radio_logged_) {
+                radio_logged_ = true;
+                host().Logf("radio range_sigma=%.2f bearing_sigma=%.3f",
+                            f.range_sigma, f.bearing_sigma);
+            }
             sw::Reader r(f.data, f.len);
             sw::Header h;
             if (!h.Read(r)) continue;                    // bad version or truncated
@@ -278,6 +283,7 @@ private:
     float peer_last_heard_[sw::kMaxFleet]{};
 
     bool announced_ = false;
+    bool radio_logged_ = false;
 };
 
 }  // namespace
