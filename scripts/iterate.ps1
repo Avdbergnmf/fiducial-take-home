@@ -62,6 +62,10 @@ $s = Get-RunSummary -Path $report
 
 Write-Host ""
 Write-Host ("=== {0}  total {1,10:N1}   {2} ===" -f $s.Id, $s.Total, $s.Outcome) -ForegroundColor Cyan
+if ($s.CivPairCredit -gt 0) {
+    Write-Host ("  adjusted total includes civilian-pair floor credit +{0:N0} (raw {1:N1})" -f `
+            $s.CivPairCredit, $s.RawTotal) -ForegroundColor DarkGray
+}
 Write-Host ("  mission {0,9:N1}   awareness {1,6:N1}   comms {2,6:N1}" -f $s.Mission, $s.Awareness, $s.Comms)
 Write-Host ("  kills {0}/{1}   breaches {2}   wasted {3}   civilians {4}" -f `
         $s.Kills, $s.HostilesTotal, $s.Breaches, $s.Wasted, $s.Civilians)

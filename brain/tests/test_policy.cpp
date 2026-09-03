@@ -288,6 +288,13 @@ static void TestRingStaysInsideTheSpawnCircle() {
     wide.Configure(cfg, Rng());
     CHECK(std::fabs(wide.ring_radius()
                     - (cfg.asset_radius + cfg.comm_radius * 0.625f)) < 1e-3f);
+
+    const float full_radius = PicketRadius(cfg, 16);
+    const float fifteen_radius = PicketRadius(cfg, 15);
+    CHECK(fifteen_radius < full_radius);
+    CHECK(std::fabs(fifteen_radius - full_radius *
+                    std::sin(3.14159265358979f / 16.0f) /
+                    std::sin(3.14159265358979f / 15.0f)) < 1e-3f);
 }
 
 static void TestLeadIntercept() {

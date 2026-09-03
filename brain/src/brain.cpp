@@ -39,6 +39,7 @@ public:
 
         // 3. POLICY: what should we do about it
         policy_.Decide(store_, obs);
+        LogPicketRadius();
         if (policy_.last_log()[0] != '\0')
             host().Log(policy_.last_log());
         policy_.LogRing(host());
@@ -65,6 +66,14 @@ private:
                     cfg_.friendly_margin,
                     policy_.ring_radius(), policy_.ring_altitude(),
                     obs.self().fix_sigma);
+        logged_ring_radius_ = policy_.ring_radius();
+    }
+
+    void LogPicketRadius() {
+        const float radius = policy_.ring_radius();
+        if (logged_ring_radius_ < 0.0f || radius == logged_ring_radius_) return;
+        host().Logf("params ring=%.1f alt=%.1f", radius, policy_.ring_altitude());
+        logged_ring_radius_ = radius;
     }
 
     void ConsumeFrames(const swarm::Observation& obs) {
@@ -196,10 +205,19 @@ private:
 
         LogProximity(obs, target);
 
-        // Face where we are going: yaw is free and it makes the recording
-        // readable in the viewer.
+        // Ring repositioning uses world-frame ACCEL_NED, so yaw does not need
+        // to follow the inward velocity. Face outward while closing a hole;
+        // when a threat is being stalked or intercepted, face the flight path
+        // again so the recorded attitude matches the active manoeuvre.
         float yaw = 0.0f;
-        if (swarm::LengthSq(velocity) > 1.0f) yaw = std::atan2(velocity.y, velocity.x);
+        const bool face_outward = policy_.stance() != sw::Stance::Committed &&
+                                  policy_.stalk() == nullptr;
+        const float dx = position.x - cfg_.asset.x;
+        const float dy = position.y - cfg_.asset.y;
+        if (face_outward && dx * dx + dy * dy > 1.0f)
+            yaw = std::atan2(dy, dx);
+        else if (swarm::LengthSq(velocity) > 1.0f)
+            yaw = std::atan2(velocity.y, velocity.x);
 
         return swarm::Command::Acceleration(accel, yaw);
     }
@@ -283,6 +301,7 @@ private:
     float peer_last_heard_[sw::kMaxFleet]{};
 
     bool announced_ = false;
+    float logged_ring_radius_ = -1.0f;
     bool radio_logged_ = false;
 };
 

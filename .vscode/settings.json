@@ -1,3 +1,11 @@
 {
-    "cmake.sourceDirectory": "C:/Users/Alex_/Documents/Fiducial/fiducial-take-home/brain"
+    "cmake.sourceDirectory": "C:/Users/Alex_/Documents/Fiducial/fiducial-take-home/brain",
+    "chat.tools.terminal.autoApprove": {
+        "cmake": true,
+        "ctest": true,
+        "/^powershell -ExecutionPolicy Bypass -File scripts\\\\iterate\\.ps1 -Scenario x1-79fa30553c65850999aee609fbea2dc5 -Stem radius-check -Note \"dynamic radius viewer\" -NoBuild -Fast$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
 }

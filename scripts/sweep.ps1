@@ -105,6 +105,7 @@ $rows = $rows | Sort-Object Total
 Write-Host ""
 $fmt = "{0,-10} {1,10} {2,7} {3,7} {4,7} {5,5} {6,7} {7,6} {8,9} {9}"
 Write-Host ($fmt -f "id", "total", "kills", "breach", "wasted", "civ", "aware", "comms", "detect", "losses by cause") -ForegroundColor Cyan
+Write-Host "total includes +150 per civilian-pair floor loss when civilian losses >= 2 and friendly losses = 0" -ForegroundColor DarkGray
 Write-Host ("-" * 100) -ForegroundColor DarkGray
 foreach ($r in $rows) {
     $colour = if ($r.Crashes -gt 0 -or $r.AbiViolations -gt 0) { "Red" }

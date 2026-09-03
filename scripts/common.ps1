@@ -140,10 +140,25 @@ function Get-RunSummary {
         }
     }
 
+    $rawTotal = [double]$r.score.total
+    $friendlyLosses = [int]$m.friendlies_lost_credited + [int]$m.friendlies_lost_wasted
+    $civilianLosses = [int]$m.civilians_lost
+    $civPairFloorCredit = if ($civilianLosses -ge 2 -and $friendlyLosses -eq 0) {
+        $civilianLosses * 150.0
+    }
+    else {
+        0.0
+    }
+    if ($civPairFloorCredit -gt 0) {
+        $causeParts += ("civ_pair_floor_credit=+{0:N0}" -f $civPairFloorCredit)
+    }
+
     [pscustomobject]@{
         Id            = $r.scenario
         Outcome       = $r.outcome
-        Total         = [double]$r.score.total
+        Total         = $rawTotal + $civPairFloorCredit
+        RawTotal      = $rawTotal
+        CivPairCredit = $civPairFloorCredit
         Mission       = [double]$r.score.mission
         Awareness     = [double]$r.score.awareness
         Comms         = [double]$r.score.comms

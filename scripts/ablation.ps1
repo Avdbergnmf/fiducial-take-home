@@ -214,7 +214,7 @@ function Write-SweepTable {
 
 function Save-SummaryCsv {
     param([object[]]$Rows, [string]$Path)
-    $Rows | Select-Object Id, Total, Mission, Awareness, Comms, Kills, HostilesTotal,
+    $Rows | Select-Object Id, Total, RawTotal, CivPairCredit, Mission, Awareness, Comms, Kills, HostilesTotal,
         Breaches, Wasted, Civilians, Causes, Correct, Wrong, Outcome |
         Export-Csv -LiteralPath $Path -NoTypeInformation
 }

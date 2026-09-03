@@ -24,6 +24,11 @@ enum class Stance : uint8_t {
 /// two observers with a metre of track noise cannot both own the inbound.
 uint32_t FacingSlot(const Vec3& position, const Vec3& asset, uint32_t count);
 
+/// Picket radius for the currently live fleet. The live ring preserves the
+/// full-fleet station chord and is bounded by sensing, spawn, reaction, and
+/// asset standoff constraints.
+float PicketRadius(const Config& cfg, uint32_t live_count);
+
 /// True if the other interceptor should keep this inbound. Clearly closer
 /// (2 m) wins regardless of id; similar range, lower fleet id (D38).
 /// `them_id` < 0 means unidentified — only the range rule applies.

@@ -32,6 +32,37 @@ constexpr uint8_t kPrioTrackFirst = 6;      // first Hostile report, above heart
 constexpr uint8_t kPrioHeartbeat = 5;       // identity first: claims/reports starved this and neighbours stole intercepts
 constexpr float kReceding = 2.0f;           // m/s away; facing owner yields to clockwise
 
+float ComputePicketRadius(const Config& cfg, uint32_t live_count) {
+    const float span_x = cfg.arena_max.x - cfg.arena_min.x;
+    const float span_y = cfg.arena_max.y - cfg.arena_min.y;
+    const float arena_half = 0.5f * (span_x < span_y ? span_x : span_y);
+    const float spawn_radius = 0.80f * arena_half;
+    const float full_radius = cfg.asset_radius + cfg.comm_radius * 0.625f;
+    const float spawn_cap = spawn_radius * 0.65f;
+    const float react_cap = spawn_radius - 3.5f * cfg.max_speed;
+    const float floor_r = cfg.asset_radius + 10.0f;
+    const uint32_t full_count = cfg.fleet_size > 0 ? cfg.fleet_size : 1;
+    const uint32_t count = live_count > 0 ? live_count : 1;
+
+    float radius = full_radius;
+    if (count < full_count && count >= 2) {
+        // Preserve the full-fleet chord as the ring thins, then keep adjacent
+        // stations within one sense radius where that bound is tighter.
+        const float full_half_angle = kPi / static_cast<float>(full_count);
+        const float live_half_angle = kPi / static_cast<float>(count);
+        radius *= std::sin(full_half_angle) / std::sin(live_half_angle);
+        if (cfg.sense_radius > 0.0f) {
+            const float sense_cap = cfg.sense_radius /
+                                   (2.0f * std::sin(live_half_angle));
+            if (radius > sense_cap) radius = sense_cap;
+        }
+    }
+    if (radius > spawn_cap) radius = spawn_cap;
+    if (radius > react_cap) radius = react_cap;
+    if (radius < floor_r) radius = floor_r;
+    return radius;
+}
+
 /// Scoring hook, and the only channel the viewer has for "this drone called
 /// enemy." Intercept still uses Track.belief. Local Friendly and Hostile
 /// only — hearsay is skipped at the call site (track_id 0). Wreckage and
@@ -45,6 +76,10 @@ SwClass PublishedClass(const Track& t) {
 }
 
 }  // namespace
+
+float PicketRadius(const Config& cfg, uint32_t live_count) {
+    return ComputePicketRadius(cfg, live_count);
+}
 
 void Policy::Configure(const Config& cfg, Rng rng) {
     cfg_ = cfg;
@@ -65,7 +100,7 @@ void Policy::Configure(const Config& cfg, Rng rng) {
     // (mean -52.5 -> -20.8). Past ~0.75 the ring outruns its own recovery --
     // a leaker at that range cannot be run down, since a hostile has our
     // lateral limit -- and tier-2 layouts collapse. See notes/decisions.md.
-    ring_radius_ = cfg.asset_radius + cfg.comm_radius * 0.625f;
+    ring_radius_ = PicketRadius(cfg, cfg.fleet_size);
 
     // ...but never out near the circle hostiles enter on (D28). A picket that
     // sits just inside it meets its first hostile already born on top of it,
@@ -79,13 +114,6 @@ void Policy::Configure(const Config& cfg, Rng rng) {
     // conservative read and the cap binds a little early there rather than
     // late). comm_radius is a radio property and says nothing about how far out
     // the threat starts, which is why the ring needed a second bound at all.
-    const float span_x = cfg.arena_max.x - cfg.arena_min.x;
-    const float span_y = cfg.arena_max.y - cfg.arena_min.y;
-    const float arena_half = 0.5f * (span_x < span_y ? span_x : span_y);
-    const float spawn_radius = 0.80f * arena_half;
-    const float ring_cap = spawn_radius * 0.65f;
-    if (ring_radius_ > ring_cap) ring_radius_ = ring_cap;
-
     // And leave enough FLIGHT TIME between the spawn circle and the picket, not
     // just enough distance (D33). The ratio above catches a ring parked on top
     // of the spawn circle; it does not catch one that is nominally inside it but
@@ -99,11 +127,6 @@ void Policy::Configure(const Config& cfg, Rng rng) {
     // comparable (measured 19-21 m/s against our 17-24), so max_speed is the
     // proxy. This is the same reasoning as the spawn radius itself: a number the
     // brain is not given, derived from one it is.
-    const float react_cap = spawn_radius - 3.5f * cfg.max_speed;
-    if (ring_radius_ > react_cap) ring_radius_ = react_cap;
-    // Never inside the thing we are defending.
-    const float floor_r = cfg.asset_radius + 10.0f;
-    if (ring_radius_ < floor_r) ring_radius_ = floor_r;
     ring_altitude_ = 30.0f;
     picket_goal_ = flight::RingSlot(cfg.drone_id, cfg.fleet_size, cfg.asset,
                                     ring_radius_, ring_altitude_);
@@ -567,6 +590,9 @@ Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) 
     // survivors take evenly spaced stations (D19); yield uses those stations.
     // Past the predicted ram they do not move (D17).
     const float now = obs.time();
+    ring_radius_ = PicketRadius(
+        cfg_, CountLive(cfg_.fleet_size, cfg_.drone_id, heard_, heard_at_,
+                        obs.position(), cfg_.comm_radius, now, confirmed_dead_));
     const Vec3 slot = StationAt(StationBearing(cfg_.drone_id, cfg_.fleet_size,
                                         cfg_.drone_id, heard_, heard_at_,
                                         obs.position(), cfg_.comm_radius, now,
