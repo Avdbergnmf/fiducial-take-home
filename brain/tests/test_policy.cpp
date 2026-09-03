@@ -548,6 +548,15 @@ static void TestStalkAimLeadsNotPursues() {
     CHECK(std::fabs(swarm::Distance(headon, slot) - cap) < 0.5f);
 }
 
+static void TestBornOutsideRing() {
+    std::printf("first sight outside the ring is an inbound, inside is behind us\n");
+    const Vec3 asset(0, 0, 0);
+    CHECK(BornOutsideRing(Vec3(170, 0, -40), asset, 90.0f));
+    CHECK(BornOutsideRing(Vec3(90, 0, -30), asset, 90.0f));
+    CHECK(!BornOutsideRing(Vec3(40, 0, -30), asset, 90.0f));
+    CHECK(kScrambleEvidence > 0.05f && kScrambleEvidence < 0.2f);
+}
+
 int main() {
     TestFacingSlotMatchesRing();
     TestFacingSlotAgreesOnABisector();
@@ -564,6 +573,7 @@ int main() {
     TestYieldHorizonIsRemainingFlight();
     TestStalkAimLeadsNotPursues();
     TestInterceptorKeepsGoingAtTheMerge();
+    TestBornOutsideRing();
 
     if (g_failures == 0) {
         std::printf("policy: all passed\n");

@@ -209,16 +209,22 @@ private:
 
         // Ring repositioning uses world-frame ACCEL_NED, so yaw does not need
         // to follow the inward velocity. Face outward while closing a hole;
-        // when a threat is being stalked or intercepted, face the flight path
-        // again so the recorded attitude matches the active manoeuvre.
+        // face a watched inbound the instant it appears (D44); when stalking
+        // or intercepting, face the flight path.
         float yaw = 0.0f;
         const bool face_outward = policy_.stance() != sw::Stance::Committed &&
-                                  policy_.stalk() == nullptr;
+                                  policy_.stalk() == nullptr &&
+                                  policy_.watch() == nullptr;
         const float dx = position.x - cfg_.asset.x;
         const float dy = position.y - cfg_.asset.y;
         if (face_outward && dx * dx + dy * dy > 1.0f)
             yaw = std::atan2(dy, dx);
-        else if (swarm::LengthSq(velocity) > 1.0f)
+        else if (const sw::Track* watched = policy_.watch();
+                 watched && policy_.stance() != sw::Stance::Committed &&
+                 policy_.stalk() == nullptr) {
+            yaw = std::atan2(watched->position.y - position.y,
+                             watched->position.x - position.x);
+        } else if (swarm::LengthSq(velocity) > 1.0f)
             yaw = std::atan2(velocity.y, velocity.x);
 
         return swarm::Command::Acceleration(accel, yaw);

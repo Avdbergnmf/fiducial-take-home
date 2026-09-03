@@ -102,6 +102,12 @@ constexpr float kCompactWindow = 8.0f;
 float ThreatWindow(const Vec3& position, const Vec3& velocity,
                    const Vec3& centre, float radius, float dash_speed);
 
+/// Horizontal closest approach lands inside the asset cylinder. The breach
+/// clock (D10). Level overflights hit this too; that is why Classify still
+/// waits on 3D miss / dive, and why scramble (D44) aborts if it never dives.
+bool GroundTrackHitsCylinder(const Vec3& position, const Vec3& velocity,
+                             const Vec3& asset, float asset_radius);
+
 /// Descending, and the ground track enters the cylinder. Hostiles ramp past
 /// 1 m/s down within 0.5 s; civilians on recorded runs sit at 0.00–0.14.
 /// A posture, not a class — Classify still integrates evidence.

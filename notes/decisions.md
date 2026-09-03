@@ -1954,3 +1954,43 @@ the kill radius is ≤ 1 s, write the same `near`/`ram` line every 0.1 s
 from the current self pose and the current track. A heading change or a
 fix update is in the next command ~10 ms later. Documented here so it is
 not "fixed" into a slower guidance loop.
+
+---
+
+## D44 — Scramble: face immediately, leave station at 0.1 s of cylinder LOS
+
+**The miss.** On generated inbounds the facing picket is in the right slot
+and still leaks: classify waits 0.6 s of *aimed* geometry (and often longer
+for 3D miss to fall), and the owner does not leave until `ShouldCommit`.
+The drones look correctly positioned; the response is late.
+
+**The rule**
+
+1. A local track first seen **outside the ring** (`BornOutsideRing`), that
+   we own, and while we do not already own a Hostile: **yaw at it**. No
+   leave-station. Civilians coming from behind the picket (first sight
+   inside the ring) do not turn us.
+2. Integrate `cylinder_score`: ground track through the asset cylinder
+   (`GroundTrackHitsCylinder`, D10), 0.1 s. Then **leave station and fly
+   ProNav as if committed** (`provisional_`). Unique owner and
+   `CloserChaser` still hold. Catchability (`t_meet < ttg`) does not —
+   these are the edge approaches.
+3. Classify is unchanged. At the existing Hostile latch, drop
+   `provisional_` (full commit). If a heartbeat names it Friendly, it
+   reads Wreckage, the cylinder LOS decays away, or after 1 s it still
+   has not dived and 3D miss is > 8 m: abort to picket (`not-threat` /
+   `not-hostile`).
+
+Logged as `commit … early` so the Aim cue and commit span start at the
+scramble, not at the 0.6 s call.
+
+**Measured, 8 named scenarios.** Mean **98.9**, worst **−195.7 (x1-a)**.
+Kills: s1 6/6, x2-b 3/3, x1-b/c and x2-a clean. s2 still 5/6. The new
+cost is x1-a: 3 civilians, 1 wasted, `pair_neutral=1` — a level chord
+through the cylinder now pulls the owner off station at 0.1 s. Hard id
+`x1-06b926af…` 0/3 → **1/3** (−504 → −304).
+
+**Not reversed if it hurts.** D31 measured that leaving station early
+costs on fresh ids. This is that trade, taken on purpose. Investigate
+civilian rams, emptied sectors, and `not-threat` aborts on real hostiles
+before rolling it back.

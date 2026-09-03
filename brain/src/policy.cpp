@@ -19,6 +19,8 @@ constexpr float kCatchSlack = 0.5f;         // s; must arrive this much before t
 constexpr float kCruise = 14.0f;            // must match Fly() in brain.cpp
 constexpr float kFreshHostile = 6.0f;       // s; older Hostile calls are latch-ghosts
 constexpr float kRecommitHold = 2.0f;       // s; do not re-chase a track we just aborted
+constexpr float kScrambleDrop = 0.02f;     // abort the early chase if that LOS is gone
+constexpr float kScrambleCivHold = 1.0f;   // s; level overflight never dives
 
 constexpr float kChasingToward = 5.0f;     // m/s along LOS; pickets sit below this
 constexpr float kCloserBy = 2.0f;          // m; farther duplicate aborts
@@ -132,6 +134,8 @@ void Policy::Configure(const Config& cfg, Rng rng) {
                                     ring_radius_, ring_altitude_);
     station_ = picket_goal_;
     stalk_ = nullptr;
+    watch_ = nullptr;
+    provisional_ = false;
     for (uint32_t i = 0; i < kMaxFleet; ++i) {
         heard_[i] = -1.0e9f;
         confirmed_dead_[i] = 0;
@@ -172,6 +176,8 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
     target_ = nullptr;
     if (stance_ == Stance::Committed) {
         target_ = ResolveTarget(store);
+        if (target_ && provisional_ && target_->belief == Belief::Hostile)
+            provisional_ = false;
         const char* why = nullptr;
         if (!target_)
             why = "lost";
@@ -185,6 +191,7 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
             last_abort_store_id_ = target_store_id_;
             last_abort_at_ = now;
             BindTarget(nullptr);
+            provisional_ = false;
             stance_ = Stance::Picketing;
         } else {
             BindTarget(target_);
@@ -194,19 +201,26 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
     if (stance_ != Stance::Committed) {
         Track* candidate = nullptr;
         float best_key = 1.0e6f;
+        bool early = false;
         for (Track& t : store.tracks()) {
-            if (!ShouldCommit(t, store, obs)) continue;
             if (CloserChaser(t, store, obs)) continue;
-            const float ttg = TimeToCylinder(t.position, t.velocity, cfg_.asset,
-                                             cfg_.asset_radius);
-            const float d = swarm::Distance(t.position, obs.position());
-            const float key = ttg + d * 0.001f;
-            if (key < best_key) { best_key = key; candidate = &t; }
+            if (ShouldCommit(t, store, obs)) {
+                const float ttg = TimeToCylinder(t.position, t.velocity, cfg_.asset,
+                                                 cfg_.asset_radius);
+                const float d = swarm::Distance(t.position, obs.position());
+                const float key = ttg + d * 0.001f;
+                if (key < best_key) { best_key = key; candidate = &t; early = false; }
+            } else if (ShouldScramble(t, store, obs)) {
+                const float d = swarm::Distance(t.position, obs.position());
+                const float key = 1.0e5f + d;
+                if (key < best_key) { best_key = key; candidate = &t; early = true; }
+            }
         }
         if (candidate) {
             BindTarget(candidate);
             committed_at_ = now;
             stance_ = Stance::Committed;
+            provisional_ = early;
             const float rng = swarm::Distance(candidate->position, obs.position());
             const float closing = ClosingSpeed(obs.position(), obs.velocity(),
                                                candidate->position, candidate->velocity);
@@ -215,13 +229,14 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
             const float ttg = TimeToCylinder(candidate->position, candidate->velocity,
                                              cfg_.asset, cfg_.asset_radius);
             std::snprintf(last_log_, sizeof(last_log_),
-                          "commit trk=%u score=%.2f miss=%.1f rng=%.0f close=%.1f ttg=%.1f n=%.1f e=%.1f alt=%.1f vn=%.1f ve=%.1f%s",
+                          "commit trk=%u score=%.2f miss=%.1f rng=%.0f close=%.1f ttg=%.1f n=%.1f e=%.1f alt=%.1f vn=%.1f ve=%.1f%s%s",
                           candidate->has_local_id ? candidate->track_id : 0,
                           candidate->closing_score, miss, rng, closing, ttg,
                           candidate->position.x, candidate->position.y,
                           -candidate->position.z,
                           candidate->velocity.x, candidate->velocity.y,
-                          candidate->has_local_id ? "" : " peer");
+                          candidate->has_local_id ? "" : " peer",
+                          early ? " early" : "");
         }
     }
 
@@ -242,8 +257,10 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
 
     if (stance_ != Stance::Committed)
         picket_goal_ = PicketGoal(store, obs);
-    else
+    else {
         stalk_ = nullptr;
+        watch_ = nullptr;
+    }
 }
 
 uint32_t FacingSlot(const Vec3& position, const Vec3& asset, uint32_t count) {
@@ -597,6 +614,7 @@ Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) 
                           cfg_.asset, ring_radius_, ring_altitude_);
     station_ = slot;
     stalk_ = nullptr;
+    watch_ = nullptr;
     Vec3 goal = slot;
 
     // Ease toward a likely inbound before the Hostile latch, still close
@@ -618,6 +636,29 @@ Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) 
         goal = aim;
         stalk_ = &t;
         break;
+    }
+
+    // Face an inbound we own as soon as it is in sense from outside the ring.
+    // Yaw only — movement waits on kScrambleEvidence of cylinder LOS (D44).
+    {
+        const Track* best = nullptr;
+        float best_key = 1.0e9f;
+        const bool own_hostile = OwnsAHostile(store, obs);
+        for (const Track& t : store.tracks()) {
+            if (!t.has_local_id) continue;
+            if (t.belief == Belief::Friendly || t.belief == Belief::Wreckage) continue;
+            if (!OwnsInbound(t, store, obs)) continue;
+            const float d = swarm::Distance(obs.position(), t.position);
+            if (t.belief == Belief::Hostile) {
+                if (d < best_key) { best_key = d; best = &t; }
+                continue;
+            }
+            if (own_hostile) continue;
+            if (!EnteredFromOutside(t)) continue;
+            const float key = -t.cylinder_score * 1000.0f + d;
+            if (key < best_key) { best_key = key; best = &t; }
+        }
+        watch_ = best;
     }
 
     for (const Track& t : store.tracks()) {
@@ -684,9 +725,64 @@ bool Policy::ShouldCommit(const Track& t, const TrackStore& store,
     return t_meet + kCatchSlack < ttg;
 }
 
+bool BornOutsideRing(const Vec3& first, const Vec3& asset, float ring_radius) {
+    const float dx = first.x - asset.x;
+    const float dy = first.y - asset.y;
+    const float g = std::sqrt(dx * dx + dy * dy);
+    return g >= ring_radius - 1.0f;
+}
+
+bool Policy::EnteredFromOutside(const Track& t) const {
+    return BornOutsideRing(t.first_position, cfg_.asset, ring_radius_);
+}
+
+bool Policy::OwnsAHostile(const TrackStore& store,
+                          const swarm::Observation& obs) const {
+    for (const Track& t : store.tracks()) {
+        if (t.belief != Belief::Hostile) continue;
+        if (obs.time() - t.belief_since > kFreshHostile) continue;
+        if (OwnsInbound(t, store, obs)) return true;
+    }
+    return false;
+}
+
+bool Policy::ShouldScramble(const Track& t, const TrackStore& store,
+                           const swarm::Observation& obs) const {
+    // Leave station ~0.1 s after the ground track crosses the cylinder,
+    // before the Hostile latch. Local sense only, and only inbounds that
+    // first appeared outside the ring so a civilian from behind the picket
+    // does not pull us off (D44). Unique owner still holds.
+    if (t.belief == Belief::Friendly || t.belief == Belief::Wreckage) return false;
+    if (t.belief == Belief::Hostile) return false;
+    if (!t.has_local_id) return false;
+    if (t.cylinder_score < kScrambleEvidence) return false;
+    if (!EnteredFromOutside(t)) return false;
+    if (OwnsAHostile(store, obs)) return false;
+    if (obs.time() - last_abort_at_ < kRecommitHold) {
+        if (t.store_id != 0 && t.store_id == last_abort_store_id_) return false;
+        if (t.has_local_id && last_abort_id_ != 0 && t.track_id == last_abort_id_)
+            return false;
+    }
+    if (!OwnsInbound(t, store, obs)) return false;
+    if (CloserChaser(t, store, obs)) return false;
+    return true;
+}
+
 const char* Policy::AbortReason(const Track& t, const swarm::Observation& obs) const {
     const float now = obs.time();
     if (now - committed_at_ > kAbortAfter) return "timeout";
+    if (provisional_) {
+        if (t.belief == Belief::Friendly || t.belief == Belief::Wreckage)
+            return "not-hostile";
+        if (t.cylinder_score < kScrambleDrop && now - committed_at_ > 0.3f)
+            return "not-threat";
+        const float miss = ClosestApproachDistance(t.position, t.velocity, cfg_.asset);
+        if (now - committed_at_ >= kScrambleCivHold &&
+            !LooksDivingAtAsset(t.position, t.velocity, cfg_.asset, cfg_.asset_radius) &&
+            miss > 8.0f)
+            return "not-threat";
+        return nullptr;
+    }
     if (t.belief != Belief::Hostile) return "not-hostile";
 
     const float closing = ClosingSpeed(obs.position(), obs.velocity(),
@@ -745,6 +841,7 @@ void Policy::BindTarget(Track* t) {
     if (!t) {
         target_id_ = 0;
         target_store_id_ = 0;
+        provisional_ = false;
         return;
     }
     target_id_ = t->has_local_id ? t->track_id : 0;

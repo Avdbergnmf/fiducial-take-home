@@ -244,6 +244,10 @@ struct Track {
     Vec3 velocity{};
     Quat attitude{};
 
+    /// Pose at first local sight. Policy uses this to tell an inbound that
+    /// entered sense from outside the ring from a civilian coming from behind.
+    Vec3 first_position{};
+
     float first_seen = 0.0f;
     float last_seen = 0.0f;
     float last_update = 0.0f;
@@ -251,6 +255,7 @@ struct Track {
     // Evidence accumulated over time. Classification needs sustained
     // observation, so single-tick geometry is never enough on its own.
     float closing_score = 0.0f;    // integrated approach toward the asset
+    float cylinder_score = 0.0f;   // s the ground track has crossed the cylinder (D44)
     float ballistic_score = 0.0f;  // integrated "falling like wreckage"
     Vec3 last_velocity{};
     float miss_at_first = -1.0f;   // CPA miss when first classified; -1 = unset

@@ -97,6 +97,16 @@ static void TestLooksDivingAtAsset() {
     CHECK(!LooksDivingAtAsset(Vec3(120, 0, -50), Vec3(-19, 0, 0.02f), kAsset, 30.0f));
 }
 
+static void TestGroundTrackHitsCylinder() {
+    std::printf("ground track through the cylinder is independent of the dive\n");
+    CHECK(GroundTrackHitsCylinder(Vec3(170, 0, -40), Vec3(-16, 0, 0), kAsset, 30.0f));
+    CHECK(!GroundTrackHitsCylinder(Vec3(170, 0, -40), Vec3(0, 16, 0), kAsset, 30.0f));
+    // Level dash at 40 m still breaches the cylinder (D10). Scramble uses this;
+    // Classify still refuses the Hostile call (D7).
+    CHECK(GroundTrackHitsCylinder(Vec3(170, 0, -40), Vec3(-16, 0, 0), kAsset, 30.0f));
+    CHECK(!LooksDivingAtAsset(Vec3(170, 0, -40), Vec3(-16, 0, 0), kAsset, 30.0f));
+}
+
 static void TestClosingSpeed() {
     std::printf("relative closing uses both velocities\n");
     const Vec3 us(75, 0, -30);
@@ -338,6 +348,7 @@ int main() {
     TestTimeToCylinder();
     TestThreatWindowIsFiniteWhileSpooling();
     TestLooksDivingAtAsset();
+    TestGroundTrackHitsCylinder();
     TestClosingSpeed();
     TestBallistic();
     TestMissDistanceSeparatesTheHardCase();

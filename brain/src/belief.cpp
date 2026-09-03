@@ -88,12 +88,17 @@ float ThreatWindow(const Vec3& position, const Vec3& velocity,
     return (ground - radius) / speed;
 }
 
-bool LooksDivingAtAsset(const Vec3& position, const Vec3& velocity,
-                        const Vec3& asset, float asset_radius) {
-    if (velocity.z <= kDiveRate) return false;
+bool GroundTrackHitsCylinder(const Vec3& position, const Vec3& velocity,
+                             const Vec3& asset, float asset_radius) {
     const float ground_miss = ClosestApproachDistance(
         Flat(position), Flat(velocity), Flat(asset));
     return ground_miss < asset_radius;
+}
+
+bool LooksDivingAtAsset(const Vec3& position, const Vec3& velocity,
+                        const Vec3& asset, float asset_radius) {
+    if (velocity.z <= kDiveRate) return false;
+    return GroundTrackHitsCylinder(position, velocity, asset, asset_radius);
 }
 
 float ClosingSpeed(const Vec3& observer_p, const Vec3& observer_v,
@@ -185,6 +190,7 @@ void TrackStore::Update(const swarm::Observation& obs) {
             t->belief = Belief::Unknown;
             t->belief_since = now;
             t->last_velocity = raw.velocity;
+            t->first_position = raw.position;
         }
         else {
             t->last_velocity = t->velocity;   // for the ballistic test below
@@ -294,6 +300,12 @@ void TrackStore::Classify(Track& t, float now, float dt) {
     const bool aimed = AimedAtAsset(miss, t.miss_at_first, cfg_.asset_radius)
                        || (short_window && diving);
 
+    if (GroundTrackHitsCylinder(t.position, t.velocity, cfg_.asset,
+                                cfg_.asset_radius))
+        t.cylinder_score = Clamp(t.cylinder_score + dt, 0.0f, 3.0f);
+    else
+        t.cylinder_score = Clamp(t.cylinder_score - dt * kScoreDecay, 0.0f, 3.0f);
+
     if (aimed && alignment > 0.8f && closing > 4.0f) {
         t.closing_score = Clamp(t.closing_score + dt, -2.0f, 3.0f);
     } else if (!aimed || alignment < 0.3f) {
@@ -368,6 +380,7 @@ void TrackStore::MergePeerReport(const Vec3& position, const Vec3& velocity,
         t->first_seen = now;
         t->belief_since = now;
         t->last_velocity = velocity;
+        t->first_position = position;
     }
     t->position = position;
     t->velocity = velocity;

@@ -101,6 +101,14 @@ float TowardTarget(const Vec3& position, const Vec3& velocity, const Vec3& targe
 /// closing — there is no intercept to yield for (D17).
 Vec3 CorridorHorizon(const Vec3& from, const Vec3& hostile_p, const Vec3& hostile_v);
 
+/// Seconds of ground-track-through-cylinder before an owner leaves station
+/// at an unidentified inbound. Full Hostile latch is still 0.6 s of aimed
+/// geometry; this only starts the intercept flight (D44).
+constexpr float kScrambleEvidence = 0.1f;
+
+/// True if first sight was at or outside the picket ring (1 m slop).
+bool BornOutsideRing(const Vec3& first, const Vec3& asset, float ring_radius);
+
 /// How far a picket may leave its slot toward a not-yet-Hostile inbound.
 /// Stopping distance at max_speed is ~30 m, so 40 m still reverses onto
 /// station if Classify never latches.
@@ -129,6 +137,8 @@ public:
     /// Not-yet-Hostile inbound we are already closing on, still Picketing.
     /// Null on station. Same ProNav law as a commit, leashed to `station()`.
     const Track* stalk() const { return stalk_; }
+    /// Inbound we own and are facing while we ID it. Null if none. Yaw only.
+    const Track* watch() const { return watch_; }
     Vec3 station() const { return station_; }
     const char* last_log() const { return last_log_; }
     float ring_radius() const { return ring_radius_; }
@@ -159,8 +169,13 @@ public:
 private:
     bool ShouldCommit(const Track& t, const TrackStore& store,
                       const swarm::Observation& obs) const;
+    bool ShouldScramble(const Track& t, const TrackStore& store,
+                        const swarm::Observation& obs) const;
     bool OwnsInbound(const Track& t, const TrackStore& store,
                      const swarm::Observation& obs) const;
+    bool OwnsAHostile(const TrackStore& store,
+                    const swarm::Observation& obs) const;
+    bool EnteredFromOutside(const Track& t) const;
     bool FacingReceding(uint32_t facing, const Track& hostile,
                         const TrackStore& store,
                         const swarm::Observation& obs) const;
@@ -195,6 +210,8 @@ private:
     Vec3 picket_goal_{};
     Vec3 station_{};
     const Track* stalk_ = nullptr;
+    const Track* watch_ = nullptr;
+    bool provisional_ = false;
     float heard_[kMaxFleet]{};
     Vec3 heard_at_[kMaxFleet]{};
     uint8_t confirmed_dead_[kMaxFleet]{};
