@@ -1546,4 +1546,81 @@ D32-D35 is the stronger brain on the eight fixed scenarios and on the three runs
 picked out by eye — both of which it was developed against — and gives up 42
 points a run on twenty ids it has never seen, with four more breaches and a floor
 410 points lower. Weighted evenly over all 31 runs: 90.8 against **113.1**. The
-merge keeps both.
+merge keeps both.---
+
+## D38 — What sets the floor, and why the ring cannot lower it further
+
+Asked to optimise the **floor** rather than the mean, and to test the rule "keep
+the picket far enough in that hostiles never spawn inside sense range", since
+that is where the near-misses were seen.
+
+**First, the reported run is already fixed.** `x1-bd34b277be45b2319f3419b1acdb3d81`
+scores **+191.6, 3/3, zero breaches, no misses** on the merged head. The whiffs
+predate D37: the time margin now sets its ring at 73.6 m
+(`154.5 − 3.5 × 23.1 = 73.7`), and that is what closed it.
+
+**The rule, tested at three strengths** (`ring ≤ spawn_radius − sense·f`),
+scored on floor across the fixed eight, twenty fresh ids and four reported runs:
+
+| | fixed min | fresh min | hard min | **global min** |
+|---|---|---|---|---|
+| current | **13.1** | −112.9 | **−83.6** | **−112.9** |
+| f = 1.00 | −32.2 | −112.9 | −118.9 | −118.9 |
+| f = 0.85 | −18.1 | −112.9 | −83.6 | −112.9 |
+| f = 0.70 | −2.6 | −112.9 | −83.6 | −112.9 |
+
+**No improvement at any strength**, and the full rule is worse. f = 0.85 lifts
+the fresh *mean* by 11.6, but the entire gain is one id
+(`x2-f29b16af`, −28.5 → +197.0, a single marginal breach flipping) against a
+31-point loss on x1-a; every other id moves by exactly 0.0. That is a coin
+flip, not a mechanism.
+
+**Why the rule cannot help: the floor scenario already obeys it.**
+`x2-147e7e55` runs `ring 56.5, sense 72.8, spawn 142.4`, so `ring + sense =
+129.3 < 142.4` — hostiles there are already first seen crossing into detection.
+Its −112.9 is built differently:
+
+```
+rewards: [0.0, 0.0]      urgency_ratio: [1.052, 1.072]
+mission = 0 + 0 - 200
+```
+
+Both kills scored **zero** reward: `urgency_ratio` above 1.0 means the hostile
+was destroyed *after* the moment it would have reached the asset unopposed, and
+`reward = W_kill·clamp(1 − ratio)` clamps to nothing. The run is two worthless
+kills and one breach.
+
+**So the ring there is too far IN, not too far out** — and it is D37's own time
+margin holding it at 56.5 (`142.4 − 3.5 × 24.5 = 56.6`). The margin uses *our*
+`max_speed` as a stand-in for the hostile's, and at 24.5 against a hostile that
+flies about 19 it over-reserves by nearly a third.
+
+**Bounding the reservation** (`react_margin ≤ spawn_radius · f`) to give the
+standoff back:
+
+| | global min | fresh mean | x2-147e |
+|---|---|---|---|
+| current (unbounded) | **−112.9** | 96.6 | **−113 (2/3)** |
+| f = 0.55 | −112.7 | 98.0 | −113 (2/3) |
+| f = 0.45 | −295.3 | 89.7 | −295 (1/3) |
+| f = 0.35 | −523.4 | 54.7 | −295 (1/3) |
+
+The floor scenario is **already at its optimum**: every loosening makes it
+worse, every tightening leaves it unchanged. f = 0.35 reproduces the pre-D37
+floor of −523.4, which confirms the margin is doing the work it was added for.
+
+**Nothing changed.** Six variants across two principled rules, none improves the
+floor. The ring geometry is exhausted as a lever for it.
+
+**What the floor is actually made of**, worth knowing rather than fixing:
+
+| run | score | mission | what it is |
+|---|---|---|---|
+| x2-147e7e55 | −112.9 | 2/3, 1 breach | two zero-reward kills; ring already optimal |
+| x1-19941165 | −108.7 | **3/3, 0 breaches** | a perfect mission, minus 300 for two civilians that die at **t = 0** (D29) |
+| x2-5995abce | −94.2 | 4/5, 1 breach | |
+| x2-8e0cbbb1 | −79.3 | 2/3, 1 breach | |
+
+Two of the four worst runs are dominated by a penalty with no available action:
+x1-19941165 kills everything, breaches nothing, and still scores −108.7. The
+floor is close to what this scoring function allows.
