@@ -127,5 +127,7 @@ What we look for, concretely:
   the identity-eight cell (**180.3**).
 - `notes/ablation-ids.png` / `ablation-delta.png` / `ablation-waterfall.png`
   are the attribution figures. Delta stack height is **Δmean**, not the
-  sum of eight totals. `orbit-cover-tradeoff.png` is a D70 plant at
+  sum of eight totals. `ablation-timeline.png` is the ladder on git
+  commit time (V1–V14 is one day; V23/V24 diamonds are sweep times).
+  `orbit-cover-tradeoff.png` is a D70 plant at
   H=25; live picket is 20 m (D72).

@@ -12,6 +12,8 @@ second policy win, and do not flatten V21's real mean dip.
 Attribution: `ablation-ids.png` (where each id sits),
 `ablation-delta.png` (which ids moved the mean at each step;
 stack height is Δmean), `ablation-waterfall.png` (same Δmean as bars).
+`ablation-timeline.png` is the same floor/mean/max on **commit time**
+(V23/V24 diamonds are sweep times, not git).
 
 ![floor / mean / max](ablation-ladder.png)
 
@@ -26,6 +28,8 @@ stack height is Δmean), `ablation-waterfall.png` (same Δmean as bars).
 ![per-id Δ at each step](ablation-delta.png)
 
 ![mean waterfall](ablation-waterfall.png)
+
+![score vs commit time](ablation-timeline.png)
 
 | ver | commit | change | min | mean | max | worst |
 | --- | --- | --- | ---: | ---: | ---: | --- |

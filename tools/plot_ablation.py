@@ -20,10 +20,9 @@ import json
 import re
 import subprocess
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 import matplotlib.dates as mdates
 
@@ -55,7 +54,8 @@ COL_MEAN = "#1d4ed8"
 COL_MAX = "#64748b"
 COL_BREACH = "#dc2626"
 COL_OK = "#15803d"
-LOCAL = ZoneInfo("Europe/Berlin")
+# CEST. Windows Python here has no tzdata; do not use ZoneInfo.
+LOCAL = timezone(timedelta(hours=2))
 
 
 def version_key(name: str) -> tuple:
@@ -211,10 +211,14 @@ def plot_timeline(rows: list[dict]) -> None:
         return
 
     fig, ax = plt.subplots(figsize=(13.2, 5.2))
-    ax.fill_between(times, mins, maxs, step="post", color="#cbd5e1", alpha=0.55, label="min–max")
-    ax.step(times, maxs, where="post", color=COL_MAX, lw=1.4, label="max")
-    ax.step(times, means, where="post", color=COL_MEAN, lw=2.0, label="mean")
-    ax.step(times, mins, where="post", color=COL_FLOOR, lw=2.2, label="floor (min)")
+    t_step = list(times) + [times[-1] + timedelta(hours=1)]
+    n_pad = lambda xs: xs + [xs[-1]]
+    ax.fill_between(
+        t_step, n_pad(mins), n_pad(maxs), step="post", color="#cbd5e1", alpha=0.55, label="min–max"
+    )
+    ax.step(t_step, n_pad(maxs), where="post", color=COL_MAX, lw=1.4, label="max")
+    ax.step(t_step, n_pad(means), where="post", color=COL_MEAN, lw=2.0, label="mean")
+    ax.step(t_step, n_pad(mins), where="post", color=COL_FLOOR, lw=2.2, label="floor (min)")
     git_t = [t for t, g in zip(times, is_git) if g]
     git_y = [y for y, g in zip(means, is_git) if g]
     other_t = [t for t, g in zip(times, is_git) if not g]
@@ -234,22 +238,18 @@ def plot_timeline(rows: list[dict]) -> None:
             label="V23/V24 sweep time (not git)",
         )
     ax.axhline(0.0, color="#94a3b8", lw=0.8)
-    # Version labels sit above the band. Dense Sep 1 cluster is the point.
     y_top = max(maxs)
-    y_span = y_top - min(mins)
     for i, (t, ver) in enumerate(zip(times, labels)):
-        bump = 0.018 * y_span if i % 2 == 0 else 0.055 * y_span
         ax.annotate(
             ver,
             (mdates.date2num(t), y_top),
-            xytext=(0, 6 + (8 if i % 2 else 0)),
+            xytext=(0, 4 + (10 if i % 2 else 0)),
             textcoords="offset points",
             ha="center",
             va="bottom",
             fontsize=7,
             color="#334155",
         )
-        ax.plot([t, t], [maxs[i], y_top + bump * 0.15], color="#cbd5e1", lw=0.6, zorder=1)
     ax.set_ylabel("score (8 named ids)")
     ax.set_title("Ablation ladder — score vs commit time")
     ax.xaxis.set_major_locator(mdates.DayLocator())
@@ -257,6 +257,8 @@ def plot_timeline(rows: list[dict]) -> None:
     ax.xaxis.set_minor_locator(mdates.HourLocator(byhour=[6, 12, 18]))
     ax.set_xlabel("commit time (local). Equal version steps hide that V1–V14 is one day.")
     ax.legend(loc="lower right", framealpha=0.95)
+    y_lo = min(mins)
+    ax.set_ylim(y_lo - 0.04 * (y_top - y_lo), y_top + 0.22 * (y_top - y_lo))
     fig.autofmt_xdate(rotation=0, ha="center")
     fig.tight_layout()
     save(fig, "ablation-timeline.png")
@@ -483,6 +485,8 @@ def write_summary_md(rows: list[dict]) -> None:
         "Attribution: `ablation-ids.png` (where each id sits),",
         "`ablation-delta.png` (which ids moved the mean at each step;",
         "stack height is Δmean), `ablation-waterfall.png` (same Δmean as bars).",
+        "`ablation-timeline.png` is the same floor/mean/max on **commit time**",
+        "(V23/V24 diamonds are sweep times, not git).",
         "",
         "![floor / mean / max](ablation-ladder.png)",
         "",
@@ -497,6 +501,8 @@ def write_summary_md(rows: list[dict]) -> None:
         "![per-id Δ at each step](ablation-delta.png)",
         "",
         "![mean waterfall](ablation-waterfall.png)",
+        "",
+        "![score vs commit time](ablation-timeline.png)",
         "",
         "| ver | commit | change | min | mean | max | worst |",
         "| --- | --- | --- | ---: | ---: | ---: | --- |",
@@ -576,6 +582,7 @@ def main() -> int:
     plot_trajectories(rows)
     plot_deltas(rows)
     plot_mean_waterfall(rows)
+    plot_timeline(rows)
     write_summary_md(rows)
     if args.update_csv:
         update_csv(rows)

@@ -118,6 +118,8 @@ older table; the rest of V0–V10 matched.
 
 ![mean waterfall — each bar is Δmean](notes/ablation-waterfall.png)
 
+![score vs commit time](notes/ablation-timeline.png)
+
 | ver | commit | change | min | mean | max | Δmin |
 | --- | --- | --- | ---: | ---: | ---: | ---: |
 | V0 | `5589171` | skeleton (untested draft) | −1546.9 | −895.3 | 39.6 | — |
@@ -252,7 +254,8 @@ V10's floor (x2-b −524.6, 0/3, three × −200) is closed.
 `notes/ablation-*.png` and `notes/ablation-summary.md` are the ladder
 figures. Attribution (where points go) is `ablation-ids.png` (each id
 across versions), `ablation-delta.png` (each id's share of Δmean),
-`ablation-waterfall.png` (Δmean as bars). `notes/workflow.md` is
+`ablation-waterfall.png` (Δmean as bars), `ablation-timeline.png`
+(same scores vs commit time). `notes/workflow.md` is
 the test loop. `notes/GAPS.md` is the unfinished list.
 `notes/sense-sample.json` is generated-id `sense_radius` (mean 76.1 m,
 SD 15.9); Cover already uses boot, not this mean.
