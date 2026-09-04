@@ -138,15 +138,18 @@ float PicketFloorAltitude(const Config& cfg, float radius);
 bool OtherInterceptorWins(float us_range, uint32_t us_id,
                           float them_range, int them_id);
 
-/// True when a Friendly on the picket ring is the wall this inbound is
-/// running onto. Toward can be negative — the hostile flies into them,
-/// so they never look like a chaser (`kChasingToward` = 5). Duplicate
-/// abort uses this so a sitting interceptor still sends the farther
-/// neighbour home, and only when they are at least 12 m closer. Yield
-/// still requires a chaser. Mates outside `ring_radius + 10 m` are not
-/// walls (s2's outer seer).
-bool SittingWall(const Track& craft, const Track& hostile,
-                 const Vec3& asset, float ring_radius);
+/// True when a mate's InterceptScore is a connection we do not take.
+/// Chasing mate: they hit first, we miss, or a t_go tie they win on
+/// range/id. Parked mate: only if both connect and they are clearly
+/// first (0.25 s, same as ownership). Receding facing, equal t_go, is
+/// a handoff not a duplicate (D67 / D75). Catchable-from-rest is not
+/// this test: a parked picket that also connects loses to a better
+/// score, and a miss of our own this tick does not yield to them.
+bool OtherConnectsFirst(float us_score, float them_score,
+                        float us_toward, float them_toward,
+                        float us_range, uint32_t us_id,
+                        float them_range, int them_id,
+                        bool them_chasing = false);
 
 /// True if this id is still treated as on station. Self is always alive.
 /// Never-heard is assumed alive so we do not steal sectors before the first

@@ -3,8 +3,9 @@
 Why `kOrbitRate` is 0.06, why that number is only worth anything with
 handoff, and why `CoverCloses` does not AND the red band under the
 bracelet. The pictures are the D70 closed-form leftover-Reach vs ω;
-the live picket is 20 m (D72) and sitting-wall (D71) closed a canary
-waste that this sweep still shows. Decision write-up: D70.
+the live picket is 20 m (D72) and D75's connect-first abort closed a
+canary waste that this ω sweep still shows (D71's 12 m sitting-wall was
+a fit, not the reason). Decision write-up: D70.
 
 Regenerate the figure: `python tools/plot_orbit_tradeoff.py`
 
@@ -46,9 +47,9 @@ deaths).
 
 ## Measured around that peak
 
-Same 10 ids, after cover slack, **before** sitting-wall (D71). Canary
-3/3 at 0.06 still had one wreckage (−40); D71 dropped that without
-changing ω.
+Same 10 ids, after cover slack, **before** D71/D75. Canary
+3/3 at 0.06 still had one wreckage (−40); D75 dropped that without
+changing ω (D71 did too, with a fitted 12 m gap).
 
 | ω rad/s | identity 8 | canary | fa56 | what happened |
 |---:|---:|---|---|---|
@@ -88,7 +89,7 @@ planned ring while the fleet is orbiting.
 
 - Not the union of sense spheres.
 - Not a reason to grow R (D21).
-- Not a reason to lower `kChasingToward` (D71: a sitting wall is a
-  duplicate, not an interceptor).
+- Not a reason to lower `kChasingToward` (D71/D75: a sitting interceptor
+  is a duplicate via intercept score, not via toward = −5).
 - Not re-derived at H=20. The live default is 20 m (D72); the curves
   above are the D70 plant that picked ω.

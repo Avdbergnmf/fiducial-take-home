@@ -72,7 +72,7 @@ because they are the next honest days, not because they were forgotten.
   open, we leave the radio/spawn caps. Some generated layouts will still
   breach.
 - **Two drones, one tick of roster lag.** UniqueOwner plus closer-chaser
-  plus sitting-wall is the substitute for Claim. Hopped heartbeats keep
+  plus connect-first abort is the substitute for Claim. Hopped heartbeats keep
   that lag to a missed beat, not a radio horizon. Two drones can still
   both think they own the inbound for one tick.
 
@@ -134,7 +134,7 @@ in an interview, not a recap of that.
 | **1 m ground grid** | The ground is a scaled Unity plane (`EnvironmentView`), no metre ticks. Distances are guessed from the asset cylinder and kill-radius cue. A 1 m / 10 m grid (and a 10 m altitude tape) is how you read “was that 12 m or 30 m” without selecting a craft. |
 | **Standalone player build** | There is no `BuildPipeline` / CI player. Driving it today means the Unity Editor on this machine. §12 says bring the visualiser; an `.exe` (plus a Linux build if the interview box is not Windows) is how someone else opens a run without installing Unity. `StreamingAssets` is already the load path a build would use. |
 | **Compass** | Viewer +Z is north (`FORMAT.md`: NED `x` → viewer `z`). Arena borders exist and are **unlabelled**. The only `N` is on the inspector heading preview, which is a 2D chip for one craft, not a world rose. A north pip on the ground and a camera-locked compass are the missing orientation. |
-| **Load several runs / a sweep and compare** | The picker lists StreamingAssets **and** an extra folder, but `VisualizerRoot.LoadRun` binds **one** run. Switching V10 ↔ V23 means unloading. There is no linked clocks, no ghost of the other trajectory, no split view, no sweep table of the eight ids inside the viewer. Ablation output sits in `runs/ablation/<ver>/` and is compared by leaving Unity. |
+| **Load several runs / a sweep and compare** | The picker lists StreamingAssets **and** an extra folder, but `VisualizerRoot.LoadRun` binds **one** run. Switching V10 ↔ V24 means unloading. There is no linked clocks, no ghost of the other trajectory, no split view, no sweep table of the eight ids inside the viewer. Ablation output sits in `runs/ablation/<ver>/` and is compared by leaving Unity. |
 
 A self-contained player also has to eat runs without this repo’s Python
 sidecar. Today: `jsonl` → `tools/build_viewer_data.py` → `sync_viewer_data.ps1`
@@ -151,7 +151,7 @@ wishlist.
 | **Top-down, north-up camera** | Default view is 45° orbit; `R` resets that. No plan-view preset. The grid and compass only pay once the camera is looking down the Z axis. |
 | **Sense / comm for the whole fleet** | Those cues draw on the **selected** friendly. Cover (D57) is the fleet belt. Blind gaps between pickets are still a select-and-look exercise. |
 | **Measure** | Click-two-points distance (and height). The grid is the cheap version of this; a tape is the precise one. |
-| **Bookmarks** | Scrub to t=26.48 from memory, or from a log click. No named marks on the timeline for “handoff”, “sitting wall”, “breach”. |
+| **Bookmarks** | Scrub to t=26.48 from memory, or from a log click. No named marks on the timeline for “handoff”, “connect-first”, “breach”. |
 | **Chase / look-from camera** | Selection follow is still orbit. A ram’s last two seconds are easier from the interceptor. Not required by the brief; it is how we actually debug intercepts. |
 | **`near` log volume** | D4: 57% of lines on s1, least informative. Display is English now; the noise is still a brain/viewer filter problem. A default hide of `near` would make Logs usable in an interview. |
 | **Attitude check is still visual** | `FORMAT.md`: the NED→Unity quaternion is silent when wrong. No automated “this craft yawed, the mesh yawed” test in `plot_fixture.py`. |
@@ -167,8 +167,8 @@ links, bandwidth, report/score, time control, kill-envelope, extra-folder
 | §12 item | Standing |
 |---|---|
 | Brain library | s0–s2 + generated x1/x2. s3–s5 not attempted. |
-| DESIGN.md | Rewritten to present tense against D71–D74. |
+| DESIGN.md | Rewritten to present tense against D75. |
 | Visualiser | Graded Unity viewer, driven from the Editor. Remaining items in **Unity viewer** above. |
-| Tests | `ctest` + determinism + identity/canary sweeps. |
-| Results | Ablation ladder V0–V23, plots in `notes/`. |
+| Tests | `ctest` + determinism + identity/canary sweeps. Loop: `notes/workflow.md`. |
+| Results | Ablation ladder V0–V24, plots in `notes/` (including attribution). |
 | Honest gaps | This file. |

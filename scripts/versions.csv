@@ -22,4 +22,5 @@ V19,51a9571,D56 hopped heartbeats (live roster),-4.5,153.8,253.0,x1-a
 V20,6e5c69b,D66 handoff to the mover,-4.5,153.9,253.0,x1-a
 V21,fa3b01c,D66/D67 InterceptScore + orbit,-15.4,138.1,230.3,x1-a
 V22,7d77194,D70 cover slack 5 m,-12.1,150.7,240.2,x1-a
-V23,WORKING,"live tree (D71 sitting-wall, D72 H=20)",-7.7,152.3,237.6,x1-a
+V23,SNAPSHOT,"D71 sitting-wall + D72 H=20 (frozen tree, not git)",-7.7,152.3,237.6,x1-a
+V24,WORKING,D75 connect-first abort (live tree),-7.7,152.3,237.6,x1-a

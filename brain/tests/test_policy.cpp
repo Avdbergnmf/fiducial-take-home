@@ -64,24 +64,43 @@ static void TestOtherInterceptorTieBreak() {
     CHECK(OtherInterceptorWins(49.0f, 13, 49.0f, -1) == false);
 }
 
-static void TestSittingWallIsTheCanaryInterceptor() {
-    std::printf("sitting ring wall counts; outer seer does not\n");
-    Track wall{};
-    wall.belief = Belief::Friendly;
-    wall.position = Vec3(-26.0f, -19.5f, -6.0f);
-    wall.velocity = Vec3(-0.1f, 2.4f, 0.0f);
+static void TestOtherConnectsFirstIsTheCanaryAbort() {
+    std::printf("mate who connects first aborts the late chaser; handoff does not\n");
+    Config cfg;
+    cfg.max_speed = 20.0f;
+    cfg.max_accel = 15.0f;
+    cfg.lateral_limit = 6.71f;
+    cfg.kill_radius = 1.0f;
 
-    Track hostile{};
-    hostile.belief = Belief::Hostile;
-    hostile.position = Vec3(-49.0f, -46.0f, -12.0f);
-    hostile.velocity = Vec3(12.8f, 12.1f, 0.0f);
+    // Canary geometry at ~t=27: inbound running onto a near-stationary
+    // picket. Toward is negative so FlyingAt never fires. The solver still
+    // connects — that is "I've got this", not a 12 m range gap.
+    const Vec3 wall_p(-26.0f, -19.5f, -6.0f), wall_v(-0.1f, 2.4f, 0.0f);
+    const Vec3 hp(-49.0f, -46.0f, -12.0f), hv(12.8f, 12.1f, 0.0f);
+    const float wall = InterceptScore(wall_p, wall_v, hp, hv, cfg);
+    CHECK(wall < kNoHit);
 
-    const Vec3 asset(0, 0, 0);
-    CHECK(SittingWall(wall, hostile, asset, 29.8f));
+    const Vec3 seer_p(-200.0f, -200.0f, -20.0f);
+    CHECK(InterceptScore(seer_p, Vec3(), hp, hv, cfg) >= kNoHit);
 
-    Track seer = wall;
-    seer.position = Vec3(-200.0f, -200.0f, -20.0f);
-    CHECK(!SittingWall(seer, hostile, asset, 86.0f));
+    // Late chaser whose solver also connects, 0.40 s later: wall is
+    // clearly first. 0.10 s is adjacent from-rest noise, not a duplicate.
+    // A miss of our own is not a reason to yield to a parked picket.
+    CHECK(OtherConnectsFirst(wall + 0.40f, wall, 12.0f, -1.7f, 40.0f, 5, 35.0f, 4));
+    CHECK(!OtherConnectsFirst(wall + 0.10f, wall, 12.0f, -1.7f, 40.0f, 5, 35.0f, 4));
+    CHECK(!OtherConnectsFirst(kNoHit + 5.0f, wall, 12.0f, -1.7f, 40.0f, 5, 35.0f, 4));
+
+    // fa56: equal t_go, receding facing, neighbour already closing.
+    // Facing is closer; that is not a duplicate. Handoff still goes.
+    CHECK(!OtherConnectsFirst(2.80f, 2.80f, 3.8f, -1.2f, 50.0f, 1, 40.0f, 0));
+
+    // We hit first: stay, even if they are closer and also connect.
+    CHECK(!OtherConnectsFirst(wall, wall + 0.40f, 12.0f, -1.7f, 49.0f, 5, 35.0f, 4));
+
+    // Adjacent parked pickets both connect from rest. Closer is not a
+    // duplicate — that was D71's 12 m luck. Two chasers on a tie still yield.
+    CHECK(!OtherConnectsFirst(2.80f, 2.80f, 0.0f, 0.0f, 40.0f, 5, 35.0f, 4, false));
+    CHECK(OtherConnectsFirst(2.80f, 2.80f, 12.0f, 12.0f, 40.0f, 5, 35.0f, 4, true));
 }
 
 static void TestInterceptorKeepsGoingAtTheMerge() {
@@ -1028,7 +1047,7 @@ int main() {
     TestFacingSlotMatchesRing();
     TestFacingSlotAgreesOnABisector();
     TestOtherInterceptorTieBreak();
-    TestSittingWallIsTheCanaryInterceptor();
+    TestOtherConnectsFirstIsTheCanaryAbort();
     TestUniqueOwnerIsOneDrone();
     TestInboundOwnerSkipsARecedingFacing();
     TestLiveRingRespaces();

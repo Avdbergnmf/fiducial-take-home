@@ -3348,6 +3348,9 @@ commit on the local track).
 Canary **3/3 +85.0**, wasted 0, drone 5 never leaves station. fa56
 still 3/3 **83.5**. s1 6/6, s2 6/6.
 
+**Superseded by D75.** The 12 m gap and skip-facing were a fit to this
+id. The geometry was always "drone 4's solver connects first."
+
 ---
 
 ## D72 — Default picket 20 m (re-grid after D71)
@@ -3442,7 +3445,49 @@ that only as a description of the distribution, never as a hardcoded
 radius. Baking 60 would be wrong on x1-a (103.8) and on the tight
 tokens (~46).
 
-**Not converted to sense.** `kSittingRingPad` (10 m), `kRayDefaultAlt`
-(20 m), spawn-circle caps, `kCoverSlack` (5 m). Those were measured
-against intercept geometry, not against the sense sphere.
+**Not converted to sense.** `kRayDefaultAlt` (20 m), spawn-circle caps,
+`kCoverSlack` (5 m). Those were measured against intercept geometry, not
+against the sense sphere.
+
+---
+
+## D75 — Duplicate abort is "they connect first", not a 12 m ring gap
+
+D71's SittingWall converted the canary wreckage and kept s1/s2/fa56. It
+did it with a fitted range gap: on the live ring, toward ≥ −5, **≥ 12 m
+closer**, skip the facing incumbent. Canary was 14 m; fa56's receding
+facing incumbent was 10.4 m. That is luck. The fact to act on is the
+solver: a mate whose `InterceptScore` is a hit, and who hits first, has
+the inbound. The late drone coming in hot onto that ram should abort.
+
+**Chosen.** Drop SittingWall. `CloserChaser` scores every Friendly on
+the live sensor track with the same `InterceptScore` the ram flies.
+
+- Parked mate: abort only if both connect and they are clearly first
+  (0.25 s, same as `kHandoffMargin`). Catchable-from-rest is not this —
+  adjacent pickets both "connect from rest" and a 2 m range steal sent
+  the owner home (s1 5/6, fa56 2/3, x2-b 1/3 on the first draw). A miss
+  of our own this tick does not yield to a parked picket (weave leftover).
+- Chasing mate (`ReallyChasing`: `FlyingAt` and faster than ωR + 3 m/s):
+  they hit first, we miss, or a t_go tie they win on range/id.
+- Receding facing, equal t_go: `BeatsIncumbent` still hands off (D67).
+- Yield still uses `FlyingAt`. `kChasingToward` stays 5.
+
+`ReallyChasing` exists because a fat ring's orbit is ωR ≈ 5 m/s at R = 84
+(x2-b). That matches `kChasingToward`, so station-keeping looked like a
+chaser and the real interceptor aborted at 17 m. Yield does not use this
+gate — a slow interceptor still gets a corridor.
+
+**Not chosen.** Lower toward to −5 (D71 table: s1 3/6, s2 5/6, fa56
+0/3). Catchable-from-rest (facing parked is catchable; handoff dies).
+Keep the 12 m gap and skip-facing (hides the geometry). Ballistic CPA
+(canary wall vs inbound has ~6 m of altitude leftover; the solver still
+connects). Abort on our miss to a parked mate (x2-b / s1 weave).
+
+**Measured.** Identity 8 mean **152.3**, worst x1-a **−7.7** (2 civ, 0
+breach, D44). s0 96.6, s1 6/6 **188.4**, s2 6/6 **180.3**, x1-b 237.6,
+x1-c 136.2, x2-a 201.1, x2-b 3/3 **185.5**. Canary `x1-06b926af…`
+**3/3 +87.1**, wasted 0, one ram (drone 5 at 28.86). fa56
+`x2-fa56ef…` 3/3 **83.2**.
+
 

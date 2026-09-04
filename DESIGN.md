@@ -5,16 +5,17 @@
 Every drone holds a picket slot and spends itself on at most one inbound it
 can catch before the asset cylinder. Classification is a 3D miss. Allocation
 is radio-free: unique facing owner, then a handoff to whoever can actually
-finish, then a sitting-wall check so a parked interceptor is not rammed from
+finish, then a connect-first abort so a parked interceptor is not rammed from
 behind. The ring is sized for radio, thinned over the live roster, and shrunk
 until the unique-owner inbound at picket height still has leftover reach.
 
 On the eight named scenarios (`s0, s1, s2, x1-a, x1-b, x1-c, x2-a, x2-b`)
-the live brain is mean **152.3**, worst **x1-a −7.7** (two civilians, not
-a breach; D44 stays). s0 **96.6**, s1 6/6 **188.0**, s2 6/6 **180.5**,
-x1-b **237.6**, x1-c **136.3**, x2-a 4/4 **201.2**, x2-b 3/3 **185.6**.
-Detection is unused: `declare_identity` is never called. The git ladder
-and plots are in RESULTS.md and `notes/ablation-*.png`.
+the live brain is **V24**, mean **152.3**, worst **x1-a −7.7** (two
+civilians, not a breach; D44 stays). s0 **96.6**, s1 6/6 **188.4**, s2 6/6
+**180.3**, x1-b **237.6**, x1-c **136.2**, x2-a 4/4 **201.1**, x2-b 3/3
+**185.5**. Detection is unused: `declare_identity` is never called. The
+git ladder and plots are in RESULTS.md and `notes/ablation-*.png`. How we
+tested: `notes/workflow.md`.
 
 The decision this document still defends is the catchable-only commit rule.
 It turned s1 from 1 kill and 5 breaches into 6/6. Hops, hopped heartbeats,
@@ -164,12 +165,13 @@ incumbent: must win by 0.25 s of score. Receding incumbent, same t_go bin:
 also if closing faster by 0.5 m/s. Orbit without that handoff is a cost
 (D23). Leftover Reach vs ω: `notes/orbit-cover-tradeoff.md`.
 
-**A sitting wall is a duplicate.** A parked facing picket has toward ≈ 0
-along the LOS (orbit tangent ⊥ inbound). Lowering the chase threshold to
-treat them as interceptors breaks s1/s2/fa56 — every parked neighbour looks
-busy. Instead: Friendly on the live ring, closing, toward ≥ −5, **≥ 12 m
-closer**, skip the named facing incumbent. The outer seer on s2 is not a
-wall.
+**A mate who already connects is a duplicate.** A parked facing picket has
+toward ≈ 0 along the LOS (orbit tangent ⊥ inbound), so `FlyingAt` never
+fires. Lowering the chase threshold to treat them as interceptors breaks
+s1/s2/fa56. Instead: `InterceptScore` on the live track. Parked mate: abort
+only if they connect clearly first (0.25 s). Chasing mate: they hit first,
+or we miss. Receding facing with a tied score is still a handoff. A 12 m
+range gap was a fit, not this. Fat-ring orbit (ωR ≈ 5 m/s) is not a chase.
 
 Pickets step off the *remaining* intercept flight, not the whole
 slot-to-hostile chord. A 6 s-old Hostile latch is wreckage.
@@ -262,17 +264,28 @@ one `params` line at boot. Per-tick logs would overflow (`drone == -1`).
 
 ## Testing approach
 
+The loop, determinism, and viewer-as-debugger write-up is
+`notes/workflow.md`. Short form:
+
 - **`ctest`:** `test_protocol` (truncation, version, garbage, outbox
   priority/expiry, seen-set, relay stamps), `test_policy` (facing slot, unique
-  owner, live ring, yield corridor, closed cover, sitting wall, default
+  owner, live ring, yield corridor, closed cover, connect-first abort, default
   picket 20 m), `test_belief` (classifier geometry plus peer-report
   association by pose, not track_id).
 - **Determinism:** `scripts\determinism.ps1` — `--threads 1 --record` then
   `--threads 8 --replay`. Compute timings stripped (not scored).
-- **Improvement vs noise:** `iterate.ps1` on one id (`runs/history.csv` via
-  `scripts\history.ps1`), then `sweep.ps1` on the same eight. The graded
-  number is the **worst** total, not the mean. The git ladder is
+- **One id, then the eight, then named hard ids.** `iterate.ps1` with a
+  trace into the Unity viewer; `sweep.ps1` on the identity eight (worst
+  total, not the mean); canary `x1-06b926af…` and fa56 `x2-fa56ef…` when
+  the eight had already accepted a story. The git ladder is
   `scripts\ablation.ps1` + `scripts\versions.csv`, plotted into `notes/`.
+- **Paper trail in the same pass.** `notes/decisions.md`,
+  `notes/provenance.md`, `scripts/versions.csv`. A knob without a
+  measured/derived/guess label is not a result.
+- **Viewer:** scrub to the report event (`breach` / `intercept` /
+  `friendly_lost`), read that drone’s `commit` / `abort` / `hand=` lines.
+  Dual-ram, nobody-committed, and receding-facing misses were all found
+  this way.
 
 ## What I would do with another week
 
@@ -316,8 +329,8 @@ true.
 
 **Brain.** The *decisions* are mine: sure-hit-or-shrink, friends-only then
 local Hostile on the scoring hook, catchable commit, one owner clockwise,
-hops, hopped heartbeats, handoff/orbit, closed-cover slack, sitting wall
-(D2, D9, D11, D15, D18, D56, D66, D70, D71). Most of the C++ was written by
+hops, hopped heartbeats, handoff/orbit, closed-cover slack, connect-first
+duplicate abort (D2, D9, D11, D15, D18, D56, D66, D70, D75). Most of the C++ was written by
 an LLM from those instructions. A lot of it was already right when I
 measured it, and I kept it. That is specify, generate, sweep, keep or
 reject. I can reconstruct the rules from scratch. I would not type

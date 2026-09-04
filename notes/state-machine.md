@@ -59,7 +59,9 @@ whatever station we were in.
 stations, then that live id. A receding owner yields one step clockwise
 on the live ring. Two observers on a bisector name the same owner. A mate
 already flying at it (closing along the LOS ≥ 5 m/s) is the interceptor;
-we abort as `duplicate`. With the orbit on, a challenger with a better
+we abort as `duplicate`. A parked mate whose `InterceptScore` is a hit
+that lands clearly first (0.25 s) is also `duplicate` (D75) — catchable
+from rest is not that. With the orbit on, a challenger with a better
 `InterceptScore` takes the inbound (`kHandoff`). Approaching incumbent:
 must win by `kHandoffMargin` seconds of score (default 0.25, D69). Receding
 incumbent, same t_go bin: also if closing faster by `kHandoffAspect` m/s
@@ -90,7 +92,7 @@ uses these names; hover is the paragraph.
 | Reason | Who | Meaning |
 |---|---|---|
 | `lost` | both | Track vanished (dead, out of sense, hearsay aged out). |
-| `duplicate` | both | Another friendly is clearly closer, or similar range and lower id. A sitting ring wall (inbound running onto them, toward can be negative) also counts if they are ≥ 12 m closer and not the facing incumbent (D71). |
+| `duplicate` | both | Another friendly is clearly closer, or similar range and lower id. A mate whose `InterceptScore` is a hit we do not take also counts: parked, clearly first by 0.25 s; chasing, they hit first or we miss (D75). Receding facing with a tied score is a handoff, not a duplicate (D67). |
 | `timeout` | both | 12 s since we left. One spawn interval is ~14 s; come home. |
 | `not-hostile` | both | Class is no longer Hostile (scramble: also Friendly / Wreckage). |
 | `not-threat` | scramble only | Cylinder LOS gone, or a level overflight that never dived (1 s). |

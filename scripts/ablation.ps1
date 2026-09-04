@@ -12,8 +12,10 @@
 # today's SDK, and sweeps the same 8 ids. Output is runs\ablation\<ver>\ —
 # gitignored; do not copy into StreamingAssets.
 #
-# Commit WORKING (versions.csv V23, or -Current) copies the live working-tree
-# brain/src instead of git archive, so uncommitted D71+ appear on the ladder.
+# Commit WORKING (versions.csv V24, or -Current) copies the live working-tree
+# brain/src instead of git archive, so uncommitted D75+ appear on the ladder.
+# V23 is SNAPSHOT: a frozen sitting-wall tree kept under runs/ablation/V23,
+# not a git commit. -All will not rebuild it.
 #
 # Plots: python tools\plot_ablation.py
 # Iterate log (not this): scripts\history.ps1
@@ -71,12 +73,10 @@ function Read-VersionTable {
 function Resolve-Rows {
     $table = Read-VersionTable
     if ($Current) {
-        $hit = @($table | Where-Object {
-            $_.commit -eq "WORKING" -or $_.version -eq "V23"
-        })
+        $hit = @($table | Where-Object { $_.commit -eq "WORKING" })
         if ($hit.Count -gt 0) { return , $hit[0] }
         return , [pscustomobject]@{
-            version = "V23"
+            version = "V24"
             commit  = "WORKING"
             label   = "live working tree"
             min     = ""
@@ -104,7 +104,7 @@ function Resolve-Rows {
         $hit = @($table | Where-Object { $_.commit -eq "WORKING" })
         if ($hit.Count -gt 0) { return , $hit[0] }
         return , [pscustomobject]@{
-            version = "V23"
+            version = "V24"
             commit  = "WORKING"
             label   = "live working tree"
             min     = ""
@@ -321,6 +321,23 @@ function Invoke-Version {
     $outDir = Join-Path $AblationRoot $ver
     $existingSummary = Join-Path $outDir "summary.csv"
     $existingMeta = Join-Path $outDir "meta.json"
+    $frozen = ($Row.commit -eq "SNAPSHOT")
+    if ($frozen) {
+        if (-not (Test-Path -LiteralPath $existingSummary) -or
+            -not (Test-Path -LiteralPath $existingMeta)) {
+            throw ("{0} is a frozen snapshot, not a git commit. Keep runs/ablation/{0}." -f $ver)
+        }
+        Write-Host ("frozen {0} (snapshot on disk, not rebuilt)" -f $ver) -ForegroundColor DarkGray
+        $m = Get-Content -Raw -LiteralPath $existingMeta | ConvertFrom-Json
+        return [pscustomobject]@{
+            Version = $ver
+            Commit  = "SNAPSHOT"
+            Min     = $m.min
+            Mean    = $m.mean
+            Max     = $m.max
+            Worst   = $m.worst
+        }
+    }
     if ($SkipExisting -and (Test-Path -LiteralPath $existingSummary) -and
         (Test-Path -LiteralPath $existingMeta)) {
         Write-Host ("skip {0} (summary exists)" -f $ver) -ForegroundColor DarkGray
@@ -380,9 +397,11 @@ function Invoke-Version {
 
     $stats = $rows | Measure-Object -Property Total -Average -Minimum -Maximum
     $worstRow = @($rows | Sort-Object Total)[0]
-    $gotMin = [math]::Round($stats.Minimum, 1)
-    $gotMean = [math]::Round($stats.Average, 1)
-    $gotMax = [math]::Round($stats.Maximum, 1)
+    # Midpoint-away-from-zero so 152.25 is 152.3, not banker's 152.2 (a fake
+    # V23→V24 regression on a wash).
+    $gotMin = [math]::Round($stats.Minimum, 1, [System.MidpointRounding]::AwayFromZero)
+    $gotMean = [math]::Round($stats.Average, 1, [System.MidpointRounding]::AwayFromZero)
+    $gotMax = [math]::Round($stats.Maximum, 1, [System.MidpointRounding]::AwayFromZero)
 
     $footer = "worst {0:N1} ({1})   mean {2:N1}   best {3:N1}" -f `
         $gotMin, $worstRow.Id, $gotMean, $gotMax
@@ -416,8 +435,9 @@ function Invoke-Version {
         version        = $ver
         label          = $Row.label
         commit_request = $Row.commit
-        commit         = if ($liveTree) { $head } else { (git -C $RepoRoot rev-parse --verify "$($Row.commit)^{commit}").Trim() }
+        commit         = if ($liveTree) { "WORKING" } else { (git -C $RepoRoot rev-parse --verify "$($Row.commit)^{commit}").Trim() }
         commit_short   = if ($liveTree) { "WORKING" } else { (git -C $RepoRoot rev-parse --short $Row.commit).Trim() }
+        head           = $head
         working_tree   = [bool]$liveTree
         when           = (Get-Date).ToString("s")
         min            = $gotMin

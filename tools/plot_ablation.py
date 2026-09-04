@@ -19,6 +19,7 @@ import csv
 import json
 import re
 import sys
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 
 import matplotlib
@@ -32,6 +33,17 @@ ABLATION = REPO / "runs" / "ablation"
 NOTES = REPO / "notes"
 MANIFEST = REPO / "scripts" / "versions.csv"
 IDS = ["s0", "s1", "s2", "x1-a", "x1-b", "x1-c", "x2-a", "x2-b"]
+# tab10, stable per id so the delta stack and the trajectories match.
+ID_COLORS = {
+    "s0": "#4e79a7",
+    "s1": "#f28e2b",
+    "s2": "#e15759",
+    "x1-a": "#76b7b2",
+    "x1-b": "#59a14f",
+    "x1-c": "#edc948",
+    "x2-a": "#b07aa1",
+    "x2-b": "#ff9da7",
+}
 
 COL_FLOOR = "#b45309"
 COL_MEAN = "#1d4ed8"
@@ -76,6 +88,11 @@ def fget(rec: dict, key: str, default: float = 0.0) -> float:
         return float(rec.get(key, default) or default)
     except (TypeError, ValueError):
         return default
+
+
+def round1(x) -> float:
+    """Half-up to 0.1. Python/banker's round(152.25, 1) is 152.2 — a fake dip."""
+    return float(Decimal(str(x)).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP))
 
 
 def iget(rec: dict, key: str, default: int = 0) -> int:
@@ -229,12 +246,128 @@ def plot_floor(rows: list[dict]) -> None:
     save(fig, "ablation-floor.png")
 
 
+def id_totals(rows: list[dict]) -> dict[str, list[float]]:
+    out = {sid: [] for sid in IDS}
+    for r in rows:
+        per = r["_per"]
+        for sid in IDS:
+            rec = per.get(sid)
+            out[sid].append(fget(rec, "Total") if rec else float("nan"))
+    return out
+
+
+def plot_trajectories(rows: list[dict]) -> None:
+    """Each named id's total across versions — where the points live."""
+    series = id_totals(rows)
+    labels = [r["version"] for r in rows]
+    x = np.arange(len(labels))
+    fig, ax = plt.subplots(figsize=(11.5, 5.4))
+    for sid in IDS:
+        ax.plot(
+            x,
+            series[sid],
+            color=ID_COLORS[sid],
+            lw=1.8,
+            marker="o",
+            ms=4,
+            label=sid,
+        )
+    ax.axhline(0.0, color="#94a3b8", lw=0.8)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=45, ha="right")
+    ax.set_ylabel("total")
+    ax.set_title("Where the points live — each named id across versions")
+    ax.legend(loc="lower right", ncol=4, framealpha=0.95, fontsize=8)
+    fig.tight_layout()
+    save(fig, "ablation-ids.png")
+
+
+def plot_deltas(rows: list[dict]) -> None:
+    """Stacked Δtotal per id at each version step — where points came from."""
+    if len(rows) < 2:
+        return
+    series = id_totals(rows)
+    step_labels = [r["version"] for r in rows[1:]]
+    n = len(step_labels)
+    x = np.arange(n)
+    fig, ax = plt.subplots(figsize=(11.5, 5.6))
+    pos_bottom = np.zeros(n)
+    neg_bottom = np.zeros(n)
+    for sid in IDS:
+        prev = np.array(series[sid][:-1], dtype=float)
+        cur = np.array(series[sid][1:], dtype=float)
+        d = (cur - prev) / 8.0
+        pos = np.where(d > 0.0, d, 0.0)
+        neg = np.where(d < 0.0, d, 0.0)
+        ax.bar(
+            x,
+            pos,
+            bottom=pos_bottom,
+            color=ID_COLORS[sid],
+            width=0.82,
+            label=sid,
+        )
+        ax.bar(x, neg, bottom=neg_bottom, color=ID_COLORS[sid], width=0.82)
+        pos_bottom += pos
+        neg_bottom += neg
+    ax.axhline(0.0, color="#94a3b8", lw=0.8)
+    ax.set_xticks(x)
+    ax.set_xticklabels(step_labels, rotation=45, ha="right")
+    ax.set_ylabel("contribution to Δmean (each colour is one id)")
+    ax.set_title("Where the mean came from — per-id share of each step")
+    ax.legend(loc="upper right", ncol=4, framealpha=0.95, fontsize=8)
+    fig.tight_layout()
+    save(fig, "ablation-delta.png")
+
+
+def plot_mean_waterfall(rows: list[dict]) -> None:
+    """Running mean, with each step's Δmean as a bar from the previous mean."""
+    if len(rows) < 2:
+        return
+    labels = [r["version"] for r in rows]
+    means = np.array([float(r["mean"]) for r in rows], dtype=float)
+    x = np.arange(len(labels))
+    fig, ax = plt.subplots(figsize=(11.5, 4.8))
+    ax.plot(x, means, color=COL_MEAN, lw=2.0, marker="o", ms=5, zorder=3, label="mean")
+    for i in range(1, len(means)):
+        d = means[i] - means[i - 1]
+        color = COL_OK if d >= 0 else COL_BREACH
+        ax.plot([i - 1, i], [means[i - 1], means[i - 1]], color="#94a3b8", lw=0.7, zorder=1)
+        ax.bar(
+            i,
+            d,
+            bottom=means[i - 1],
+            width=0.55,
+            color=color,
+            alpha=0.85,
+            zorder=2,
+        )
+    ax.axhline(0.0, color="#94a3b8", lw=0.8)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=45, ha="right")
+    ax.set_ylabel("mean of 8 named ids")
+    ax.set_title("Mean score — each bar is the move from the previous version")
+    ax.legend(loc="lower right", framealpha=0.95)
+    fig.tight_layout()
+    save(fig, "ablation-waterfall.png")
+
+
 def write_summary_md(rows: list[dict]) -> None:
     lines = [
         "# Ablation ladder",
         "",
         "Generated by `tools/plot_ablation.py` from `runs/ablation/`.",
         "`scripts/history.ps1` is the iterate CSV, not this table.",
+        "",
+        "Live brain is **V24** (`WORKING`, D75 connect-first). **V23** is a",
+        "frozen sitting-wall snapshot, not live. V23 and V24 match on",
+        "min / mean / max at one decimal (mean **152.3** is half-up of 152.25);",
+        "per-id cells shuffle by ≤ 0.4. Do not read the last delta column as a",
+        "second policy win, and do not flatten V21's real mean dip.",
+        "",
+        "Attribution: `ablation-ids.png` (where each id sits),",
+        "`ablation-delta.png` (which ids moved the mean at each step;",
+        "stack height is Δmean), `ablation-waterfall.png` (same Δmean as bars).",
         "",
         "![floor / mean / max](ablation-ladder.png)",
         "",
@@ -243,6 +376,12 @@ def write_summary_md(rows: list[dict]) -> None:
         "![kills / breaches / civilians](ablation-mission.png)",
         "",
         "![worst id per version](ablation-floor.png)",
+        "",
+        "![each named id](ablation-ids.png)",
+        "",
+        "![per-id Δ at each step](ablation-delta.png)",
+        "",
+        "![mean waterfall](ablation-waterfall.png)",
         "",
         "| ver | commit | change | min | mean | max | worst |",
         "| --- | --- | --- | ---: | ---: | ---: | --- |",
@@ -255,9 +394,9 @@ def write_summary_md(rows: list[dict]) -> None:
         mean = r["mean"]
         mx = r["max"]
         worst = r.get("worst") or ""
-        mn_s = f"{float(mn):.1f}"
-        mean_s = f"{float(mean):.1f}"
-        mx_s = f"{float(mx):.1f}"
+        mn_s = f"{round1(mn):.1f}"
+        mean_s = f"{round1(mean):.1f}"
+        mx_s = f"{round1(mx):.1f}"
         delta = ""
         if prev is not None:
             d = float(mn) - float(prev)
@@ -285,9 +424,9 @@ def update_csv(rows: list[dict]) -> None:
         hit = by_ver.get(rec["version"])
         if not hit:
             continue
-        rec["min"] = f"{float(hit['min']):.1f}"
-        rec["mean"] = f"{float(hit['mean']):.1f}"
-        rec["max"] = f"{float(hit['max']):.1f}"
+        rec["min"] = f"{round1(hit['min']):.1f}"
+        rec["mean"] = f"{round1(hit['mean']):.1f}"
+        rec["max"] = f"{round1(hit['max']):.1f}"
         rec["worst"] = hit.get("worst") or rec.get("worst") or ""
     with MANIFEST.open("w", encoding="utf-8", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=fieldnames)
@@ -319,6 +458,9 @@ def main() -> int:
     plot_heatmap(rows)
     plot_breaches(rows)
     plot_floor(rows)
+    plot_trajectories(rows)
+    plot_deltas(rows)
+    plot_mean_waterfall(rows)
     write_summary_md(rows)
     if args.update_csv:
         update_csv(rows)
