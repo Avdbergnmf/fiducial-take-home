@@ -3264,6 +3264,9 @@ layout-adaptive `ω(R)` is still the right *shape* (fat rings want
 slower) but integrating `ω(R)·t` while R shrinks would jump phase;
 boot-from-full-R is the safe form if this is revisited.
 
+Charts of leftover Reach vs ω (knife-edge / fat / tight-sense, plus the
+centripetal tax): `notes/orbit-cover-tradeoff.md`.
+
 **Cue.** Kill envelope now diverts around the live ballistic point
 (`p + v t`), same pancake as the Reach cue. Parked is the old from-rest
 belt. Brain shrink stays from rest, so the overlay can read greener
@@ -3411,4 +3414,35 @@ layouts that bind, with a knife-edge bracelet.
 **Keep 5.** Overlay margin, not a score win. 0 is the W_kill peak on
 this draw; 10 is past the plateau. The remaining 25893f hole is not
 this knob.
+
+---
+
+## D74 — Sense radius is on boot; do not bake a sample mean
+
+Cover, first-sight leftover, the thinning-ring sense cap, and the
+kill-envelope pancake already take `cfg.sense_radius`. `Config::From`
+copies `SwBootInfo::sense_radius` once at `create`. The 60 m in
+`world.h` is the s1 / unit-test default; it is overwritten before the
+first tick. CHALLENGE.md §6 publishes it (`always shorter than the
+radio`) and §11 refuses `--dump-params` on generated ids, so a number
+read off s1.json is not a mission constant.
+
+**Could we have missed it?** Dump-params on s0–s5 is 60 m on every
+fixed rung, which is how the 60 default got there. Generated tokens
+are the ones that move. Those still tell every drone the live value
+on boot (logged `params sense=…`); the brain already sizes Cover on
+that. Baking a sweep mean into the binary would be fitting the
+unpublished draw, which is what dump-params is refused to prevent.
+
+**Fallback sample** (if boot were missing — it is not): 21 generated ids
+(the five named x1/x2 plus 16 `--new-token` draws) plus dump-params on
+s0–s5. Fixed rungs are all **60**. Generated: mean **76.1 m**, SD
+**15.9**, min **46.1**, max **103.8** (`notes/sense-sample.json`). Use
+that only as a description of the distribution, never as a hardcoded
+radius. Baking 60 would be wrong on x1-a (103.8) and on the tight
+tokens (~46).
+
+**Not converted to sense.** `kSittingRingPad` (10 m), `kRayDefaultAlt`
+(20 m), spawn-circle caps, `kCoverSlack` (5 m). Those were measured
+against intercept geometry, not against the sense sphere.
 

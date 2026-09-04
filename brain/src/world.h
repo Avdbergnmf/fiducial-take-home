@@ -111,6 +111,9 @@ struct Config {
     uint32_t tier = 0;
     float dt = 0.01f;
 
+    // Struct defaults are the s1 fixture for unit tests. create() always
+    // overwrites from SwBootInfo::sense_radius (D74) — 60 is not a mission
+    // constant, and --dump-params is refused on the generated ids we grade.
     float sense_radius = 60.0f;
     float comm_radius = 90.0f;
     uint32_t mtu = 256;

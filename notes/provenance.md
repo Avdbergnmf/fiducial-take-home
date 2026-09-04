@@ -27,6 +27,11 @@ refuses to publish loss, latency and track-drop times on purpose. The ranked
 list below is the ones that were costing runs; D2/D7/D11/D12/D13/D14 took
 the first five.
 
+Leftover **GUESS** constants we did not re-grid, on purpose, are listed in
+`notes/GAPS.md` (time optimisation, not forgotten). `sense_radius` is not
+among them: it is on `SwBootInfo` and Cover already uses the live value
+(D74). Do not bake a `--dump-params` / sweep mean into the binary.
+
 ---
 
 ## Config, resolved from SwBootInfo — `world.h`

@@ -5,23 +5,34 @@
 #     powershell -ExecutionPolicy Bypass -File scripts\ablation.ps1 -Commit 2522c14
 #     powershell -ExecutionPolicy Bypass -File scripts\ablation.ps1 -Version V7 -Trace
 #     powershell -ExecutionPolicy Bypass -File scripts\ablation.ps1 -All
+#     powershell -ExecutionPolicy Bypass -File scripts\ablation.ps1 -Current
 #
-# The version key and expected scores live in scripts\versions.csv (the table
-# in RESULTS.md). This archives brain/src at that commit into a scratch tree,
-# compiles it against today's SDK, and sweeps the same 8 ids. Output is
-# runs\ablation\<ver>\ — gitignored; do not copy into StreamingAssets.
+# The version key and expected scores live in scripts\versions.csv. This
+# archives brain/src at that commit into a scratch tree, compiles it against
+# today's SDK, and sweeps the same 8 ids. Output is runs\ablation\<ver>\ —
+# gitignored; do not copy into StreamingAssets.
+#
+# Commit WORKING (versions.csv V23, or -Current) copies the live working-tree
+# brain/src instead of git archive, so uncommitted D71+ appear on the ladder.
+#
+# Plots: python tools\plot_ablation.py
+# Iterate log (not this): scripts\history.ps1
 #
 # -Trace records the worst scenario (jsonl + viewer sidecar). -TraceAll does
 # every id. Default is reports only, which is enough to check the numbers.
+# -SkipExisting leaves a version alone if summary.csv is already there.
+# -All continues after a version that fails to build or sweep.
 
 [CmdletBinding()]
 param(
     [string]$Version,
     [string]$Commit,
     [switch]$All,
+    [switch]$Current,
     [switch]$List,
     [switch]$Trace,
     [switch]$TraceAll,
+    [switch]$SkipExisting,
     [int]$Jobs = 4,
     [string]$Manifest,
     [string]$Config = "Release"
@@ -59,6 +70,21 @@ function Read-VersionTable {
 
 function Resolve-Rows {
     $table = Read-VersionTable
+    if ($Current) {
+        $hit = @($table | Where-Object {
+            $_.commit -eq "WORKING" -or $_.version -eq "V23"
+        })
+        if ($hit.Count -gt 0) { return , $hit[0] }
+        return , [pscustomobject]@{
+            version = "V23"
+            commit  = "WORKING"
+            label   = "live working tree"
+            min     = ""
+            mean    = ""
+            max     = ""
+            worst   = ""
+        }
+    }
     if ($All) { return $table }
 
     $key = Normalize-VersionKey $Version
@@ -72,6 +98,20 @@ function Resolve-Rows {
         $row = $hit[0]
         if ($wantCommit) { $row.commit = $wantCommit }
         return , $row
+    }
+
+    if ($wantCommit -eq "WORKING" -or $wantCommit -eq ".") {
+        $hit = @($table | Where-Object { $_.commit -eq "WORKING" })
+        if ($hit.Count -gt 0) { return , $hit[0] }
+        return , [pscustomobject]@{
+            version = "V23"
+            commit  = "WORKING"
+            label   = "live working tree"
+            min     = ""
+            mean    = ""
+            max     = ""
+            worst   = ""
+        }
     }
 
     if ($wantCommit) {
@@ -94,7 +134,7 @@ function Resolve-Rows {
         }
     }
 
-    throw "Pass -Version V7, -Commit <hash>, -All, or -List."
+    throw "Pass -Version V7, -Commit <hash>, -Current, -All, or -List."
 }
 
 function Write-Log {
@@ -119,7 +159,9 @@ function Show-Table {
     }
     Write-Host ""
     Write-Host "Rebuild one:  powershell -ExecutionPolicy Bypass -File scripts\ablation.ps1 -Version V7"
+    Write-Host "Live tree:    powershell -ExecutionPolicy Bypass -File scripts\ablation.ps1 -Current"
     Write-Host "With viewer:  powershell -ExecutionPolicy Bypass -File scripts\ablation.ps1 -Version V7 -Trace"
+    Write-Host "Plots:        python tools\plot_ablation.py"
     Write-Host "Output:       runs\ablation\<ver>\  (gitignored)"
 }
 
@@ -130,27 +172,44 @@ function Build-BrainAtCommit {
         [Parameter(Mandatory)][string]$LogPath
     )
 
-    $resolved = (git -C $RepoRoot rev-parse --verify "$Commit^{commit}").Trim()
-    if ($LASTEXITCODE -ne 0 -or -not $resolved) {
-        throw "git cannot resolve commit $Commit"
+    $liveTree = ($Commit -eq "WORKING" -or $Commit -eq ".")
+    if (-not $liveTree) {
+        $resolved = (git -C $RepoRoot rev-parse --verify "$Commit^{commit}").Trim()
+        if ($LASTEXITCODE -ne 0 -or -not $resolved) {
+            throw "git cannot resolve commit $Commit"
+        }
+        $short = (git -C $RepoRoot rev-parse --short $resolved).Trim()
+        Write-Log $LogPath ("source: {0} ({1})" -f $short, $resolved) "DarkGray"
     }
-    $short = (git -C $RepoRoot rev-parse --short $resolved).Trim()
-    Write-Log $LogPath ("source: {0} ({1})" -f $short, $resolved) "DarkGray"
+    else {
+        $short = "WORKING"
+        $resolved = (git -C $RepoRoot rev-parse HEAD).Trim()
+        Write-Log $LogPath ("source: working tree (HEAD {0})" -f $resolved) "DarkGray"
+    }
 
     if (Test-Path -LiteralPath $WorkDir) {
         Remove-Item -LiteralPath $WorkDir -Recurse -Force
     }
     New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
 
-    $zip = Join-Path $WorkDir "src.zip"
-    git -C $RepoRoot archive --format=zip $resolved brain/src -o $zip
-    if ($LASTEXITCODE -ne 0) { throw "git archive $short brain/src failed" }
-    Expand-Archive -Force -LiteralPath $zip -DestinationPath $WorkDir
-    $src = Join-Path $WorkDir "brain\src"
-    if (-not (Test-Path -LiteralPath $src)) {
-        throw "git archive did not produce brain/src (commit $short)"
+    if ($liveTree) {
+        $live = Join-Path $RepoRoot "brain\src"
+        if (-not (Test-Path -LiteralPath $live)) {
+            throw "no live brain\src at $live"
+        }
+        Copy-Item -Recurse $live (Join-Path $WorkDir "src")
     }
-    Copy-Item -Recurse $src (Join-Path $WorkDir "src")
+    else {
+        $zip = Join-Path $WorkDir "src.zip"
+        git -C $RepoRoot archive --format=zip $resolved brain/src -o $zip
+        if ($LASTEXITCODE -ne 0) { throw "git archive $short brain/src failed" }
+        Expand-Archive -Force -LiteralPath $zip -DestinationPath $WorkDir
+        $src = Join-Path $WorkDir "brain\src"
+        if (-not (Test-Path -LiteralPath $src)) {
+            throw "git archive did not produce brain/src (commit $short)"
+        }
+        Copy-Item -Recurse $src (Join-Path $WorkDir "src")
+    }
 
     $sdkCmake = $SdkInclude -replace '\\', '/'
     $cmake = @"
@@ -260,6 +319,22 @@ function Invoke-Version {
 
     $ver = $Row.version
     $outDir = Join-Path $AblationRoot $ver
+    $existingSummary = Join-Path $outDir "summary.csv"
+    $existingMeta = Join-Path $outDir "meta.json"
+    if ($SkipExisting -and (Test-Path -LiteralPath $existingSummary) -and
+        (Test-Path -LiteralPath $existingMeta)) {
+        Write-Host ("skip {0} (summary exists)" -f $ver) -ForegroundColor DarkGray
+        $m = Get-Content -Raw -LiteralPath $existingMeta | ConvertFrom-Json
+        return [pscustomobject]@{
+            Version = $ver
+            Commit  = $Row.commit
+            Min     = $m.min
+            Mean    = $m.mean
+            Max     = $m.max
+            Worst   = $m.worst
+        }
+    }
+
     New-Item -ItemType Directory -Force -Path $outDir | Out-Null
     $log = Join-Path $outDir "log.txt"
     Set-Content -LiteralPath $log -Value ("# {0}  {1}  {2}" -f $ver, $Row.commit, $Row.label)
@@ -335,12 +410,15 @@ function Invoke-Version {
         }
     }
 
+    $liveTree = ($Row.commit -eq "WORKING" -or $Row.commit -eq ".")
+    $head = (git -C $RepoRoot rev-parse HEAD).Trim()
     $meta = [ordered]@{
         version        = $ver
         label          = $Row.label
         commit_request = $Row.commit
-        commit         = (git -C $RepoRoot rev-parse --verify "$($Row.commit)^{commit}").Trim()
-        commit_short   = (git -C $RepoRoot rev-parse --short $Row.commit).Trim()
+        commit         = if ($liveTree) { $head } else { (git -C $RepoRoot rev-parse --verify "$($Row.commit)^{commit}").Trim() }
+        commit_short   = if ($liveTree) { "WORKING" } else { (git -C $RepoRoot rev-parse --short $Row.commit).Trim() }
+        working_tree   = [bool]$liveTree
         when           = (Get-Date).ToString("s")
         min            = $gotMin
         mean           = $gotMean
@@ -381,15 +459,32 @@ function Invoke-Version {
 }
 
 # --- entry ----------------------------------------------------------------
-if ($List -or (-not $All -and -not $Version -and -not $Commit)) {
+if ($List -or (-not $All -and -not $Current -and -not $Version -and -not $Commit)) {
     Show-Table
-    if ($List -or (-not $Version -and -not $Commit -and -not $All)) { return }
+    if ($List -or (-not $Version -and -not $Commit -and -not $All -and -not $Current)) { return }
 }
 
 $targets = Resolve-Rows
 $ladder = @()
 foreach ($row in $targets) {
-    $ladder += Invoke-Version $row
+    try {
+        $ladder += Invoke-Version $row
+    }
+    catch {
+        Write-Host ("FAILED {0}: {1}" -f $row.version, $_) -ForegroundColor Red
+        $failDir = Join-Path $AblationRoot $row.version
+        New-Item -ItemType Directory -Force -Path $failDir | Out-Null
+        Add-Content -LiteralPath (Join-Path $failDir "log.txt") -Value ("FAILED: {0}" -f $_)
+        $ladder += [pscustomobject]@{
+            Version = $row.version
+            Commit  = $row.commit
+            Min     = $null
+            Mean    = $null
+            Max     = $null
+            Worst   = "FAILED"
+        }
+        if (-not $All) { throw }
+    }
 }
 
 if ($ladder.Count -gt 1) {

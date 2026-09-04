@@ -9,17 +9,45 @@ Generated ids were drawn with `--new-token`, not chosen by hand.
 **Sweep set (8 scenarios, used for the version ladder below):**
 `s0, s1, s2, x1-a, x1-b, x1-c, x2-a, x2-b`
 
+The live brain is **V23** (working tree: sitting-wall + picket 20 m, on top
+of D70 slack). Figures: `notes/ablation-ladder.png` and friends, generated
+by `tools/plot_ablation.py`. The git ladder is `scripts/ablation.ps1`, not
+`scripts/history.ps1` (that one is the iterate CSV).
+
+Gaps we did not close — encryption, insiders, leftover GUESS constants —
+are `notes/GAPS.md`.
+
+---
+
+## Live brain (V23 / 8 named)
+
+| scenario | total | hostiles stopped | breaches | wasted | civ | aware | comms | notes |
+| --- | ---: | :---: | :---: | ---: | ---: | ---: | ---: | --- |
+| x1-b | **237.6** | 4/4 | 0 | 0 | 0 | 53.4 | 36.1 | best run |
+| s1 | **188.0** | 6/6 | 0 | 0 | 0 | 53.3 | 34.3 | all six stopped |
+| x2-a | 201.2 | 4/4 | 0 | 0 | 0 | 52.0 | 35.6 | |
+| x2-b | 185.6 | 3/3 | 0 | 0 | 0 | 52.6 | 29.0 | V10 never committed |
+| s2 | 180.5 | 6/6 | 0 | 0 | 0 | 57.4 | 32.4 | hops + live roster |
+| x1-c | 136.3 | 3/3 | 0 | 0 | 0 | 49.6 | 35.7 | |
+| s0 | 96.6 | 0/0 | 0 | 0 | 0 | 60.0 | 36.6 | no threats; comms pays D56 hops |
+| x1-a | **−7.7** | 4/4 | 0 | 0 | 2 | 42.1 | 35.9 | **worst** — two civilians, D44 |
+
+**min −7.7 · mean 152.3 · max +237.6.** Breaches on this set: **0.**
+Detection is `n/a` / 0: `declare_identity` is never called.
+
+V10 on the same eight was min **−524.6** (x2-b 0/3, three breaches),
+mean **−136.4**. The floor moved off breaches and onto x1-a's civilian
+chords.
+
 ---
 
 ## Tier 2 — hops (`s2` + four generated ids)
 
-CHALLENGE.md §14.7 / the hop check: information has to cross the fleet, because
-on tier 2 the arrival is 220 m out and only one drone can see it. Read the
-**worst** run, not the mean. Two things that typically bite: the ring is sized
-for radio so sensing can leave permanent blind gaps between members; and
-`propagation_p95_s` slower than the inbound.
-
-**Drawn** (this session, `--new-token`, not reused from an earlier sweep):
+CHALLENGE.md §14.7 / the hop check: information has to cross the fleet,
+because on tier 2 the arrival is 220 m out and only one drone can see it.
+Read the **worst** run, not the mean. Drawn this session with `--new-token`,
+not reused from the identity eight. Baseline is the V10 brain (no
+TrackReport hops).
 
 ```
 s2
@@ -31,274 +59,190 @@ x2-3c6916869d57804ad923813e2cec47ff
 
 **5/5 completed.** No crash, no hang, no ABI violation.
 
-Baseline is the V10 brain (`366fd4d`, RESULTS ladder, **no TrackReport hops**,
-`max_hops_observed` 0 / `propagation_p95_s` null) on the **same five ids**.
-That is the tier-1-only picture: act on what you can see, plus one-hop
-heartbeats.
+### Hop brain vs V10 (same five ids)
 
-### This brain (worst first)
+| scenario | this brain | stopped | V10 | V10 stopped |
+| --- | ---: | :---: | ---: | :---: |
+| x2-6878d203… | **−170.3** | 3/3 (2 civ) | −423.1 | 2/3, 1 breach |
+| x2-3c691686… | 159.3 | 3/3 | 145.3 | 3/3 |
+| s2 | 180.7 | 6/6 | **−501.9** | 3/6, 3 breaches |
+| x2-3eeb7e3d… | 208.4 | 3/3 | −74.0 | 2/3, 1 breach |
+| x2-63dad4d1… | 276.8 | 4/4 | −62.7 | 3/4, 1 breach |
 
-| scenario | total | hostiles stopped | breaches | wasted | civ | aware | comms | hops | p95 | notes |
-| --- | ---: | :---: | :---: | :---: | ---: | ---: | ---: | ---: | ---: | --- |
-| x2-6878d203… | **−170.3** | 3/3 | 0 | 0 | 2 | 43.6 | 34.4 | 5 | 0.07 s | **worst** — two civilians at t=0, not a leak |
-| x2-3c691686… | 159.3 | 3/3 | 0 | 0 | 0 | 52.1 | 28.1 | 3 | 0.09 s | |
-| s2 | 180.7 | 6/6 | 0 | 0 | 0 | 57.0 | 32.4 | 2 | 0.10 s | named fixture |
-| x2-3eeb7e3d… | 208.4 | 3/3 | 0 | 0 | 0 | 47.9 | 23.2 | 4 | 0.08 s | |
-| x2-63dad4d1… | 276.8 | 4/4 | 0 | 0 | 0 | 54.0 | 36.5 | 9 | 0.11 s | |
-
-**worst −170.3 · mean 131.0 · max +276.8.** The floor is civilians, not a
-breach. **Breaches this set: 0.** Kill rewards on s2 sum to +91.2 (six real
-rams, not late zeros). `frames_dropped_budget` 0 on every run.
-
-### Same ids, V10 (no hops)
-
-| scenario | total | stopped | breaches | civ | hops | p95 |
-| --- | ---: | :---: | :---: | ---: | ---: | --- |
-| s2 | **−501.9** | 3/6 | **3** | 0 | 0 | null |
-| x2-6878d203… | −423.1 | 2/3 | **1** | 2 | 0 | null |
-| x2-3eeb7e3d… | −74.0 | 2/3 | **1** | 0 | 0 | null |
-| x2-63dad4d1… | −62.7 | 3/4 | **1** | 0 | 0 | null |
-| x2-3c691686… | 145.3 | 3/3 | 0 | 0 | 0 | null |
-
-**worst −501.9 (s2) · breaches 6 across the set.** Four of five layouts leak.
-
-### Breaches down
-
-| | V10 (tier-1-only) | this brain |
-| --- | ---: | ---: |
-| s2 | 3 | **0** |
-| four generated x2 | 3 | **0** |
-| set total | 6 | **0** |
-
-s2 went 3/6 −501.9 → 6/6 +180.7. The worst generated id still stops all
-hostiles; V10 leaked it.
-
-**p95 vs the inbound.** On s2 the hostile dashes at 13 m/s from 220 m
-(`~17 s` to the cylinder). Hopped p95 is **0.07–0.11 s**. V10 never
-crosses a hop (`p95` null), so the far-side picket is told by the ram, not
-the radio.
-
-**Blind gaps.** s2 sense is 60 m, comm 75 m; the ring sits at
-`asset + 0.625·comm` so the neighbour chord is inside sense (D21). The
-scenario note about a 50 m sense leaving permanent holes is not this
-layout. The actual s2 hole was “spawn 220 m, one seer, no relay.” Generated
-x2 ids can still be tighter on sense than spacing; hops are what closed
-those four, not a guarantee that every future token is gap-free.
-
-Reports: `runs/sweep_tier2_now/` (this brain), `runs/sweep_tier2_v10/`
-(V10 on the same ids).
-
----
-
-## Version-ladder snapshot (V10 / 8 named)
-
-The table below is the **V10** brain (`366fd4d`), not the live hop brain.
-It is the floor the ablation ladder was built on. Live s2 is in the section
-above.
-
-| scenario | total | hostiles stopped | breaches | friendlies lost (wasted) | awareness | detection | comms | notes |
-| --- | ---: | :---: | :---: | :---: | ---: | :---: | ---: | --- |
-| x1-b | **158.4** | 4/4 | 0 | 0 | 55.8 | n/a | 37.8 | best run |
-| s1 | **130.0** | 6/6 | 0 | 0 | 54.4 | n/a | 35.5 | all six stopped, nothing wasted |
-| s0 | 99.3 | 0/0 | 0 | 0 | 59.7 | n/a | 39.6 | no threats; awareness near max |
-| x1-c | 94.2 | 3/3 | 0 | 0 | 50.6 | n/a | 38.0 | |
-| x1-a | −246.4 | 4/4 | 0 | 1 | 35.3 | n/a | 34.7 | stopped all, but rammed 3 civilians |
-| x2-a | −300.5 | 2/4 | 2 | 0 | 53.3 | n/a | 36.6 | tier 2: info does not cross the fleet |
-| s2 | −501.9 | 3/6 | 3 | 0 | 58.0 | n/a | 32.9 | tier 2 |
-| x2-b | **−524.6** | 0/3 | 3 | 0 | 52.6 | n/a | 22.8 | **worst case** — never commits |
-
-**min −524.6 · mean −136.4 · max +158.4**
-
-Score split (§9 defaults: `W_kill` 100 urgency-scaled, `P_breach` 200,
-`P_waste` 40, `P_civilian` 150, `W_aware` 60, `W_comms` 40, `W_detect` 80).
-Kill is the sum of intercept rewards, not 100 per stop — a late kill can be
-worth 0. Detection is `n/a` / 0 everywhere: `declare_identity` is never
-called, so the tier-5 term is zero by construction. That is deliberate — see
-DESIGN.md.
-
-| scenario | kill | breach | wasted | civilian | awareness | comms | detect | total |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | :---: | ---: |
-| x1-b | +64.9 | 0 | 0 | 0 | +55.8 | +37.8 | n/a | **158.4** |
-| s1 | +40.2 | 0 | 0 | 0 | +54.4 | +35.5 | n/a | **130.0** |
-| s0 | 0 | 0 | 0 | 0 | +59.7 | +39.6 | n/a | 99.3 |
-| x1-c | +5.5 | 0 | 0 | 0 | +50.6 | +38.0 | n/a | 94.2 |
-| x1-a | +173.6 | 0 | −40 | −450 | +35.3 | +34.7 | n/a | −246.4 |
-| x2-a | +9.6 | −400 | 0 | 0 | +53.3 | +36.6 | n/a | −300.5 |
-| s2 | +7.3 | −600 | 0 | 0 | +58.0 | +32.9 | n/a | −501.9 |
-| x2-b | 0 | −600 | 0 | 0 | +52.6 | +22.8 | n/a | **−524.6** |
-
-All friendly losses on the good runs are `pair_hostile`, which §9.2 does not
-charge: one friendly per hostile destroyed is free. The only *wasted* loss in
-the whole sweep is 1 drone on x1-a.
+**worst −170.3 · mean 131.0.** The floor is civilians, not a breach.
+**Breaches this set: 0** (V10: 6). Hopped p95 on these runs is
+0.07–0.11 s. Reports: `runs/sweep_tier2_now/` vs `runs/sweep_tier2_v10/`.
 
 ---
 
 ## How it got here — version ladder
 
-Each row is a real commit, rebuilt from git history and swept over the same 8
-scenarios. Deltas are on the **minimum**, because §11.2 says the floor is what
-gets graded.
+Each row is a real commit (V23 is the working tree), rebuilt from git
+history and swept over the same 8 scenarios. Deltas are on the **minimum**,
+because §11.2 says the floor is what gets graded. Re-measured 2026-09-04
+(`scripts/ablation.ps1 -All`). V3's mean moved 4.8 vs an older table;
+the rest of V0–V10 matched.
+
+![floor / mean / max](notes/ablation-ladder.png)
+
+![per-id totals](notes/ablation-heatmap.png)
+
+![kills / breaches / civilians](notes/ablation-mission.png)
+
+![worst id per version](notes/ablation-floor.png)
 
 | ver | commit | change | min | mean | max | Δmin |
 | --- | --- | --- | ---: | ---: | ---: | ---: |
 | V0 | `5589171` | skeleton (untested draft) | −1546.9 | −895.3 | 39.6 | — |
-| V1 | `80c589e` | D2 aimed-at-asset + CPA discriminant | −1093.5 | −687.6 | 39.6 | **+453** |
-| V2 | `33f8984` | D3/D4 diagnostic logging | −1093.5 | −687.6 | 39.6 | 0 |
-| V3 | `ad2cc9f` | D7 miss distance becomes 3D | −1037.9 | −611.0 | 39.6 | +56 |
-| V4 | `dd447fe` | D8 friendly ID from heartbeats | −947.2 | −537.1 | 99.4 | +91 |
+| V1 | `80c589e` | D2 aimed-at-asset + CPA discriminant | −1093.4 | −687.6 | 39.6 | **+454** |
+| V2 | `33f8984` | D3/D4 diagnostic logging | −1093.4 | −687.6 | 39.6 | 0 |
+| V3 | `ad2cc9f` | D7 miss distance becomes 3D | −1037.9 | −606.2 | 39.6 | +55 |
+| V4 | `dd447fe` | D8 friendly ID from heartbeats | −947.2 | −537.2 | 99.4 | +91 |
 | V5 | `8ab1263` | D10 asset is a cylinder | −948.2 | −536.1 | 99.4 | −1 |
-| V6 | `917346a` | fix: hostile calling restored | −947.2 | −537.1 | 99.4 | +1 |
+| V6 | `917346a` | fix: hostile calling restored | −947.2 | −537.2 | 99.4 | +1 |
 | V7 | `2522c14` | D11 commit only a catchable intercept | −521.2 | −134.7 | 158.6 | **+426** |
 | V8 | `2d75837` | D13 local tracks die with sensor picture | −700.0 | −211.4 | 158.4 | **−179** |
 | V9 | `8664314` | D15 one owner per hostile + yield | −524.6 | −136.4 | 158.4 | +175 |
-| V10 | `366fd4d` | current | −524.6 | −136.4 | 158.4 | 0 |
+| V10 | `366fd4d` | viewer-side; brain matches V9 | −524.6 | −136.4 | 158.4 | 0 |
+| V11 | `8fce68a` | D17 corridor horizon (yield) | −524.6 | −136.4 | 158.4 | 0 |
+| V12 | `0b4d519` | hops (TrackReport / Ray) | −511.1 | −108.2 | 160.3 | +13 |
+| V13 | `a3898dc` | D21 local bisection + radio ring | −303.8 | 16.3 | 191.9 | **+207** |
+| V14 | `b3bf0e8` | collision course (meet, not wait) | −246.8 | 99.1 | 276.7 | +57 |
+| V15 | `94510d7` | spawn-circle picket cap | −247.9 | 97.3 | 276.4 | −1 |
+| V16 | `4e5a660` | D44 early scramble | −195.7 | 98.9 | 257.7 | +52 |
+| V17 | `132140e` | named flight state machine | −30.6 | 123.2 | 263.3 | **+165** |
+| V18 | `c5c3fc1` | D52 ray picket altitude | −28.6 | 122.8 | 260.1 | +2 |
+| V19 | `51a9571` | D56 hopped heartbeats (live roster) | −4.5 | 153.8 | 253.0 | +24 |
+| V20 | `6e5c69b` | D66 handoff to the mover | −4.5 | 153.9 | 253.0 | 0 |
+| V21 | `fa3b01c` | D66/D67 InterceptScore + orbit | −15.4 | 138.1 | 230.3 | −11 |
+| V22 | `7d77194` | D70 cover slack 5 m | −12.1 | 150.7 | 240.2 | +3 |
+| V23 | WORKING | D71 sitting-wall, D72 H=20 | **−7.7** | **152.3** | 237.6 | +4 |
 
-Total: **−1546.9 → −524.6 on the floor, −895.3 → −136.4 on the mean.**
-
-Each version's *worst* report, split the same way. The floor is almost always
-a breach bill; awareness and comms never move it by more than ~90 points.
-
-| ver | worst | kill | breach | wasted | civilian | awareness | comms | total |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| V0 | s1 | 0 | −1200 | −80 | −300 | 0 | +33.1 | −1546.9 |
-| V1 | x1-a | +42.9 | −600 | −120 | −450 | 0 | +33.6 | −1093.5 |
-| V2 | x1-a | +42.9 | −600 | −120 | −450 | 0 | +33.6 | −1093.5 |
-| V3 | s2 | +5.4 | −1000 | −80 | 0 | +0.6 | +36.2 | −1037.9 |
-| V4 | s1 | +5.4 | −1000 | −40 | 0 | +52.9 | +34.5 | −947.2 |
-| V5 | s1 | +5.4 | −1000 | −40 | 0 | +51.9 | +34.5 | −948.2 |
-| V6 | s1 | +5.4 | −1000 | −40 | 0 | +52.9 | +34.5 | −947.2 |
-| V7 | x2-b | 0 | −600 | 0 | 0 | +52.7 | +26.1 | −521.2 |
-| V8 | s2 | +11.5 | −800 | 0 | 0 | +57.8 | +30.8 | −700.0 |
-| V9 | x2-b | 0 | −600 | 0 | 0 | +52.6 | +22.8 | −524.6 |
-| V10 | x2-b | 0 | −600 | 0 | 0 | +52.6 | +22.8 | −524.6 |
+Total: **−1546.9 → −7.7 on the floor, −895.3 → +152.3 on the mean.**
+The floor stopped being a breach bill at V19.
 
 ---
 
 ## What each step did
 
-**V1 — the discriminant (+453 floor, +547 on s1).** The skeleton called a
-civilian "enemy" and rammed it. Replacing the fixed 24 m gate with "sure hit, or
-the miss distance has shrunk" removed civilian kills on 4 of 8 scenarios. s1
-civilians went 2 → 0. This was the biggest single fix to the floor.
+**V1 — the discriminant (+454 floor).** Replacing the 24 m gate with
+"sure hit, or the miss has shrunk" removed civilian kills on 4 of 8
+scenarios. Biggest single fix to the floor.
 
-**V2 — logging (0.0, exactly).** Every one of the 8 scenarios scored identically
-before and after. D3/D4 claim logging does not touch behaviour; this measures it
-rather than asserting it.
+**V2 — logging (0).** Behaviour unchanged. Measures that logs are not
+on the command path.
 
-**V3 — 3D miss (+56 floor).** Small overall, but +473 on x1-a alone. A chord that
-misses by 5 m on the ground can be 30 m away in altitude. Only bites on layouts
-where the geometry differs from s1, which is exactly what generated ids are for.
+**V3 — 3D miss (+55 floor).** Small overall, +473 on x1-a alone. A chord
+that misses by 5 m on the ground can be 30 m away in altitude.
 
-**V4 — friendly ID (+91 floor).** Matching heartbeats to sensor tracks let the
-fleet label its own members. s0 jumped 39.6 → 99.4: that is the awareness term
-switching on, worth ~60 points, with no intercept involved. It also removed the
-last `pair_friendly` collisions on x2-b (2 → 0).
+**V4 — friendly ID (+91 floor).** Heartbeat match. s0 jumps by the
+awareness term. Last `pair_friendly` on x2-b goes to 0.
 
 **V5 → V6 — a bug the score could not see (±2).** V5 accidentally stopped
-declaring hostiles. Score moved by 1–2 points, so a sweep would never have caught
-it. It shows up clearly in `wrong_declarations`, which swung 515 → 0 → 515 on
-x1-b. Lesson: the total is not enough on its own.
+declaring hostiles. `wrong_declarations` swung; the total barely moved.
 
-**V7 — the commit rule (+426 floor, +1078 on s1).** The largest change in the
-project. Only commit to a hostile we can actually catch: local track, fresh,
-closing, within sensor range. s1 went from 1 kill and 5 breaches to **6 kills and
-0 breaches**. Six of eight scenarios improved by 200–1078 points. **But x2-b got
-worse by 204** — see worst cases.
+**V7 — the commit rule (+426 floor, +1078 on s1).** Only commit to a
+hostile we can catch. s1: 1 kill / 5 breaches → 6/6. x2-b got *worse*
+(never commits). That hole is closed later, not by relaxing this bar.
 
-**V8 — track drop (−179 floor).** Dropping local tracks the moment they leave the
-sensor picture cost 200+ points each on s2, x1-a and x2-a, and gained nothing
-anywhere. s1 was unchanged, so the tight loop on s1 could not see it. This is the
-clearest example of why the sweep exists.
+**V8 — track drop (−179 floor).** Dropping local tracks at the sensor
+edge cost 200+ on s2 / x1-a / x2-a. s1 unchanged. Why the sweep exists.
 
-**V9 — one owner per hostile (+175 floor).** A deterministic owner per hostile,
-with the others moving off the intercept line. Recovered almost exactly what V8
-lost (+198 s2, +200 x1-c, +200 x2-a). Net effect of V8+V9 together is roughly
-flat on the floor, but the fleet stopped converging on the same target.
+**V9 — one owner per hostile (+175 floor).** Recovered almost exactly
+what V8 lost. Fleet stopped converging on the same target.
 
-**V10 — current (0.0).** The last commit is viewer-side only. Measured, not
-assumed.
+**V10 — viewer-side (0).** Brain matches V9.
+
+**V11 — corridor horizon (0 on this set).** Yield uses remaining intercept
+flight, not the whole chord. Load-bearing later; the eight named scores
+do not move yet.
+
+**V12 — hops (+13 floor).** TrackReport / Ray cross the radio horizon.
+x1-a −246 → −51 (civilians, not a new leak). s2 still 3/6, x2-b still
+0/3. Hops without a live roster are not enough for s2's late pair.
+
+**V13 — ring / bisection (+207 floor).** Mean crosses zero. x2-a 4/4.
+s2 4/6. x2-b 1/3. Neighbour chord stays inside radio; ring does not grow.
+
+**V14 — collision course (+57 floor).** Meet the inbound rather than wait
+on the slot. x2-b 3/3 (+125). Floor becomes s2 (−247, still 2 breaches).
+s1 6/6 +231.
+
+**V15 — spawn-circle cap (−1).** Safety cap. Wash on the eight.
+
+**V16 — early scramble (+52 floor).** Leave the ring before the Hostile
+latch when the ground track already crosses the cylinder. x2-b stays 3/3.
+s2 5/6. Floor becomes x1-a (−196, 3 civilians). Frozen trade (D44).
+
+**V17 — named state machine (+165 floor).** x1-a 3 civ → 2 (−5). s2 still
+one breach (−31). Modes are inspectable; the score move is the abort /
+scramble split becoming explicit.
+
+**V18 — ray picket altitude (+2).** Station height follows the inbound
+cone. Does not close s2's last breach by itself.
+
+**V19 — hopped heartbeats (+24 floor, s2 6/6).** Live roster from relays.
+s2 −29 → **+181, 6/6**. Floor is x1-a (−4.5, 2 civ) from here on.
+Mean 154. This is the s2 close, not hops-alone (V12).
+
+**V20 — handoff (0).** Challenger with a better intercept takes the
+inbound. Identity eight is a wash; it is the setup for orbit.
+
+**V21 — InterceptScore + orbit (−11 floor, −16 mean).** ω = 0.06. Facing
+slot with a moving ring is the *wrong* interceptor unless handoff is on.
+Pays on generated canaries more than on this eight. Mean dip is real.
+
+**V22 — cover slack 5 m (+3 floor, +13 mean).** Shrink until leftover
+Reach ≥ 5 m. Identity eight does not bind; generated cover does.
+
+**V23 — sitting wall + default 20 m (+4 floor).** Parked facing picket is
+a duplicate if ≥ 12 m closer; do not lower `kChasingToward`. Picket 20 m
+(D72). x1-a −7.7, s1 188. Mean 152.3.
 
 ---
 
-## Worst cases
+## Worst case (live)
 
-| scenario | kill | breach | wasted | civilian | awareness | comms | detect | total |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | :---: | ---: |
-| x2-b | 0 | −600 (3×) | 0 | 0 | +52.6 | +22.8 | n/a | **−524.6** |
-| s2 | +7.3 | −600 (3×) | 0 | 0 | +58.0 | +32.9 | n/a | −501.9 |
-| x2-a | +9.6 | −400 (2×) | 0 | 0 | +53.3 | +36.6 | n/a | −300.5 |
-| x1-a | +173.6 | 0 | −40 | −450 (3×) | +35.3 | +34.7 | n/a | −246.4 |
+The floor is **x1-a, −7.7**: 4/4 hostiles, 0 breaches, 2 civilians.
+That is D44, not a leak of the catchable bar. Awareness is also lowest
+here (42.1). s2 / x2-b / x2-a are no longer worst-case stories.
 
-**x2-b, −524.6 — the floor, and a direct cost of V7.** Every point on the floor
-is the three-breach bill. The fleet stops nothing (0 of 3), takes 3 × −200,
-and loses no drones at all. Awareness and comms give +75.4 back, which does
-not touch the mission hole. That combination means it never commits: the
-commit rule added in V7 is strict enough that on this layout nothing ever
-clears the bar. Before V7 the same scenario scored −317 with 1 kill. **The
-change that won +1078 on s1 cost 204 here.** That trade is the single thing
-I would revisit first — the commit rule needs a fallback for when no drone
-qualifies, rather than everyone standing down.
-
-**s2 and x2-a, −501.9 and −300.5 — tier 2, not implemented.** Kill rewards are
-tiny (+7.3 and +9.6): the intercepts that do happen are late. The score is
-the breach bill (−600 and −400). Hostiles arrive far from whoever can see
-them. `comms.propagation_p95_s` is `null` for this brain, meaning nothing we
-transmit crosses more than one hop. Both scenarios take breaches that the
-fleet had the information to prevent but could not move. This is a known gap,
-not a tuning problem.
-
-**x1-a, −246.4 — the last civilians.** This is the only worst case that is
-*not* a breach story. All 4 hostiles stopped, 0 breaches, and the kill term
-is the best in the sweep (+173.6). Then 3 civilians (−450) and one wasted
-drone (−40) wipe it out. The discriminant still fires on a chord that passes
-very close to the asset. Awareness is also lowest here (35.3), which is the
-same root cause showing up in a second metric.
+V10's floor (x2-b −524.6, 0/3, three × −200) is closed.
 
 ---
 
 ## Saved artifacts
 
-`runs/sweep_tier2_now/` and `runs/sweep_tier2_v10/` are the hop-check
-reports (s2 + four `--new-token` ids, this brain vs V10). Local; not
-copied into StreamingAssets.
+`notes/ablation-*.png` and `notes/ablation-summary.md` are the ladder
+figures. `notes/GAPS.md` is the unfinished list. `notes/sense-sample.json`
+is generated-id `sense_radius` (mean 76.1 m, SD 15.9); Cover already
+uses boot, not this mean.
 
-`runs/ablation/` is local only (gitignored). Each run is a full recording plus
-the viewer sidecar, left in place — nothing is copied into StreamingAssets.
+`runs/ablation/` is local only (gitignored). Each version has reports,
+`summary.csv`, `log.txt`, `meta.json`.
 
 ```
 scripts/versions.csv                version → commit, expected min/mean/max, worst
-runs/ablation/<ver>/                rebuilt reports (summary.csv, log.txt, meta.json, *.json)
-runs/ablation/<ver>/<id>.{jsonl,bin,meta.json}   if you passed -Trace / -TraceAll
+runs/ablation/<ver>/                rebuilt reports
+notes/ablation-*.png                ladder figures
 ```
 
-`.json` is the score report, `.jsonl` is `--trace`, `.bin` + `.meta.json` are
-what the viewer loads. Rebuild any ladder row with `scripts\ablation.ps1`
-(see below). Point the viewer's extra-run folder at `runs\ablation\` or a
-version subfolder. Do not copy into StreamingAssets.
-
-`runs/history.csv` holds the 27 live runs recorded during development by
-`scripts\iterate.ps1`. It is incomplete — several runs were not committed — which
-is why the ladder above was rebuilt from git rather than read out of it.
+`runs/history.csv` is the live iterate log from `scripts/iterate.ps1`,
+shown by `scripts/history.ps1`. It is incomplete, which is why the ladder
+is rebuilt from git.
 
 ---
 
 ## Reproducing the ladder
 
-The table is `scripts\versions.csv` (version key, commit, expected min/mean/max,
-worst id). Rebuild one row without checking out that commit — only `brain/src`
-is archived into a scratch tree and compiled against today's SDK:
-
 ```
 powershell -ExecutionPolicy Bypass -File scripts\ablation.ps1 -List
-powershell -ExecutionPolicy Bypass -File scripts\ablation.ps1 -Version V7
-powershell -ExecutionPolicy Bypass -File scripts\ablation.ps1 -Version V7 -Trace
+powershell -ExecutionPolicy Bypass -File scripts\ablation.ps1 -Version V19
+powershell -ExecutionPolicy Bypass -File scripts\ablation.ps1 -Current
 powershell -ExecutionPolicy Bypass -File scripts\ablation.ps1 -All
+python tools\plot_ablation.py --update-csv
 ```
 
-Output is `runs\ablation\<ver>\`: per-id `*.json` reports, `summary.csv`,
-`log.txt`, `meta.json`. `-Trace` adds jsonl + viewer `.bin`/`.meta.json` for
-the worst id. That folder is gitignored; point the viewer's extra-run folder
-at it if you want to look. A drift warning means the live score is more than
-0.15 off the CSV (RESULTS.md's table).
-
-Sanity check: V10 (HEAD-era brain) should still print s1 = 130.0.
+`-Current` / commit `WORKING` copies live `brain/src` so uncommitted D71+
+appear. A drift warning means the live score is more than 0.15 off
+`scripts/versions.csv`.

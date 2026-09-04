@@ -8,6 +8,10 @@
 # it when you have been tuning for an hour and want to know whether the last
 # hour was worth it. Filtering by -Scenario is the honest comparison: totals
 # from different scenarios are not comparable with each other.
+#
+# This is NOT the git version ladder. That is scripts\ablation.ps1 plus
+# scripts\versions.csv (rebuild brain/src at a commit, sweep the same 8 ids).
+# Plots of that ladder land in notes\ (tools\plot_ablation.py).
 
 [CmdletBinding()]
 param(

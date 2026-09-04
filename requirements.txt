@@ -2,7 +2,8 @@
 # brain, and NOT needed by tools/inspect_trace.py, which is standard library
 # only and deliberately stays that way.
 #
-# Used by tools/build_viewer_data.py and tools/plot_fixture.py.
+# Used by tools/build_viewer_data.py, tools/plot_fixture.py, and
+# tools/plot_ablation.py.
 #   py -m pip install -r requirements.txt
 numpy
 matplotlib

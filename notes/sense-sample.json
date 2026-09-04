@@ -1,0 +1,151 @@
+{
+  "fixed_n": 6,
+  "fixed_values": [
+    60.0
+  ],
+  "generated_n": 21,
+  "generated_min": 46.1,
+  "generated_max": 103.8,
+  "generated_mean": 76.07619047619048,
+  "generated_sd": 15.941891505147836,
+  "all_mean": 72.50370370370368,
+  "all_sd": 15.552577859077834,
+  "rows": [
+    {
+      "id": "s0",
+      "sense": 60.0,
+      "source": "dump-params"
+    },
+    {
+      "id": "s1",
+      "sense": 60.0,
+      "source": "dump-params"
+    },
+    {
+      "id": "s2",
+      "sense": 60.0,
+      "source": "dump-params"
+    },
+    {
+      "id": "s3",
+      "sense": 60.0,
+      "source": "dump-params"
+    },
+    {
+      "id": "s4",
+      "sense": 60.0,
+      "source": "dump-params"
+    },
+    {
+      "id": "s5",
+      "sense": 60.0,
+      "source": "dump-params"
+    },
+    {
+      "id": "x1-c",
+      "sense": 67.4,
+      "source": "boot-log"
+    },
+    {
+      "id": "x1-b",
+      "sense": 87.6,
+      "source": "boot-log"
+    },
+    {
+      "id": "x2-a",
+      "sense": 82.5,
+      "source": "boot-log"
+    },
+    {
+      "id": "x2-b",
+      "sense": 91.4,
+      "source": "boot-log"
+    },
+    {
+      "id": "x1-a",
+      "sense": 103.8,
+      "source": "boot-log"
+    },
+    {
+      "id": "x1-04dcc08daa7b9118c6ada859bfbab98d",
+      "sense": 46.1,
+      "source": "boot-log"
+    },
+    {
+      "id": "x1-d0d75a665e1c6aca90cf4adf89cc9a00",
+      "sense": 73.1,
+      "source": "boot-log"
+    },
+    {
+      "id": "x1-4ad8f2ca5c56355cf53752cc5c23a889",
+      "sense": 95.8,
+      "source": "boot-log"
+    },
+    {
+      "id": "x1-7e8be552cc4b37aaa220c16f9475543b",
+      "sense": 95.0,
+      "source": "boot-log"
+    },
+    {
+      "id": "x1-fabbf23dc646f43d9c35d89af9fb0a5a",
+      "sense": 68.1,
+      "source": "boot-log"
+    },
+    {
+      "id": "x1-7da38f037c0cbde955102652d14f3ebe",
+      "sense": 70.1,
+      "source": "boot-log"
+    },
+    {
+      "id": "x2-38cb09c9e242dacddb3393f9b948bd68",
+      "sense": 76.6,
+      "source": "boot-log"
+    },
+    {
+      "id": "x1-76dacbe7eff8972fe57829d8d89b6ae9",
+      "sense": 55.6,
+      "source": "boot-log"
+    },
+    {
+      "id": "x1-322f2f3496e44665e46c6153264b1724",
+      "sense": 71.4,
+      "source": "boot-log"
+    },
+    {
+      "id": "x2-81fa2fdc27985b5fddccdfee7b57cb91",
+      "sense": 46.4,
+      "source": "boot-log"
+    },
+    {
+      "id": "x2-29f21b2b9c0592f1fe3a93cd0841493c",
+      "sense": 81.6,
+      "source": "boot-log"
+    },
+    {
+      "id": "x2-17e6d5d13382c779e1bd8cd4e23b71c4",
+      "sense": 85.1,
+      "source": "boot-log"
+    },
+    {
+      "id": "x2-75247378f90f910844ab0e3ce0d49735",
+      "sense": 91.4,
+      "source": "boot-log"
+    },
+    {
+      "id": "x2-7cf96b58f8b7d53910cb1d46892a89c9",
+      "sense": 55.9,
+      "source": "boot-log"
+    },
+    {
+      "id": "x2-26839e469d20fff7798f96a5abbf8a30",
+      "sense": 76.1,
+      "source": "boot-log"
+    },
+    {
+      "id": "x2-e39f8d84337a664e9bc35a39bac1bfcc",
+      "sense": 76.6,
+      "source": "boot-log"
+    }
+  ],
+  "note": "Do not compile generated_mean into the brain. Config::From copies SwBootInfo::sense_radius at create (D74)."
+}

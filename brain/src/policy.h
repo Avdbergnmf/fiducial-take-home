@@ -384,7 +384,7 @@ private:
 
     uint16_t next_seq_ = 0;
     float last_heartbeat_ = -1.0e9f;
-    float ring_radius_ = 60.0f;
+    float ring_radius_ = 60.0f;  // overwritten in Reset from PicketRadius(cfg)
     float ring_altitude_ = kRayDefaultAlt;
     InboundRay ray_;
     float last_ray_send_ = -1.0e9f;
