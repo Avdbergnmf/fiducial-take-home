@@ -6,12 +6,95 @@ every number here is directly comparable.
 
 Generated ids were drawn with `--new-token`, not chosen by hand.
 
-**Sweep set (8 scenarios, used for every row below):**
+**Sweep set (8 scenarios, used for the version ladder below):**
 `s0, s1, s2, x1-a, x1-b, x1-c, x2-a, x2-b`
 
 ---
 
-## Current brain
+## Tier 2 — hops (`s2` + four generated ids)
+
+CHALLENGE.md §14.7 / the hop check: information has to cross the fleet, because
+on tier 2 the arrival is 220 m out and only one drone can see it. Read the
+**worst** run, not the mean. Two things that typically bite: the ring is sized
+for radio so sensing can leave permanent blind gaps between members; and
+`propagation_p95_s` slower than the inbound.
+
+**Drawn** (this session, `--new-token`, not reused from an earlier sweep):
+
+```
+s2
+x2-3eeb7e3df1cee611bbcfdda558404df0
+x2-63dad4d1aaff755add3981e4aaa8ccb5
+x2-6878d2031c0dded570deced57de97f8c
+x2-3c6916869d57804ad923813e2cec47ff
+```
+
+**5/5 completed.** No crash, no hang, no ABI violation.
+
+Baseline is the V10 brain (`366fd4d`, RESULTS ladder, **no TrackReport hops**,
+`max_hops_observed` 0 / `propagation_p95_s` null) on the **same five ids**.
+That is the tier-1-only picture: act on what you can see, plus one-hop
+heartbeats.
+
+### This brain (worst first)
+
+| scenario | total | hostiles stopped | breaches | wasted | civ | aware | comms | hops | p95 | notes |
+| --- | ---: | :---: | :---: | :---: | ---: | ---: | ---: | ---: | ---: | --- |
+| x2-6878d203… | **−170.3** | 3/3 | 0 | 0 | 2 | 43.6 | 34.4 | 5 | 0.07 s | **worst** — two civilians at t=0, not a leak |
+| x2-3c691686… | 159.3 | 3/3 | 0 | 0 | 0 | 52.1 | 28.1 | 3 | 0.09 s | |
+| s2 | 180.7 | 6/6 | 0 | 0 | 0 | 57.0 | 32.4 | 2 | 0.10 s | named fixture |
+| x2-3eeb7e3d… | 208.4 | 3/3 | 0 | 0 | 0 | 47.9 | 23.2 | 4 | 0.08 s | |
+| x2-63dad4d1… | 276.8 | 4/4 | 0 | 0 | 0 | 54.0 | 36.5 | 9 | 0.11 s | |
+
+**worst −170.3 · mean 131.0 · max +276.8.** The floor is civilians, not a
+breach. **Breaches this set: 0.** Kill rewards on s2 sum to +91.2 (six real
+rams, not late zeros). `frames_dropped_budget` 0 on every run.
+
+### Same ids, V10 (no hops)
+
+| scenario | total | stopped | breaches | civ | hops | p95 |
+| --- | ---: | :---: | :---: | ---: | ---: | --- |
+| s2 | **−501.9** | 3/6 | **3** | 0 | 0 | null |
+| x2-6878d203… | −423.1 | 2/3 | **1** | 2 | 0 | null |
+| x2-3eeb7e3d… | −74.0 | 2/3 | **1** | 0 | 0 | null |
+| x2-63dad4d1… | −62.7 | 3/4 | **1** | 0 | 0 | null |
+| x2-3c691686… | 145.3 | 3/3 | 0 | 0 | 0 | null |
+
+**worst −501.9 (s2) · breaches 6 across the set.** Four of five layouts leak.
+
+### Breaches down
+
+| | V10 (tier-1-only) | this brain |
+| --- | ---: | ---: |
+| s2 | 3 | **0** |
+| four generated x2 | 3 | **0** |
+| set total | 6 | **0** |
+
+s2 went 3/6 −501.9 → 6/6 +180.7. The worst generated id still stops all
+hostiles; V10 leaked it.
+
+**p95 vs the inbound.** On s2 the hostile dashes at 13 m/s from 220 m
+(`~17 s` to the cylinder). Hopped p95 is **0.07–0.11 s**. V10 never
+crosses a hop (`p95` null), so the far-side picket is told by the ram, not
+the radio.
+
+**Blind gaps.** s2 sense is 60 m, comm 75 m; the ring sits at
+`asset + 0.625·comm` so the neighbour chord is inside sense (D21). The
+scenario note about a 50 m sense leaving permanent holes is not this
+layout. The actual s2 hole was “spawn 220 m, one seer, no relay.” Generated
+x2 ids can still be tighter on sense than spacing; hops are what closed
+those four, not a guarantee that every future token is gap-free.
+
+Reports: `runs/sweep_tier2_now/` (this brain), `runs/sweep_tier2_v10/`
+(V10 on the same ids).
+
+---
+
+## Version-ladder snapshot (V10 / 8 named)
+
+The table below is the **V10** brain (`366fd4d`), not the live hop brain.
+It is the floor the ablation ladder was built on. Live s2 is in the section
+above.
 
 | scenario | total | hostiles stopped | breaches | friendlies lost (wasted) | awareness | detection | comms | notes |
 | --- | ---: | :---: | :---: | :---: | ---: | :---: | ---: | --- |
@@ -174,6 +257,10 @@ same root cause showing up in a second metric.
 ---
 
 ## Saved artifacts
+
+`runs/sweep_tier2_now/` and `runs/sweep_tier2_v10/` are the hop-check
+reports (s2 + four `--new-token` ids, this brain vs V10). Local; not
+copied into StreamingAssets.
 
 `runs/ablation/` is local only (gitignored). Each run is a full recording plus
 the viewer sidecar, left in place — nothing is copied into StreamingAssets.

@@ -2493,3 +2493,78 @@ one leak (4/5) and one wasted ground — not the D30 collapse.
 **D55 re-eval.** Leave rejected. The leftover was the empty arc, not
 spawn-inside or default height (D54). Sitting the ring in still does
 not convert the hard-id north miss, and first sight is still not spawn.
+
+---
+
+## D57 — Kill-envelope cue (viewer only)
+
+**The question.** Can we draw the theoretical safety area: each living
+drone's remaining intercept cone, projected onto a sphere around the
+asset, and see whether those patches close?
+
+**Not in the brain.** No new log, no control-loop change. The recording
+already has the numbers: live poses, `params sense/maxv/lat/ring`,
+header `kill_radius` and `asset.radius`.
+
+**Model (labelled, not the commit gate).** Hostile first appears on that
+drone's sense sphere and flies `maxv` (D37) straight at the asset.
+Divert from rest is `lat`. `Reach()` is the same closed form as
+`flight.cpp`. A cell is covered if any living friendly can still get
+within `kill_radius` of that inbound before it enters the asset
+cylinder. UniqueOwner, scramble delay, and the 0.1 s cylinder evidence
+are left out — this is geometry, not policy.
+
+**Drawn.** A translucent belt on the direction sphere (radius
+`ring+sense`), green / red. The picket-height ring is the closed/hole
+readout. Select a friendly: generators to first-sight on its sense
+sphere. Chip: `closed · N live` or `hole X°`.
+
+---
+
+## D58 — Closed-cover radius; default picket 25 m
+
+**The question.** The kill-envelope cue (D57) shows the planned ring is
+not a closed belt at picket altitude, even after a cone is fitted. The
+radio fraction 0.625 is a measured standoff, not a coverage rule. Sitting
+5 m lower would put the bracelet in the inbound band hostiles actually
+use; the high-el part of the belt is unused.
+
+**Not D54 / D55.** Default 20 m and 12 m were identity washes and did not
+convert the hard-id first arrival. Compact-then-open pulled the ring in
+by tens of metres and collapsed identity. This is 30 → 25 only, and a
+shrink cap on radius, never a grow and never a spawn-inside pull-in.
+
+**Radius rule.** Keep D21/D28/D33 (radio, chord preservation, spawn 0.65,
+3.5 s react, floor `asset+10`). Then shrink, never grow, to the largest
+`R` at the *current* station height where the unique-owner Voronoi-edge
+inbound is still catchable from rest:
+
+- Hostile appears on that picket's sense sphere, flies `maxv` at the
+  asset (same as D57).
+- Divert from rest is `lat`. `Reach()` matches `flight.cpp`.
+- Test the picket elevation (`atan(H/R)`), the bracelet the overlay
+  scores as closed/hole. Horizon is not AND-ed: a six-picket ring never
+  catches a ground-level bisector, and that abort would leave the radio
+  radius.
+- If even the floor is open, leave the caps: shrinking cannot invent
+  time, and growing is the D21 F0.75 collapse.
+
+Height is an input. After a ray, `H` drops and the same predicate runs
+again.
+
+**Altitude.** `kRayDefaultAlt = 25`. Fitted cone still clamps to
+`kRayCapAlt = 30` (friendly spawn). Floor 6 m unchanged.
+
+**On-station arithmetic.** An even 16-picket s1 ring at 86 m / 30 m
+already tiles under this model (and at 25 m). The open belt at t≈0 is
+the spawn cluster, not a too-large planned `(R,H)`. The cap binds when
+`N` is small (six stations cannot hold 86 m) or `sense` is tight (35 m
+cannot tile 86 m). That is the mathematical rule the radio fraction was
+not.
+
+**Measured.** Identity 8/8, mean **153.8 → 154.5**, worst **x1-a −4.5 →
+−3.6**. 0 breaches. s2 **6/6, 180.7 → 182.0**. s1 6/6 **203.6**. x1-a
+still 4/4, 2 civ (D44). Hard id still **2/3**, hostile_0 still
+**21.31 s**, score **−109 → −113.6** (comms 32.4 → 30.8). Default 25 m
+is not D54's 20/12 wash and not a D55 pull-in. Keep.
+

@@ -293,6 +293,63 @@ static void TestRingStaysInsideTheSpawnCircle() {
                     std::sin(3.14159265358979f / 15.0f)) < 1e-3f);
 }
 
+static Config WideRadioCfg() {
+    Config cfg;
+    cfg.drone_id = 0;
+    cfg.fleet_size = 16;
+    cfg.asset = Vec3(0, 0, 0);
+    cfg.asset_radius = 30.0f;
+    cfg.comm_radius = 90.0f;
+    cfg.sense_radius = 60.0f;
+    cfg.max_speed = 20.0f;
+    cfg.lateral_limit = 6.7f;
+    cfg.kill_radius = 1.0f;
+    cfg.arena_min = Vec3(-400, -400, -120);
+    cfg.arena_max = Vec3(400, 400, 0);
+    return cfg;
+}
+
+static void TestClosedCoverLeavesAFullS1Ring() {
+    std::printf("s1-like full ring is already catchable; radio still sizes it\n");
+    const Config cfg = WideRadioCfg();
+    const float radio = cfg.asset_radius + cfg.comm_radius * 0.625f;
+    CHECK(std::fabs(PicketRadius(cfg, 16, 30.0f) - radio) < 1e-3f);
+    CHECK(std::fabs(PicketRadius(cfg, 16, 25.0f) - radio) < 1e-3f);
+}
+
+static void TestClosedCoverPullsASparseRingIn() {
+    std::printf("six even stations cannot catch the bisector at the radio radius\n");
+    Config cfg = WideRadioCfg();
+    cfg.fleet_size = 6;
+    const float radio = cfg.asset_radius + cfg.comm_radius * 0.625f;
+    const float r = PicketRadius(cfg, 6, 30.0f);
+    CHECK(r < radio - 1.0f);
+    CHECK(r > 70.0f);
+    CHECK(r < 82.0f);
+}
+
+static void TestClosedCoverBindsOnTightSense() {
+    std::printf("sense 35 m cannot tile an 86 m 16-picket ring\n");
+    Config cfg = WideRadioCfg();
+    cfg.sense_radius = 35.0f;
+    const float radio = cfg.asset_radius + cfg.comm_radius * 0.625f;
+    const float r = PicketRadius(cfg, 16, 30.0f);
+    CHECK(r < radio - 1.0f);
+    CHECK(r > 70.0f);
+    CHECK(r < 84.0f);
+}
+
+static void TestDefaultPicketAltitudeIsTwentyFive() {
+    std::printf("boot picket sits at 25 m; fitted cone may still rise to 30\n");
+    Policy p;
+    p.Configure(WideRadioCfg(), Rng());
+    CHECK(p.ring_altitude() > kRayDefaultAlt - 0.1f &&
+          p.ring_altitude() < kRayDefaultAlt + 0.1f);
+    CHECK(kRayDefaultAlt == 25.0f);
+    CHECK(kRayCapAlt == 30.0f);
+    CHECK(kRayCapAlt > kRayDefaultAlt);
+}
+
 static void TestAimAheadUsesConfiguredDistance() {
     std::printf("aim lead moves the target estimate along its velocity\n");
     const Vec3 target(10, 20, -30);
@@ -745,6 +802,10 @@ int main() {
     TestInboundOwnerSkipsARecedingFacing();
     TestLiveRingRespaces();
     TestRingStaysInsideTheSpawnCircle();
+    TestClosedCoverLeavesAFullS1Ring();
+    TestClosedCoverPullsASparseRingIn();
+    TestClosedCoverBindsOnTightSense();
+    TestDefaultPicketAltitudeIsTwentyFive();
     TestAimAheadUsesConfiguredDistance();
     TestProNavSteersAtTheZem();
     TestArenaAllowsADiveIntercept();

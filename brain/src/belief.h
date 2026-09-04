@@ -174,7 +174,8 @@ constexpr float kRayReady = 2.0f;
 constexpr float kRayOutlier = 15.0f;
 constexpr float kRayMaxSlope = 1.0f;
 constexpr float kRayMinRange = 15.0f;
-constexpr float kRayDefaultAlt = 30.0f;
+constexpr float kRayDefaultAlt = 25.0f;
+constexpr float kRayCapAlt = 30.0f;
 constexpr float kRayFloorAlt = 6.0f;
 
 /// Fit h = h0 + slope · r from one pose. False if not inbound fast enough

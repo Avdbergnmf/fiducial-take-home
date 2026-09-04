@@ -37,7 +37,132 @@ constexpr uint8_t kPrioHeartbeat = 5;       // identity first: claims/reports st
 constexpr float kRayEvery = 0.5f;           // s; cone hops between routine tracks
 constexpr float kReceding = 2.0f;           // m/s away; facing owner yields to clockwise
 
-float ComputePicketRadius(const Config& cfg, uint32_t live_count) {
+/// Same closed form as flight.cpp Reach (anonymous) and the kill-envelope
+/// cue: divert from rest at accel `a`, coast once |v| hits `vmax`.
+float CoverReach(float t, float a, float vmax) {
+    if (t <= 0.0f || a < 1e-6f) return 0.0f;
+    if (vmax < 1e-3f) return 0.5f * a * t * t;
+    const float tv = vmax / a;
+    if (t <= tv) return 0.5f * a * t * t;
+    return vmax * t - 0.5f * vmax * vmax / a;
+}
+
+/// Outer intersection of the outbound ray asset + s·u (s>0) with the
+/// sense sphere around the picket. Matches ReachCover.FirstSight.
+bool CoverFirstSight(const Vec3& asset, const Vec3& picket, const Vec3& u,
+                     float sense, Vec3& hit) {
+    const Vec3 d = picket - asset;
+    const float b = swarm::Dot(u, d);
+    const float disc = b * b - swarm::Dot(d, d) + sense * sense;
+    if (disc < 0.0f) return false;
+    const float s = b + std::sqrt(disc);
+    if (s < 0.5f) return false;
+    hit = asset + u * s;
+    return true;
+}
+
+/// Horizontal cylinder around the asset (NED xy). 0 miss, 1 already
+/// inside, 2 hits at t. Matches ReachCover.CylinderCase.
+int CoverCylinder(const Vec3& asset, float radius, const Vec3& pos,
+                  const Vec3& vel, float& t) {
+    t = 0.0f;
+    const Vec3 h0(pos.x - asset.x, pos.y - asset.y, 0.0f);
+    const Vec3 vh(vel.x, vel.y, 0.0f);
+    const float r2 = radius * radius;
+    const float h2 = swarm::LengthSq(h0);
+    if (h2 <= r2) return 1;
+    const float a = swarm::LengthSq(vh);
+    const float b = 2.0f * swarm::Dot(h0, vh);
+    const float c = h2 - r2;
+    if (a < 1e-8f) return 0;
+    const float disc = b * b - 4.0f * a * c;
+    if (disc < 0.0f) return 0;
+    const float s = std::sqrt(disc);
+    const float t0 = (-b - s) / (2.0f * a);
+    const float t1 = (-b + s) / (2.0f * a);
+    const float pick = t0 > 0.02f ? t0 : t1;
+    if (pick <= 0.02f) return 1;
+    t = pick;
+    return 2;
+}
+
+/// Unique-owner catch from rest. Same samples and margins as the
+/// kill-envelope cue, in NED (viewer is Y-up).
+bool CoverCanCatch(const Vec3& asset, float asset_radius, const Vec3& picket,
+                   const Vec3& u, float sense, float max_speed, float accel,
+                   float kill) {
+    Vec3 hit;
+    if (!CoverFirstSight(asset, picket, u, sense, hit)) return false;
+    const Vec3 vel = u * (-max_speed);
+    float t_hit = 0.0f;
+    const int cyl = CoverCylinder(asset, asset_radius, hit, vel, t_hit);
+    if (cyl == 0) return true;
+    if (cyl == 1 || t_hit <= 0.04f)
+        return swarm::Distance(picket, hit) <= kill + 0.5f;
+    constexpr int kSamples = 12;
+    for (int i = 0; i <= kSamples; ++i) {
+        const float t = t_hit * (static_cast<float>(i) / kSamples);
+        if (t < 0.04f) continue;
+        const Vec3 meet = hit + vel * t;
+        const float need = swarm::Distance(picket, meet) - kill;
+        if (need <= 0.0f) return true;
+        if (CoverReach(t, accel, max_speed) >= need) return true;
+    }
+    return false;
+}
+
+/// Unique-owner Voronoi-edge inbound at picket elevation — the bracelet
+/// the kill-envelope cue scores as closed/hole. Horizon (el=0) is not
+/// AND-ed in: a six-picket ring never catches a ground-level bisector,
+/// and that would abort the shrink and leave the radio radius.
+bool CoverCloses(const Config& cfg, float radius, float altitude,
+                 uint32_t count) {
+    if (count < 2) return true;
+    if (radius < 1.0f) return false;
+    if (cfg.sense_radius < 1.0f || cfg.max_speed < 0.1f) return true;
+    const float accel = cfg.lateral_limit > 0.1f ? cfg.lateral_limit
+                                                 : 6.7f;
+    const float h = altitude > 0.0f ? altitude : 0.0f;
+    const float elev = std::atan2(h, radius);
+    const float alpha = kPi / static_cast<float>(count);
+    const float ce = std::cos(elev);
+    const float se = std::sin(elev);
+    const Vec3 picket(cfg.asset.x + radius,
+                      cfg.asset.y,
+                      cfg.asset.z - h);
+    const Vec3 u(ce * std::cos(alpha), ce * std::sin(alpha), -se);
+    return CoverCanCatch(cfg.asset, cfg.asset_radius, picket, u,
+                         cfg.sense_radius, cfg.max_speed, accel,
+                         cfg.kill_radius);
+}
+
+/// Shrink-only. If the radio/spawn ring already tiles, keep the standoff
+/// (D21: growing past ~0.75·comm outruns recovery). If it does not, take
+/// the largest still-closed radius down to `floor_r`. If even the floor
+/// is open, shrinking cannot help — leave the caps alone.
+float ClampToClosedCover(const Config& cfg, float radius, float altitude,
+                         uint32_t count, float floor_r) {
+    if (count < 2) return radius;
+    if (CoverCloses(cfg, radius, altitude, count)) return radius;
+    if (floor_r >= radius - 0.5f) return radius;
+    if (!CoverCloses(cfg, floor_r, altitude, count)) return radius;
+    float lo = floor_r;
+    float hi = radius;
+    float best = floor_r;
+    for (int i = 0; i < 20; ++i) {
+        const float mid = 0.5f * (lo + hi);
+        if (CoverCloses(cfg, mid, altitude, count)) {
+            best = mid;
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    return best;
+}
+
+float ComputePicketRadius(const Config& cfg, uint32_t live_count,
+                          float altitude) {
     const float span_x = cfg.arena_max.x - cfg.arena_min.x;
     const float span_y = cfg.arena_max.y - cfg.arena_min.y;
     const float arena_half = 0.5f * (span_x < span_y ? span_x : span_y);
@@ -65,7 +190,7 @@ float ComputePicketRadius(const Config& cfg, uint32_t live_count) {
     if (radius > spawn_cap) radius = spawn_cap;
     if (radius > react_cap) radius = react_cap;
     if (radius < floor_r) radius = floor_r;
-    return radius;
+    return ClampToClosedCover(cfg, radius, altitude, count, floor_r);
 }
 
 /// Scoring hook, and the only channel the viewer has for "this drone called
@@ -82,8 +207,8 @@ SwClass PublishedClass(const Track& t) {
 
 }  // namespace
 
-float PicketRadius(const Config& cfg, uint32_t live_count) {
-    return ComputePicketRadius(cfg, live_count);
+float PicketRadius(const Config& cfg, uint32_t live_count, float altitude) {
+    return ComputePicketRadius(cfg, live_count, altitude);
 }
 
 void Policy::Configure(const Config& cfg, Rng rng) {
@@ -107,7 +232,15 @@ void Policy::Configure(const Config& cfg, Rng rng) {
     // (mean -52.5 -> -20.8). Past ~0.75 the ring outruns its own recovery --
     // a leaker at that range cannot be run down, since a hostile has our
     // lateral limit -- and tier-2 layouts collapse. See notes/decisions.md.
-    ring_radius_ = PicketRadius(cfg, cfg.fleet_size);
+    //
+    // Closed-cover (D58) then shrinks that radius if the unique-owner
+    // Voronoi-edge inbound at picket elevation is not catchable from rest.
+    // Same Reach / first-sight arithmetic as the kill-envelope bracelet.
+    // It does not grow: a larger ring that "buys time" is the D21 failure
+    // past F0.75. Height is an input because a lower station (default 25 m,
+    // or a fitted cone) changes the divert.
+    ring_altitude_ = kRayDefaultAlt;
+    ring_radius_ = PicketRadius(cfg, cfg.fleet_size, ring_altitude_);
 
     // ...but never out near the circle hostiles enter on (D28). A picket that
     // sits just inside it meets its first hostile already born on top of it,
@@ -134,7 +267,6 @@ void Policy::Configure(const Config& cfg, Rng rng) {
     // comparable (measured 19-21 m/s against our 17-24), so max_speed is the
     // proxy. This is the same reasoning as the spawn radius itself: a number the
     // brain is not given, derived from one it is.
-    ring_altitude_ = kRayDefaultAlt;
     ray_ = InboundRay{};
     last_ray_send_ = -1.0e9f;
     sampled_local_ = false;
@@ -209,7 +341,7 @@ void Policy::ApplyRayAltitude() {
     if (!ray_.ready()) return;
     float h = ray_.HeightAt(ring_radius_);
     if (h < kRayFloorAlt) h = kRayFloorAlt;
-    if (h > kRayDefaultAlt) h = kRayDefaultAlt;
+    if (h > kRayCapAlt) h = kRayCapAlt;
     ring_altitude_ = h;
 }
 
@@ -650,9 +782,11 @@ Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) 
     // After a nearby death the survivors re-space (D19). Past the predicted
     // ram they stay put (D17).
     const float now = obs.time();
-    ring_radius_ = PicketRadius(
-        cfg_, CountLive(cfg_.fleet_size, cfg_.drone_id, heard_, heard_at_,
-                        obs.position(), cfg_.comm_radius, now, confirmed_dead_));
+    const uint32_t live = CountLive(
+        cfg_.fleet_size, cfg_.drone_id, heard_, heard_at_,
+        obs.position(), cfg_.comm_radius, now, confirmed_dead_);
+    ApplyRayAltitude();
+    ring_radius_ = PicketRadius(cfg_, live, ring_altitude_);
     ApplyRayAltitude();
     const Vec3 slot = StationAt(StationBearing(cfg_.drone_id, cfg_.fleet_size,
                                         cfg_.drone_id, heard_, heard_at_,
@@ -711,9 +845,6 @@ Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) 
     for (const Track& t : store.tracks()) {
         if (t.belief != Belief::Hostile) continue;
         if (OwnsInbound(t, store, obs)) continue;
-        const uint32_t live = CountLive(
-            cfg_.fleet_size, cfg_.drone_id, heard_, heard_at_,
-            obs.position(), cfg_.comm_radius, now, confirmed_dead_);
         const uint32_t face = FacingSlot(t.position, cfg_.asset, live);
         uint32_t owner = LiveId(face, cfg_.fleet_size, cfg_.drone_id, heard_,
                                 heard_at_, obs.position(), cfg_.comm_radius,
