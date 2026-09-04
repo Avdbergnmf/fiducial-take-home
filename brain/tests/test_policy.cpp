@@ -318,14 +318,15 @@ static void TestClosedCoverLeavesAFullS1Ring() {
 }
 
 static void TestClosedCoverPullsASparseRingIn() {
-    std::printf("six even stations cannot catch the bisector at the radio radius\n");
+    std::printf("six even stations shrink until leftover Reach meets kCoverSlack\n");
     Config cfg = WideRadioCfg();
     cfg.fleet_size = 6;
     const float radio = cfg.asset_radius + cfg.comm_radius * 0.625f;
     const float r = PicketRadius(cfg, 6, 30.0f);
+    CHECK(kCoverSlack > 4.0f && kCoverSlack < 6.0f);
     CHECK(r < radio - 1.0f);
-    CHECK(r > 70.0f);
-    CHECK(r < 82.0f);
+    CHECK(r > 66.0f);
+    CHECK(r < 74.0f);
 }
 
 static void TestClosedCoverBindsOnTightSense() {

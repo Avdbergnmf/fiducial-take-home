@@ -64,7 +64,9 @@ we abort as `duplicate`. With the orbit on, a challenger with a better
 must win by `kHandoffMargin` seconds of score (default 0.25, D69). Receding
 incumbent, same t_go bin: also if closing faster by `kHandoffAspect` m/s
 (default 0.5) — that is the facing drone whose tangential velocity is
-square across the corridor (D67). Both knobs are in `policy.h`.
+square across the corridor (D67). Both knobs are in `policy.h`. Ring
+radius shrinks until the unique-owner inbound at picket height has 5 m
+of leftover Reach (D70), not until leftover is exactly 0.
 
 ## Modes
 

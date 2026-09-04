@@ -2519,6 +2519,13 @@ are left out — this is geometry, not policy.
 readout. Select a friendly: generators to first-sight on its sense
 sphere. Chip: `closed · N live` or `hole X°`.
 
+Defender **velocity is not in this model** (added D70). A belt that
+goes green while the fleet is still flying out to station is pose:
+leaving the spawn cluster (D58) and/or transiting a radius that tiles
+from rest. That flash is what suggested orbiting instead of parking
+(D63 / D70).
+
+
 ---
 
 ## D58 — Closed-cover radius; default picket 25 m
@@ -2720,6 +2727,17 @@ that already hit, not a new leak.
 Revisits D23. The proposal: fly the ring tangentially so a drone handed an
 inbound is already **moving** toward its intercept and only has to turn that
 velocity rather than build it.
+
+The seed observation (logged under D70, seen on the D57 cue): while the
+fleet was still forming, flying *out* to a larger picket radius, the
+kill-envelope belt often went fully green, then could open again once
+they sat. That looked like velocity filling the envelope. The cue was
+from rest — it was pose (leaving the spawn cluster, transiting a
+closed-cover radius). The physics underneath the misread is still the
+reason to orbit: do not throw away a velocity that already points at
+the intercept. Radial outbound is that for a facing inbound; a
+tangential orbit plus handoff is the version that does not grow R.
+
 
 The physics says when that can pay. Turning speed `v` through angle `φ` costs
 about `φ·v/a`; building `v` from rest costs `v/a`. So orbiting wins only while
@@ -3199,3 +3217,85 @@ worse on fresh t2 with no identity gain.
 flicker can still swap two *approaching* incumbents. This draw did not
 show that. 0.25 is measured better than 1.0 here, not a proof D65
 cannot return. Do not set the tax to 0.
+
+---
+
+## D70 — Cover slack 5 m; ω=0.06 holds around the theoretical peak
+
+D58 took the **largest still-closed** radius (leftover Reach ≈ 0). That is
+why the kill-envelope bracelet sits on a knife-edge whenever cover
+binds. The overlay's big red band *under* the bracelet is a different
+hole: `CoverCloses` tests only the picket-elevation Voronoi inbound,
+not the 0° horizon cell of `ReachCover` (a six-picket ring never
+catches a ground-level bisector, and AND-ing that cell aborts the
+shrink and leaves the radio radius).
+
+**Slack.** Prefer leftover ≥ `kCoverSlack` = 5 m on that bracelet
+inbound. If no radius in `[asset, R_caps]` can make 5 m, fall back to
+leftover ≥ 0 so a tight-sense layout does not keep an open radio ring.
+Cover may shrink to the asset cylinder. That is a late intercept, not a
+collision (the asset is a horizontal cylinder hostiles hit; pickets have
+been seen sitting on it). Radio/spawn/react caps still refuse to *park*
+inside `asset+10` on their own.
+
+A full 16-picket radio ring already has ~26 m leftover at 25 m — slack
+does not bind, standoff is unchanged. A six-picket ring pulls in until
+the 5 m margin exists (~70 m at H=30, was ~76).
+
+**Orbit tradeoff, closed form.** A ram leaves the circle, so intercept
+divert is full `lat` plus orbit velocity. Centripetal `ω²R` is only
+station-keeping. On a just-closed 6-picket ring the approaching
+neighbour's leftover peaks at ω ≈ 0.05 (4.0 m vs 1.9 from rest;
+a_c ≈ 3% of lat). The receding peer goes negative immediately —
+handoff has to take the approaching one (D67). On a fat 16-picket ring
+leftover is already 26 m and any ω past ~0.02 is a cost. That is D66's
+tier split, drawn as leftover vs ω.
+
+**Measured ω around that peak**, same 10 ids, after slack:
+
+| ω | identity 8 | canary | fa56 | notes |
+|---|---:|---:|---:|---|
+| 0.04 | 145.9 | 45.4 3/3 | 87.4 3/3 | s1 wasted 1 (wreckage) |
+| **0.06** | **150.7** | **45.5 3/3** | **83.5 3/3** | holds |
+| 0.08 | 105.2 | 86.7 3/3 | −116.6 2/3 | **s2 5/6 breach**, fa56 breach |
+
+Keep 0.06. 0.08 is past the plateau in the way D63 named. A
+layout-adaptive `ω(R)` is still the right *shape* (fat rings want
+slower) but integrating `ω(R)·t` while R shrinks would jump phase;
+boot-from-full-R is the safe form if this is revisited.
+
+**Cue.** Kill envelope now diverts around the live ballistic point
+(`p + v t`), same pancake as the Reach cue. Parked is the old from-rest
+belt. Brain shrink stays from rest, so the overlay can read greener
+than the planned ring while the fleet is orbiting.
+
+**The forming flash that suggested orbit.** Before this, `CanCatch` was
+from rest: `Reach(t)` from the live *pose*, defender velocity unused
+(D57). The belt still went green while the fleet flew *out* to station
+at boot. That was not a hidden velocity term. Two pose effects:
+
+1. Spawn cluster (D58): at t≈0 everyone is in one lump, so whole
+   azimuths have no defender. As they spread onto bearings the bracelet
+   fills. Spreading looks like “motion made it green.”
+2. Transiting a closed radius: D58 shrinks to the largest R that tiles
+   from rest. Forming often flies *through* that band toward a larger
+   radio cap. Mid-transit leftover is better than at the destination,
+   so the belt flashes closed and can open again on arrival.
+
+Radial outbound *would* help a facing inbound if v were in the model
+(they are already flying at the corridor). The overlay did not give
+them that credit. The instinct was still right: motion that points at
+the intercept is the thing worth keeping, and parking throws it away.
+Orbit is that idea without continuously growing R (D21). Tangential v
+on the *facing* drone is the worst orientation (D23/D63); handoff
+gives it to the neighbour whose v is already closing (D66/D67). The
+D70 cue is what the forming flash looked like it was already doing.
+
+
+### Measured (slack, ω=0.06)
+
+Identity 8: **unchanged**, mean **150.7**, 0 breaches, x1-a still 2 civ
+(D44). Hard canary `x1-06b926af…`: **2/3 −113.4 → 3/3 +45.5**, hostile_0
+rammed at 20.65 (was a breach at 21.31). One wreckage waste on that id
+(−40), not a breach. fa56 still 3/3 83.5.
+

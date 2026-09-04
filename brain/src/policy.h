@@ -43,6 +43,11 @@ uint32_t FacingSlot(const Vec3& position, const Vec3& asset, uint32_t count,
 /// Cost is centripetal, v^2/R out of the 6.71 m/s^2 lateral budget: at R = 25 m
 /// even 4 m/s is 0.64 m/s^2. Small rings punish this much harder than the 90 m
 /// ring this was first tried on.
+///
+/// D70: leftover-Reach vs ω on a just-closed 6-picket ring peaks at ~0.05
+/// (handoff takes the approaching neighbour; centripetal is 3% of lat).
+/// Measured 0.04 / 0.06 / 0.08 on identity+canary+fa56 after cover slack:
+/// 0.06 holds. 0.04 wastes on s1. 0.08 re-opens s2 and fa56.
 constexpr float kOrbitRate = 0.06f;
 
 /// Hand an inbound to the drone with the best intercept solution rather than
@@ -97,11 +102,20 @@ constexpr float kNoHit = 1000.0f;
 
 /// Picket radius for the currently live fleet. Radio, spawn, reaction, and
 /// chord-preservation caps first; then the largest radius at `altitude`
-/// whose unique-owner Voronoi-edge inbound (picket elevation) is still
-/// catchable from rest — same first-sight / Reach model as the
-/// kill-envelope bracelet. Never grows past those caps.
+/// whose unique-owner Voronoi-edge inbound (picket elevation) still has
+/// leftover Reach ≥ `kCoverSlack` — same first-sight / Reach model as the
+/// kill-envelope bracelet. If no radius meets the slack, fall back to
+/// leftover ≥ 0 (D58). Cover may shrink toward the asset cylinder; that is
+/// not a collision. Never grows past the caps.
 float PicketRadius(const Config& cfg, uint32_t live_count,
                    float altitude = kRayDefaultAlt);
+
+/// Metres of leftover Reach the bracelet inbound must keep. D58 took the
+/// largest still-closed R (leftover ≈ 0), which is the knife-edge belt.
+/// 5 m is a few kill-radii of margin and does not bind a full 16-picket
+/// radio ring (those have ~26 m). Layouts that cannot make 5 m still
+/// close at leftover 0 rather than giving up and leaving the radio hole.
+constexpr float kCoverSlack = 5.0f;
 
 /// Lowest station height that still keeps the kill-envelope bracelet off
 /// the dirt. Two cuts, both the Cover model the overlay draws:

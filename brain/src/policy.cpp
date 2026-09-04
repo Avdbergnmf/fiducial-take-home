@@ -88,28 +88,31 @@ int CoverCylinder(const Vec3& asset, float radius, const Vec3& pos,
 }
 
 /// Unique-owner catch from rest. Same samples and margins as the
-/// kill-envelope cue, in NED (viewer is Y-up).
-bool CoverCanCatch(const Vec3& asset, float asset_radius, const Vec3& picket,
-                   const Vec3& u, float sense, float max_speed, float accel,
-                   float kill) {
+/// kill-envelope cue, in NED (viewer is Y-up). Returns leftover Reach
+/// in metres (positive = still catchable with that much spare). A ray
+/// that never enters the cylinder is not a hole.
+float CoverLeftover(const Vec3& asset, float asset_radius, const Vec3& picket,
+                    const Vec3& u, float sense, float max_speed, float accel,
+                    float kill) {
     Vec3 hit;
-    if (!CoverFirstSight(asset, picket, u, sense, hit)) return false;
+    if (!CoverFirstSight(asset, picket, u, sense, hit)) return -1.0e9f;
     const Vec3 vel = u * (-max_speed);
     float t_hit = 0.0f;
     const int cyl = CoverCylinder(asset, asset_radius, hit, vel, t_hit);
-    if (cyl == 0) return true;
+    if (cyl == 0) return 1.0e9f;
     if (cyl == 1 || t_hit <= 0.04f)
-        return swarm::Distance(picket, hit) <= kill + 0.5f;
+        return kill + 0.5f - swarm::Distance(picket, hit);
     constexpr int kSamples = 12;
+    float best = -1.0e9f;
     for (int i = 0; i <= kSamples; ++i) {
         const float t = t_hit * (static_cast<float>(i) / kSamples);
         if (t < 0.04f) continue;
         const Vec3 meet = hit + vel * t;
         const float need = swarm::Distance(picket, meet) - kill;
-        if (need <= 0.0f) return true;
-        if (CoverReach(t, accel, max_speed) >= need) return true;
+        const float spare = CoverReach(t, accel, max_speed) - need;
+        if (spare > best) best = spare;
     }
-    return false;
+    return best;
 }
 
 /// Unique-owner Voronoi-edge inbound at picket elevation — the bracelet
@@ -117,7 +120,7 @@ bool CoverCanCatch(const Vec3& asset, float asset_radius, const Vec3& picket,
 /// AND-ed in: a six-picket ring never catches a ground-level bisector,
 /// and that would abort the shrink and leave the radio radius.
 bool CoverCloses(const Config& cfg, float radius, float altitude,
-                 uint32_t count) {
+                 uint32_t count, float min_leftover) {
     if (count < 2) return true;
     if (radius < 1.0f) return false;
     if (cfg.sense_radius < 1.0f || cfg.max_speed < 0.1f) return true;
@@ -132,27 +135,24 @@ bool CoverCloses(const Config& cfg, float radius, float altitude,
                       cfg.asset.y,
                       cfg.asset.z - h);
     const Vec3 u(ce * std::cos(alpha), ce * std::sin(alpha), -se);
-    return CoverCanCatch(cfg.asset, cfg.asset_radius, picket, u,
+    return CoverLeftover(cfg.asset, cfg.asset_radius, picket, u,
                          cfg.sense_radius, cfg.max_speed, accel,
-                         cfg.kill_radius);
+                         cfg.kill_radius) >= min_leftover;
 }
 
-/// Shrink-only. If the radio/spawn ring already tiles, keep the standoff
-/// (D21: growing past ~0.75·comm outruns recovery). If it does not, take
-/// the largest still-closed radius down to `floor_r`. If even the floor
-/// is open, shrinking cannot help — leave the caps alone.
-float ClampToClosedCover(const Config& cfg, float radius, float altitude,
-                         uint32_t count, float floor_r) {
-    if (count < 2) return radius;
-    if (CoverCloses(cfg, radius, altitude, count)) return radius;
-    if (floor_r >= radius - 0.5f) return radius;
-    if (!CoverCloses(cfg, floor_r, altitude, count)) return radius;
+/// Largest R in [floor_r, radius] with leftover ≥ min_leftover.
+/// Negative if even the floor misses.
+float LargestClosed(const Config& cfg, float radius, float altitude,
+                    uint32_t count, float floor_r, float min_leftover) {
+    if (CoverCloses(cfg, radius, altitude, count, min_leftover)) return radius;
+    if (floor_r >= radius - 0.5f) return -1.0f;
+    if (!CoverCloses(cfg, floor_r, altitude, count, min_leftover)) return -1.0f;
     float lo = floor_r;
     float hi = radius;
     float best = floor_r;
     for (int i = 0; i < 20; ++i) {
         const float mid = 0.5f * (lo + hi);
-        if (CoverCloses(cfg, mid, altitude, count)) {
+        if (CoverCloses(cfg, mid, altitude, count, min_leftover)) {
             best = mid;
             lo = mid;
         } else {
@@ -160,6 +160,23 @@ float ClampToClosedCover(const Config& cfg, float radius, float altitude,
         }
     }
     return best;
+}
+
+/// Shrink-only. Prefer leftover ≥ kCoverSlack. If no radius in the band
+/// can make that, fall back to leftover ≥ 0 (D58 knife-edge). If even
+/// the floor is open, shrinking cannot invent time — leave the caps.
+/// Floor is the asset cylinder: sitting there is a late intercept, not
+/// a collision with the asset.
+float ClampToClosedCover(const Config& cfg, float radius, float altitude,
+                         uint32_t count, float floor_r) {
+    if (count < 2) return radius;
+    const float slack = LargestClosed(cfg, radius, altitude, count,
+                                      floor_r, kCoverSlack);
+    if (slack > 0.0f) return slack;
+    const float closed = LargestClosed(cfg, radius, altitude, count,
+                                       floor_r, 0.0f);
+    if (closed > 0.0f) return closed;
+    return radius;
 }
 
 float ComputePicketRadius(const Config& cfg, uint32_t live_count,
@@ -171,7 +188,8 @@ float ComputePicketRadius(const Config& cfg, uint32_t live_count,
     const float full_radius = cfg.asset_radius + cfg.comm_radius * 0.625f;
     const float spawn_cap = spawn_radius * 0.65f;
     const float react_cap = spawn_radius - 3.5f * cfg.max_speed;
-    const float floor_r = cfg.asset_radius + 10.0f;
+    const float prefer_r = cfg.asset_radius + 10.0f;
+    const float hard_r = cfg.asset_radius > 1.0f ? cfg.asset_radius : 1.0f;
     const uint32_t full_count = cfg.fleet_size > 0 ? cfg.fleet_size : 1;
     const uint32_t count = live_count > 0 ? live_count : 1;
 
@@ -190,8 +208,8 @@ float ComputePicketRadius(const Config& cfg, uint32_t live_count,
     }
     if (radius > spawn_cap) radius = spawn_cap;
     if (radius > react_cap) radius = react_cap;
-    if (radius < floor_r) radius = floor_r;
-    return ClampToClosedCover(cfg, radius, altitude, count, floor_r);
+    if (radius < prefer_r) radius = prefer_r;
+    return ClampToClosedCover(cfg, radius, altitude, count, hard_r);
 }
 
 float ComputePicketFloor(const Config& cfg, float radius) {
@@ -257,12 +275,14 @@ void Policy::Configure(const Config& cfg, Rng rng) {
     // a leaker at that range cannot be run down, since a hostile has our
     // lateral limit -- and tier-2 layouts collapse. See notes/decisions.md.
     //
-    // Closed-cover (D58) then shrinks that radius if the unique-owner
-    // Voronoi-edge inbound at picket elevation is not catchable from rest.
-    // Same Reach / first-sight arithmetic as the kill-envelope bracelet.
-    // It does not grow: a larger ring that "buys time" is the D21 failure
-    // past F0.75. Height is an input because a lower station (default 25 m,
-    // or a fitted cone) changes the divert.
+    // Closed-cover (D58 / D70) then shrinks that radius if the unique-owner
+    // Voronoi-edge inbound at picket elevation is not catchable from rest
+    // with kCoverSlack metres of leftover Reach. Same first-sight / Reach
+    // arithmetic as the kill-envelope bracelet. It does not grow: a larger
+    // ring that "buys time" is the D21 failure past F0.75. Height is an
+    // input because a lower station (default 25 m, or a fitted cone)
+    // changes the divert. Cover may pull in as far as the asset cylinder;
+    // that is a late intercept, not a collision.
     ring_altitude_ = kRayDefaultAlt;
     ring_radius_ = PicketRadius(cfg, cfg.fleet_size, ring_altitude_);
 
