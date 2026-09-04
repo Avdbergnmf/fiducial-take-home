@@ -2287,3 +2287,111 @@ attitude in the loop; yaw stays cosmetic.
 worst s2 **−30.6**. s1 6/6 (221.0). x1-a 4/4, 2 civilians, 0 wasted.
 Hard id still **1/3, −304**. Egg was a 1-point mean with no intercept
 change.
+
+---
+
+## D52 — Linear inbound ray sets ring altitude
+
+**Fear.** On the hard id the inbound crosses the 57 m ring at ~11 m.
+Pickets sit at 30 m. CollisionCourse then spends the tilt budget on a
+19 m dive and starves north reach.
+
+**Not in the brief.** `spawn.enemy_altitude` / `spawn.enemy_radius` are
+not in `SwBootInfo`. Hostiles are not promised to dive or to hit the
+origin (D32 / D39). Hardcoding s1's 40 m is the same sin as the old
+`ring_altitude_ = 30`.
+
+**Chosen.** Fit a radially symmetric line `h = h0 + slope · r` from
+kinematics we actually see:
+
+- Local: Hostile, or AimedAtAsset + diving, still outside the ring,
+  radial closing > 2 m/s.
+- Weight: `dt · |closing|` is implicit in sampling every tick at `dt`;
+  local ×2, Hostile ×2, hearsay `1/(1+hops)`. Outliers >15 m of altitude
+  against a ready model are ignored (civilians). Decay τ = 12 s.
+- Height at the picket is `h0 + slope · ring_radius`, clamped [6, 30].
+  The ring only lowers. Radius changes (D19) re-evaluate the same cone.
+
+**Distribution.** Heartbeats do not hop. `Ray` (type 5) does, same
+`kMaxHops` as TrackReport, priority 4 (below identity, above routine
+tracks). Only a drone with a **local** inbound sample originates, every
+0.5 s once ready; everyone else relays. Receivers blend with
+hop-discounted weight, capped so one packet cannot dominate. Hearsay
+Hostile tracks also sample, so a seer who has not yet sent a `Ray`
+still moves neighbours via the existing TrackReport flood.
+
+**Not chosen.** Boot-time Pythagoras from `0.80 · arena_half` and a
+guessed 40 m. Owner-only drop without a fleet cone — the next arrival
+and the s2 interceptor who is not the seer would still sit at 30 m.
+
+**Measured.** Hard id **1/3 −304 → 2/3 −108**. Hostile_0 still
+breaches at 21.31 s (the cone only goes ready at ~17.2 s, ~2 s before
+ring crossing — the north cut-off on that first inbound remains).
+Hostile_1 and _2 are killed: the fleet is already on the cone. Eight
+named mean **123.2 → 122.9**, worst s2 **−30.6 → −28.6**. s1 6/6
+(224.2). x1-a 4/4, 2 civilians, 0 wasted (−6.8). Letting every drone
+originate a `Ray` 2 Hz tripled radio use (mean 120.3); seer-only origin
+plus hops restored comms.
+
+---
+
+## D53 — Measure loss and latency; do not publish assignment
+
+**Unpublished.** CHALLENGE.md §6: packet loss and radio latency vary
+(0–20%, 1–5 ticks plus jitter) and are never in `SwBootInfo`. Anything
+that needs a number has to measure it. §7 / s4: hostiles hear the clear
+and will use traffic that says who is going after whom.
+
+**Chosen.** Hop-0 sequence gaps per origin → loss. `obs.time − sent_time`
+→ latency. Seq jump > 32 is leaving range. Relays do not count. Log
+`link loss= lat= n= src=` every 2 s (viewer verb `link`). Stale
+TrackReport/Ray window is `40 × mean latency`, clamped [0.5, 2] s.
+
+Claim stays off the wire. UniqueOwner does not handshake. A dead drone
+never retracts; the ram times out at 12 s instead. TrackReport names a
+place, not an interceptor.
+
+**Measured.** s1 vs s2, hop-0, median per-neighbour loss / mean latency:
+
+| | published | logged (late-run) |
+|---|---|---|
+| s1 loss | 2% | **3.3%** |
+| s1 latency | 2 ticks + 0–1 jitter (20–30 ms) | **25 ms** |
+| s2 loss | 8% | **9.7%** |
+| s2 latency | 3 ticks + 0–2 jitter (30–50 ms) | **40 ms** |
+
+Pooled loss on s1 was ~15% — the 3rd ring neighbour sits in the last
+10 m of radio range. Median of per-neighbour rates is the number that
+tracks the iid parameter. Identity unchanged (mean 122.9).
+
+---
+
+## D54 — Default ring altitude stays 30 m (measured, rejected)
+
+**The question.** After D52 the leftover leak is one inbound. Is that
+always the *first* inbound, so sitting the ring lower before any cone
+exists would catch it?
+
+**Not in the brief.** Same unpublished-spawn problem as D52. Friendly
+pose at boot is 30 m; that is the only altitude we are given.
+
+**Counted, current brain.** Named s1 0/6 breaches. Named s2 1/6 —
+hostile_5 at 106.78 s, last inbound, cone long since ready. Eight
+fresh x1 tokens: three single leaks, none first-arrivals (hostile_1 /
+_2 / _3). Eight fresh x2: one leak, last inbound. Hard id is the only
+first-arrival miss (hostile_0 at 21.31 s). No s1/s2-class run had more
+than one breach.
+
+**Tried anyway.** Default 20 m (s1 Pythagorean-at-ring) and 12 m
+(hard-id crossing): cap still 30. Identity at 20 m mean **122.8**
+(was 122.9), s2 still 5/6, x1-a still 4/4 / 2 civ. Hard id still
+**2/3**, hostile_0 still **21.31 s** at both 20 m and 12 m. The first
+interceptor leaves the ring before the cone is ready; lowering the
+slot it is no longer sitting on does not buy north reach.
+
+**Not chosen.** Sitting below spawn is a dive prior (D32 / D39). D52
+already refused boot-time Pythagoras from a guessed 40 m. XY lean lost
+score because it left coverage; this Z lean keeps coverage and still
+does not convert the first inbound. Default stays friendly spawn.
+The remaining hard-id miss is time / north geometry, not station
+height.

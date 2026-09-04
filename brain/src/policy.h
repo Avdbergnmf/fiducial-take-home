@@ -159,6 +159,12 @@ public:
     /// A heartbeat from this origin, with the claimed pose.
     void NoteAlive(uint8_t drone_id, const Vec3& position, float now);
 
+    /// A hopped inbound-ray fit. Weight is discounted by hops so a far
+    /// rumour cannot overwrite a local cone (D52).
+    void NoteRay(float h0, float slope, float weight, uint8_t hops);
+
+    const InboundRay& inbound_ray() const { return ray_; }
+
     /// Nearby-death latch transitions: `gone id=` / `live id=` (D37). Separate
     /// from last_log_ so a commit on the same tick is not overwritten.
     void LogRing(const swarm::Host& host);
@@ -190,6 +196,8 @@ private:
     void BindTarget(Track* t);
     int MateId(const Track& mate) const;
     void AssignStationMode(const swarm::Observation& obs);
+    void ObserveInbounds(const TrackStore& store, float dt);
+    void ApplyRayAltitude();
 
     Config cfg_;
     Rng rng_;                 // unused today; the hook for jittering send times
@@ -208,7 +216,10 @@ private:
     uint16_t next_seq_ = 0;
     float last_heartbeat_ = -1.0e9f;
     float ring_radius_ = 60.0f;
-    float ring_altitude_ = 30.0f;
+    float ring_altitude_ = kRayDefaultAlt;
+    InboundRay ray_;
+    float last_ray_send_ = -1.0e9f;
+    bool sampled_local_ = false;
     Vec3 picket_goal_{};
     Vec3 station_{};
     const Track* stalk_ = nullptr;

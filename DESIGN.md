@@ -62,19 +62,48 @@ version, unknown type, overflow, and garbage that must not read past `len`.
 
 **Header (10 bytes):** version, type, origin, hops, seq, sent_time.
 `hops` is incremented by each relay; origin/seq/`sent_time` stay the author's.
-Cap 4 on TrackReport only (D18). Heartbeats are not forwarded.
+Cap 4 on TrackReport and Ray (D18 / D52). Heartbeats are not forwarded.
 
 - **Heartbeat** — claimed position and velocity, 0.125 m quantised. Identity.
 - **Track report** — pose, belief, confidence. No `track_id` (observer-local).
-  Association is geometry plus time (D14).
+  Association is geometry plus time (D14). Says *there is a Hostile here*,
+  not *I am going after it*.
 - **Claim** — defined, **not composed**. Unread claims won the one frame per
   tick; interceptors went silent; neighbours stacked (D11). Allocation is
-  radio-free (D15).
+  radio-free (D15). Death is silent: a drone that claimed and then died
+  never retracts, so anything waiting on an ack waits forever. We do not
+  handshake. The ram itself times out at 12 s; UniqueOwner does not ask
+  permission.
 - **Accuse** — type 4 is accepted by the header and dropped. No payload.
+- **Ray** — fitted inbound cone `(h0, slope, weight)`. Seer originates;
+  everyone else relays. Fleet geometry, not an assignment.
 
 Writer stamps `kProtocolVersion = 1`. Reader refuses any other version, any
-type outside 1–4, and any short frame. No negotiation. A frame at the antenna
+type outside 1–5, and any short frame. No negotiation. A frame at the antenna
 proves only that something transmitted it.
+
+**s4 — hostiles listen.** Everything we send is in the clear and in range of
+the inbound. Traffic that names which drone is going after which target is
+usable against us. That is why Claim stays off the wire: UniqueOwner is a
+local function of bearing and who we can still hear, so a hostile that
+overhears the radio does not get a map of interceptors. The cost is two
+drones with disagreeing `heard_[]` can both think they own the inbound
+(closer-chaser abort is the backstop). TrackReport and Ray still leak
+*where we think a Hostile is* and *how high the fence sits*. We accepted
+that: without those, s2 never intercepts. Encryption is a later-tier job;
+the trade-off is the design, not a missing flag.
+
+**Loss and latency are unpublished** (0–20% loss, 1–5 ticks plus jitter).
+Each drone measures them on **hop-0** frames: sequence gaps per origin are
+loss; `obs.time − sent_time` is delay. A seq jump larger than 32 is leaving
+range, not a burst of loss. Relays are ignored — they are not the radio to
+the author. Logged loss is the **median** per-neighbour rate so a craft in
+the last 10 m of radio range does not look like 15% iid loss. The estimate
+is logged as `link loss=… lat=… n=… src=…` every 2 s once 20 frames are in
+(viewer verb `link`). Stale TrackReport / Ray drop uses `40 × mean latency`,
+clamped to [0.5, 2] s, instead of a constant 2 s. We do not retransmit:
+TrackReport already hops and bursts at 0.1 s for the first 1.5 s after a
+call. s1 should read ~2% / ~20 ms; s2 ~8% / ~30–50 ms.
 
 Stance is not on the wire. It is piecewise constant and already logged as
 `commit` / `abort` / `picket`; a 100 Hz dump would burn the log budget. The
@@ -290,6 +319,7 @@ collision.
   plausible heartbeat marks the sender Friendly.
 - **Claims unused.** UniqueOwner plus closer-chaser abort is the substitute.
   Two drones with disagreeing `heard_[]` can both think they own the inbound.
+  That is the s4 trade: we will not put assignment on a channel hostiles hear.
 - **D13 local drop.** Tracks die with the sensor picture. Correct against an
   unpublished `track_drop_time`; it cost ~200 points each on s2, x1-a, x2-a
   until D15 recovered most of it.

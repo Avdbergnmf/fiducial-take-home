@@ -7,6 +7,7 @@
 
 #include "protocol.h"
 
+#include <cmath>
 #include <cstdio>
 
 static int g_failures = 0;
@@ -240,6 +241,67 @@ static void TestRelayCopy() {
     CHECK(!RelayCopy(src, Header::kBytes - 1, dst, sizeof(dst), 1));
 }
 
+static void TestRayPayloadRoundTrip() {
+    std::printf("ray payload round-trip\n");
+    uint8_t buf[64];
+    Writer w(buf, sizeof(buf));
+    Header h;
+    h.type = MsgType::Ray;
+    h.origin = 4;
+    h.hops = 1;
+    h.seq = 12;
+    h.sent_time = 10.0f;
+    h.Write(w);
+    RayMsg out;
+    out.h0 = 0.4f;
+    out.slope = 0.189f;
+    out.weight = 12.5f;
+    out.Write(w);
+    CHECK(w.ok());
+
+    Reader r(buf, w.size());
+    Header in;
+    CHECK(in.Read(r));
+    CHECK(in.type == MsgType::Ray);
+    CHECK(in.origin == 4);
+    CHECK(in.hops == 1);
+    RayMsg m;
+    m.Read(r);
+    CHECK(r.ok());
+    CHECK(std::fabs(m.h0 - 0.4f) < 1e-5f);
+    CHECK(std::fabs(m.slope - 0.189f) < 1e-5f);
+    CHECK(std::fabs(m.weight - 12.5f) < 1e-5f);
+}
+
+static void TestDirectLinkLossAndLatency() {
+    std::printf("hop-0 seq gaps are loss; send-time is latency\n");
+    DirectLinkStats s;
+    CHECK(!s.ready());
+    for (uint16_t i = 0; i < 20; ++i)
+        s.Observe(1, i, 1.00f, 1.02f);
+    CHECK(s.ready());
+    CHECK(s.Loss() < 1e-6f);
+    CHECK(s.MeanLatency() > 0.019f && s.MeanLatency() < 0.021f);
+    CHECK(s.origins() == 1);
+
+    DirectLinkStats lossy;
+    // 0,2,4,... = every other frame dropped.
+    for (uint16_t i = 0; i < 40; i += 2)
+        lossy.Observe(2, i, 0.0f, 0.03f);
+    CHECK(lossy.Loss() > 0.45f && lossy.Loss() < 0.55f);
+
+    DirectLinkStats wrap;
+    wrap.Observe(3, 65535, 0.0f, 0.02f);
+    wrap.Observe(3, 0, 0.0f, 0.04f);
+    CHECK(wrap.miss() == 0);
+
+    DirectLinkStats gap;
+    gap.Observe(4, 1, 0.0f, 0.02f);
+    gap.Observe(4, 100, 0.0f, 0.04f);  // left range, not 98 lost
+    CHECK(gap.miss() == 0);
+    CHECK(gap.StaleAfter() == 2.0f);   // not ready
+}
+
 int main() {
     TestHeaderRoundTrip();
     TestTruncated();
@@ -252,6 +314,8 @@ int main() {
     TestOutboxPriority();
     TestOutboxExpiry();
     TestRelayCopy();
+    TestRayPayloadRoundTrip();
+    TestDirectLinkLossAndLatency();
 
     if (g_failures == 0) {
         std::printf("protocol: all passed\n");

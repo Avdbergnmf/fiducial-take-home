@@ -157,6 +157,54 @@ bool LooksBallistic(const Vec3& velocity, const Vec3& prev_velocity, float dt);
 bool HeartbeatPlausible(const Vec3& self, const Vec3& claimed,
                         float measured_range, float range_sigma);
 
+// ---------------------------------------------------------------------------
+// Inbound ray. 2-D, radially symmetric: altitude h = h0 + slope · r, r =
+// ground range from the asset. Hostiles on recorded runs share one cone;
+// the picket sits on that cone at the ring radius (D52).
+// ---------------------------------------------------------------------------
+
+/// Radial closing below this is spool / noise; slope is undefined.
+constexpr float kRayMinClosing = 2.0f;
+/// Evidence half-life. One spawn interval is ~14 s; a fitted cone should
+/// still be there for the next arrival.
+constexpr float kRayTau = 12.0f;
+/// Weight that makes HeightAt worth flying to. ~3 ticks of a local dash.
+constexpr float kRayReady = 2.0f;
+/// Residual (m of altitude) at which a sample is a different object.
+constexpr float kRayOutlier = 15.0f;
+constexpr float kRayMaxSlope = 1.0f;
+constexpr float kRayMinRange = 15.0f;
+constexpr float kRayDefaultAlt = 30.0f;
+constexpr float kRayFloorAlt = 6.0f;
+
+/// Fit h = h0 + slope · r from one pose. False if not inbound fast enough
+/// for the slope to mean something. slope is dh/dr, altitude per metre of
+/// ground range; positive means higher farther out.
+bool FitInboundRay(const Vec3& position, const Vec3& velocity, const Vec3& asset,
+                   float& h0, float& slope);
+
+class InboundRay {
+public:
+    void Decay(float dt);
+    /// Blend a fitted (h0, slope) with weight `w`. Outliers against a
+    /// ready model are ignored.
+    bool Blend(float h0, float slope, float w, float at_range = -1.0f,
+               float at_alt = 0.0f);
+    /// Fit then blend. `w` already includes local/peer/hops scaling.
+    bool Sample(const Vec3& position, const Vec3& velocity, const Vec3& asset,
+                float w);
+    float HeightAt(float radius) const;
+    bool ready() const { return weight_ >= kRayReady; }
+    float h0() const { return h0_; }
+    float slope() const { return slope_; }
+    float weight() const { return weight_; }
+
+private:
+    float h0_ = 0.0f;
+    float slope_ = 0.0f;
+    float weight_ = 0.0f;
+};
+
 }  // namespace sw
 
 #endif  // SWARM_BELIEF_H

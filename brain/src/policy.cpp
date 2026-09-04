@@ -34,6 +34,7 @@ constexpr float kNeverHeard = -1.0e8f;
 constexpr uint8_t kPrioTrack = 3;
 constexpr uint8_t kPrioTrackFirst = 6;      // first Hostile report, above heartbeat
 constexpr uint8_t kPrioHeartbeat = 5;       // identity first: claims/reports starved this and neighbours stole intercepts
+constexpr float kRayEvery = 0.5f;           // s; cone hops between routine tracks
 constexpr float kReceding = 2.0f;           // m/s away; facing owner yields to clockwise
 
 float ComputePicketRadius(const Config& cfg, uint32_t live_count) {
@@ -131,7 +132,10 @@ void Policy::Configure(const Config& cfg, Rng rng) {
     // comparable (measured 19-21 m/s against our 17-24), so max_speed is the
     // proxy. This is the same reasoning as the spawn radius itself: a number the
     // brain is not given, derived from one it is.
-    ring_altitude_ = 30.0f;
+    ring_altitude_ = kRayDefaultAlt;
+    ray_ = InboundRay{};
+    last_ray_send_ = -1.0e9f;
+    sampled_local_ = false;
     picket_goal_ = flight::RingSlot(cfg.drone_id, cfg.fleet_size, cfg.asset,
                                     ring_radius_, ring_altitude_);
     station_ = picket_goal_;
@@ -156,6 +160,57 @@ void Policy::NoteAlive(uint8_t drone_id, const Vec3& position, float now) {
     confirmed_dead_[drone_id] = 0;
 }
 
+void Policy::NoteRay(float h0, float slope, float weight, uint8_t hops) {
+    float w = weight;
+    if (w > 16.0f) w = 16.0f;
+    if (w < 0.0f) w = 0.0f;
+    w /= (1.0f + static_cast<float>(hops));
+    ray_.Blend(h0, slope, w);
+}
+
+void Policy::ObserveInbounds(const TrackStore& store, float dt) {
+    if (dt <= 0.0f) dt = 0.01f;
+    const float ring = ring_radius_;
+    for (const Track& t : store.tracks()) {
+        if (t.belief == Belief::Friendly || t.belief == Belief::Wreckage) continue;
+        const float dx = t.position.x - cfg_.asset.x;
+        const float dy = t.position.y - cfg_.asset.y;
+        const float r = std::sqrt(dx * dx + dy * dy);
+        // Inside the ring is us, wreckage, or a hostile already past the
+        // picket. The cone is for arrivals.
+        if (r <= ring + 1.0f) continue;
+
+        bool inbound = t.belief == Belief::Hostile;
+        if (!inbound) {
+            if (t.belief == Belief::Civilian) continue;
+            const float miss = ClosestApproachDistance(t.position, t.velocity,
+                                                       cfg_.asset);
+            const float first = t.miss_at_first < 0.0f ? miss : t.miss_at_first;
+            inbound = AimedAtAsset(miss, first, cfg_.asset_radius) &&
+                      LooksDivingAtAsset(t.position, t.velocity, cfg_.asset,
+                                         cfg_.asset_radius);
+        }
+        if (!inbound) continue;
+
+        float w = dt;
+        const float closing = -(dx * t.velocity.x + dy * t.velocity.y) / r;
+        if (closing > 1.0f) w *= closing;
+        if (t.has_local_id) w *= 2.0f;
+        else w *= 1.0f / (1.0f + static_cast<float>(t.last_hops));
+        if (t.belief == Belief::Hostile) w *= 2.0f;
+        if (ray_.Sample(t.position, t.velocity, cfg_.asset, w) && t.has_local_id)
+            sampled_local_ = true;
+    }
+}
+
+void Policy::ApplyRayAltitude() {
+    if (!ray_.ready()) return;
+    float h = ray_.HeightAt(ring_radius_);
+    if (h < kRayFloorAlt) h = kRayFloorAlt;
+    if (h > kRayDefaultAlt) h = kRayDefaultAlt;
+    ring_altitude_ = h;
+}
+
 void Policy::LogRing(const swarm::Host& host) {
     const uint32_t n = cfg_.fleet_size < kMaxFleet ? cfg_.fleet_size : kMaxFleet;
     for (uint32_t id = 0; id < n; ++id) {
@@ -175,6 +230,10 @@ void Policy::LogRing(const swarm::Host& host) {
 void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
     const float now = obs.time();
     last_log_[0] = '\0';
+
+    ray_.Decay(obs.dt());
+    sampled_local_ = false;
+    ObserveInbounds(store, obs.dt());
 
     // Re-resolve the target every tick: the store's storage moves as tracks
     // are erased. Hearsay has no local id, so we key on store_id and
@@ -244,6 +303,8 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
         }
     }
 
+    ApplyRayAltitude();
+
     if (!announced_picket_ && !Intercepting(mode_)) {
         // The same station function PicketGoal flies to. They agree at boot,
         // when nobody has died; they would not after a loss, and a drone that
@@ -266,6 +327,7 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
         picket_goal_ = PicketGoal(store, obs);
         AssignStationMode(obs);
     } else {
+        ApplyRayAltitude();
         stalk_ = nullptr;
         watch_ = nullptr;
         leashed_ = false;
@@ -616,6 +678,7 @@ Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) 
     ring_radius_ = PicketRadius(
         cfg_, CountLive(cfg_.fleet_size, cfg_.drone_id, heard_, heard_at_,
                         obs.position(), cfg_.comm_radius, now, confirmed_dead_));
+    ApplyRayAltitude();
     const Vec3 slot = StationAt(StationBearing(cfg_.drone_id, cfg_.fleet_size,
                                         cfg_.drone_id, heard_, heard_at_,
                                         obs.position(), cfg_.comm_radius, now,
@@ -974,6 +1037,26 @@ void Policy::Compose(Outbox<24>& outbox, TrackStore& store,
         const uint8_t prio = first ? kPrioTrackFirst : kPrioTrack;
         if (w.ok() && outbox.Push(buffer, w.size(), prio, now)) {
             t.last_reported = now;
+        }
+    }
+
+    // Inbound cone. Hopped like a TrackReport so the far side of the ring
+    // sits at the predicted height before that hostile is in sense (D52).
+    if (ray_.ready() && sampled_local_ && now - last_ray_send_ >= kRayEvery) {
+        Writer w(buffer, sizeof(buffer));
+        Header h;
+        h.type = MsgType::Ray;
+        h.origin = static_cast<uint8_t>(cfg_.drone_id);
+        h.seq = next_seq_++;
+        h.sent_time = now;
+        h.Write(w);
+        RayMsg m;
+        m.h0 = ray_.h0();
+        m.slope = ray_.slope();
+        m.weight = ray_.weight();
+        m.Write(w);
+        if (w.ok() && outbox.Push(buffer, w.size(), kPrioRay, now)) {
+            last_ray_send_ = now;
         }
     }
 

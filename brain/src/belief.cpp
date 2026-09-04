@@ -1,5 +1,7 @@
 #include "belief.h"
 
+#include <cmath>
+
 namespace sw {
 namespace {
 
@@ -128,6 +130,72 @@ bool HeartbeatPlausible(const Vec3& self, const Vec3& claimed,
     // metres, not by noise.
     const float tol = 3.0f * sigma + 2.0f;
     return std::fabs(claimed_range - measured_range) <= tol;
+}
+
+// ---------------------------------------------------------------------------
+
+bool FitInboundRay(const Vec3& position, const Vec3& velocity, const Vec3& asset,
+                   float& h0, float& slope) {
+    const float dx = position.x - asset.x;
+    const float dy = position.y - asset.y;
+    const float r = std::sqrt(dx * dx + dy * dy);
+    if (r < kRayMinRange) return false;
+    // Outward radial speed. Inbound is negative.
+    const float dr = (dx * velocity.x + dy * velocity.y) / r;
+    if (dr > -kRayMinClosing) return false;
+    const float h = -position.z;
+    const float dh = -velocity.z;
+    float b = dh / dr;
+    if (b < 0.0f) b = 0.0f;
+    if (b > kRayMaxSlope) b = kRayMaxSlope;
+    h0 = h - b * r;
+    slope = b;
+    return true;
+}
+
+void InboundRay::Decay(float dt) {
+    if (dt <= 0.0f || weight_ <= 0.0f) return;
+    weight_ *= std::exp(-dt / kRayTau);
+    if (weight_ < 1.0e-3f) weight_ = 0.0f;
+}
+
+bool InboundRay::Blend(float h0, float slope, float w, float at_range,
+                       float at_alt) {
+    if (w <= 0.0f) return false;
+    if (slope < 0.0f) slope = 0.0f;
+    if (slope > kRayMaxSlope) slope = kRayMaxSlope;
+    if (weight_ >= kRayReady) {
+        float pred_h, sample_h;
+        if (at_range > 1.0f) {
+            pred_h = h0_ + slope_ * at_range;
+            sample_h = at_alt;
+        } else {
+            constexpr float kRef = 80.0f;
+            pred_h = h0_ + slope_ * kRef;
+            sample_h = h0 + slope * kRef;
+        }
+        if (std::fabs(sample_h - pred_h) > kRayOutlier) return false;
+    }
+    const float sum = weight_ + w;
+    h0_ = (h0_ * weight_ + h0 * w) / sum;
+    slope_ = (slope_ * weight_ + slope * w) / sum;
+    weight_ = sum;
+    return true;
+}
+
+bool InboundRay::Sample(const Vec3& position, const Vec3& velocity,
+                        const Vec3& asset, float w) {
+    float a = 0.0f, b = 0.0f;
+    if (!FitInboundRay(position, velocity, asset, a, b)) return false;
+    const float dx = position.x - asset.x;
+    const float dy = position.y - asset.y;
+    const float r = std::sqrt(dx * dx + dy * dy);
+    return Blend(a, b, w, r, -position.z);
+}
+
+float InboundRay::HeightAt(float radius) const {
+    if (radius < 0.0f) radius = 0.0f;
+    return h0_ + slope_ * radius;
 }
 
 // ---------------------------------------------------------------------------

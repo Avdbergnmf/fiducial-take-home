@@ -11,6 +11,7 @@
 #include "world.h"
 
 #include <cstdio>
+#include <cmath>
 
 namespace {
 
@@ -40,6 +41,7 @@ public:
         // 3. POLICY: what should we do about it
         policy_.Decide(store_, obs);
         LogPicketRadius();
+        LogLink(obs);
         if (policy_.last_log()[0] != '\0')
             host().Log(policy_.last_log());
         policy_.LogRing(host());
@@ -68,13 +70,36 @@ private:
                     policy_.ring_radius(), policy_.ring_altitude(),
                     obs.self().fix_sigma);
         logged_ring_radius_ = policy_.ring_radius();
+        logged_ring_alt_ = policy_.ring_altitude();
     }
 
     void LogPicketRadius() {
         const float radius = policy_.ring_radius();
-        if (logged_ring_radius_ < 0.0f || radius == logged_ring_radius_) return;
-        host().Logf("params ring=%.1f alt=%.1f", radius, policy_.ring_altitude());
+        const float alt = policy_.ring_altitude();
+        if (logged_ring_radius_ >= 0.0f &&
+            radius == logged_ring_radius_ &&
+            std::fabs(alt - logged_ring_alt_) < 0.5f)
+            return;
+        if (policy_.inbound_ray().ready()) {
+            host().Logf("params ring=%.1f alt=%.1f ray h0=%.1f slope=%.3f w=%.1f",
+                        radius, alt, policy_.inbound_ray().h0(),
+                        policy_.inbound_ray().slope(),
+                        policy_.inbound_ray().weight());
+        } else {
+            host().Logf("params ring=%.1f alt=%.1f", radius, alt);
+        }
         logged_ring_radius_ = radius;
+        logged_ring_alt_ = alt;
+    }
+
+    void LogLink(const swarm::Observation& obs) {
+        if (!links_.ready()) return;
+        const float now = obs.time();
+        if (logged_link_at_ >= 0.0f && now - logged_link_at_ < 2.0f) return;
+        logged_link_at_ = now;
+        host().Logf("link loss=%.3f lat=%.3f n=%u src=%u",
+                    links_.Loss(), links_.MeanLatency(),
+                    links_.got() + links_.miss(), links_.origins());
     }
 
     void ConsumeFrames(const swarm::Observation& obs) {
@@ -92,6 +117,12 @@ private:
             if (h.origin == cfg_.drone_id) continue;     // our own, relayed back
             if (seen_.SeenAndMark(h.origin, h.seq)) continue;
 
+            // Loss and latency are unpublished. Hop-0 seq gaps are loss on
+            // the link to that neighbour; now − sent_time is delay. Relays
+            // are not that measurement (D53).
+            if (h.hops == 0)
+                links_.Observe(h.origin, h.seq, h.sent_time, now);
+
             // TODO(tier 3): everything needed to be suspicious is right here.
             // f.range and f.bearing are measurements OUR receiver made, with
             // published sigmas -- not claims the sender made. For a single-hop
@@ -99,8 +130,8 @@ private:
             // compared, and a replay from the wrong side of the arena fails
             // that test with no crypto involved.
             //
-            // TODO(tier 3): freshness. now - h.sent_time against a window sized
-            // from MEASURED latency, not a constant.
+            // TODO(tier 3): freshness is measured (D53). A hopped report
+            // older than the hop-0 stale window is dropped below.
             //
             // TODO(tier 5): the residual between a peer's claimed position and
             // our measured range to it is the one thing an insider cannot lie
@@ -130,10 +161,27 @@ private:
                     // (now − sent_time); latency is unpublished. D14.
                     float age = now - h.sent_time;
                     if (age < 0.0f) age = 0.0f;
-                    if (age > 2.0f) break;   // stale or replayed
+                    if (age > links_.StaleAfter()) break;   // stale or replayed
                     const sw::Vec3 predicted = m.position + m.velocity * age;
                     store_.MergePeerReport(predicted, m.velocity, m.belief,
                                            m.confidence, now, h.origin, h.hops);
+                    if (h.hops + 1u <= sw::kMaxHops) {
+                        uint8_t relayed[SW_MTU];
+                        if (sw::RelayCopy(f.data, f.len, relayed, sizeof(relayed),
+                                          static_cast<uint8_t>(h.hops + 1u))) {
+                            outbox_.Push(relayed, f.len, sw::kPrioRelay, now);
+                        }
+                    }
+                    break;
+                }
+                case sw::MsgType::Ray: {
+                    sw::RayMsg m;
+                    m.Read(r);
+                    if (!r.ok()) break;
+                    float age = now - h.sent_time;
+                    if (age < 0.0f) age = 0.0f;
+                    if (age > links_.StaleAfter()) break;
+                    policy_.NoteRay(m.h0, m.slope, m.weight, h.hops);
                     if (h.hops + 1u <= sw::kMaxHops) {
                         uint8_t relayed[SW_MTU];
                         if (sw::RelayCopy(f.data, f.len, relayed, sizeof(relayed),
@@ -280,11 +328,14 @@ private:
     sw::Outbox<24> outbox_;
     sw::SeenSet<256> seen_;
 
+    sw::DirectLinkStats links_;
     sw::Vec3 peer_position_[sw::kMaxFleet]{};
     float peer_last_heard_[sw::kMaxFleet]{};
 
     bool announced_ = false;
     float logged_ring_radius_ = -1.0f;
+    float logged_ring_alt_ = -1.0f;
+    float logged_link_at_ = -1.0f;
     bool radio_logged_ = false;
     float last_aim_log_at_ = -1.0f;
 };

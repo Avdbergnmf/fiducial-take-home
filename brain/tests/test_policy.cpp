@@ -680,6 +680,23 @@ static swarm::Observation MakeObs(SwObservation& raw, const Vec3& p,
     return swarm::Observation(raw);
 }
 
+static void TestRingAltitudeFollowsInboundRay() {
+    std::printf("a hopped inbound cone lowers the picket\n");
+    Policy p;
+    p.Configure(TestCfg(), Rng());
+    CHECK(p.ring_altitude() > kRayDefaultAlt - 1.0f &&
+          p.ring_altitude() < kRayDefaultAlt + 1.0f);
+
+    p.NoteRay(0.2f, 0.189f, 16.0f, /*hops=*/0);
+    TrackStore store;
+    SwObservation raw{};
+    auto obs = MakeObs(raw, p.station(), Vec3(), 1.0f);
+    p.Decide(store, obs);
+    CHECK(p.inbound_ray().ready());
+    CHECK(p.ring_altitude() < 20.0f);
+    CHECK(p.ring_altitude() > kRayFloorAlt - 0.1f);
+}
+
 static void TestFormingBecomesPicketingAtEightMetres() {
     std::printf("forming becomes picketing within 8 m of the slot\n");
     Policy p;
@@ -783,6 +800,7 @@ int main() {
     TestStalkAimLeadsNotPursues();
     TestInterceptorKeepsGoingAtTheMerge();
     TestBornOutsideRing();
+    TestRingAltitudeFollowsInboundRay();
     TestFormingBecomesPicketingAtEightMetres();
     TestCatchableRamUsesDivert();
     TestArenaSpringsOnStation();

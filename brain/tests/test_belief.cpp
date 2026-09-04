@@ -9,6 +9,7 @@
 
 #include "belief.h"
 
+#include <cmath>
 #include <cstdio>
 
 static int g_failures = 0;
@@ -341,6 +342,58 @@ static void TestPeerReportAssociatesByGeometry() {
     CHECK(store.tracks().size() == 2);
 }
 
+static void TestInboundRayPredictsPicketHeight() {
+    std::printf("linear inbound ray height at the picket matches the cone\n");
+    InboundRay ray;
+    const Vec3 asset(0, 0, 0);
+    // Hard-id dash: r=100 m, h=18.8 m, 17.6 m/s in, 3.32 m/s down.
+    CHECK(ray.Sample(Vec3(100.0f, 0.0f, -18.8f), Vec3(-17.6f, 0.0f, 3.32f),
+                     asset, 4.0f));
+    CHECK(ray.ready());
+    const float h = ray.HeightAt(57.2f);
+    CHECK(h > 9.0f && h < 13.0f);
+}
+
+static void TestInboundRayIgnoresSpool() {
+    std::printf("a standing spawn does not fit a slope\n");
+    InboundRay ray;
+    CHECK(!ray.Sample(Vec3(190.0f, 0.0f, -40.0f), Vec3(-0.1f, 0.0f, 0.08f),
+                      Vec3(0, 0, 0), 4.0f));
+    CHECK(!ray.ready());
+}
+
+static void TestInboundRayHeavierSampleMovesTheCone() {
+    std::printf("a closer sample outweighs a far one\n");
+    InboundRay ray;
+    const Vec3 asset(0, 0, 0);
+    CHECK(ray.Sample(Vec3(180.0f, 0.0f, -40.0f), Vec3(-16.0f, 0.0f, 2.0f),
+                     asset, 1.0f));
+    const float first = ray.HeightAt(57.0f);
+    CHECK(ray.Sample(Vec3(80.0f, 0.0f, -15.0f), Vec3(-17.6f, 0.0f, 3.32f),
+                     asset, 8.0f));
+    CHECK(ray.HeightAt(57.0f) < first - 1.0f);
+}
+
+static void TestInboundRayRejectsALevelOverflight() {
+    std::printf("a 50 m level chord is an outlier against a dive cone\n");
+    InboundRay ray;
+    const Vec3 asset(0, 0, 0);
+    CHECK(ray.Sample(Vec3(100.0f, 0.0f, -18.8f), Vec3(-17.6f, 0.0f, 3.32f),
+                     asset, 8.0f));
+    const float before = ray.HeightAt(57.0f);
+    CHECK(!ray.Sample(Vec3(100.0f, 0.0f, -50.0f), Vec3(-16.0f, 0.0f, 0.0f),
+                      asset, 8.0f));
+    CHECK(std::fabs(ray.HeightAt(57.0f) - before) < 0.2f);
+}
+
+static void TestInboundRayHopsDiscountWeight() {
+    std::printf("hop count scales how hard a peer cone pulls\n");
+    InboundRay near, far;
+    CHECK(near.Blend(0.2f, 0.19f, 8.0f / 1.0f));
+    CHECK(far.Blend(0.2f, 0.19f, 8.0f / 4.0f));
+    CHECK(near.weight() > far.weight() * 2.0f);
+}
+
 int main() {
     TestRangeRate();
     TestApproachAlignment();
@@ -360,6 +413,11 @@ int main() {
     TestLevelDashIsNotAHit();
     TestHeartbeatRangeCorroboration();
     TestPeerReportAssociatesByGeometry();
+    TestInboundRayPredictsPicketHeight();
+    TestInboundRayIgnoresSpool();
+    TestInboundRayHeavierSampleMovesTheCone();
+    TestInboundRayRejectsALevelOverflight();
+    TestInboundRayHopsDiscountWeight();
 
     if (g_failures == 0) {
         std::printf("belief: all passed\n");

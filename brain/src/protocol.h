@@ -16,15 +16,19 @@ constexpr uint8_t kProtocolVersion = 1;
 /// Hop-limited forward of TrackReport. s2 spawn is 220 m out, comm 75 m, so
 /// three hops crosses the ring; four matches the example and leaves a spare.
 /// Relays sit below original reports and heartbeats so a flood cannot starve
-/// identity (D11) or the seer's own 0.5 s hostile reports (D18).
+/// identity (D11) or the seer's own 0.5 s hostile reports (D18). The inbound
+/// ray (D52) sits between heartbeat and routine tracks: identity first, then
+/// the cone, then "I still see it".
 constexpr uint8_t kMaxHops = 4;
 constexpr uint8_t kPrioRelay = 2;
+constexpr uint8_t kPrioRay = 4;
 
 enum class MsgType : uint8_t {
     Heartbeat = 1,   // I am alive, here, at this time
     TrackReport = 2, // I see something, here, and I think it is this
     Claim = 3,       // I am committing to that thing
     Accuse = 4,      // I believe this key belongs to an insider (tier 5)
+    Ray = 5,         // fitted inbound cone (h0, slope, weight)
 };
 
 // ---------------------------------------------------------------------------
@@ -174,7 +178,7 @@ struct Header {
         sent_time = r.F32();
         if (!r.ok()) return false;
         if (version != kProtocolVersion) return false;
-        if (t < 1 || t > 4) return false;
+        if (t < 1 || t > 5) return false;
         type = static_cast<MsgType>(t);
         return true;
     }
@@ -233,6 +237,18 @@ struct ClaimMsg {
 
     void Write(Writer& w) const { w.PosQ(target_position); w.F32(expires_at); }
     void Read(Reader& r) { target_position = r.PosQ(); expires_at = r.F32(); }
+};
+
+/// Linear inbound cone, same units as InboundRay: altitude = h0 + slope · r.
+/// Hopped like TrackReport so the far side of the ring can sit on the cone
+/// before that hostile is in sense (D52). Heartbeats do not hop.
+struct RayMsg {
+    float h0 = 0.0f;
+    float slope = 0.0f;
+    float weight = 0.0f;
+
+    void Write(Writer& w) const { w.F32(h0); w.F32(slope); w.F32(weight); }
+    void Read(Reader& r) { h0 = r.F32(); slope = r.F32(); weight = r.F32(); }
 };
 
 // ---------------------------------------------------------------------------
@@ -340,6 +356,105 @@ public:
 
 private:
     FixedVec<OutFrame, N> queue_;
+};
+
+/// Hop-0 sequence gaps and send-time delay. Packet loss and latency are
+/// unpublished (CHALLENGE.md §6); a receiver has to measure them. Only
+/// `hops == 0` counts — a relay is not the radio to the author.
+/// A seq jump larger than kLinkRestartGap is leaving range, not loss.
+constexpr uint16_t kLinkRestartGap = 32;
+constexpr uint32_t kLinkReadyFrames = 20;
+
+class DirectLinkStats {
+public:
+    void Observe(uint8_t origin, uint16_t seq, float sent_time, float now) {
+        if (origin >= kMaxFleet) return;
+        Slot& s = slot_[origin];
+        if (s.seen) {
+            const uint16_t delta = static_cast<uint16_t>(seq - s.last);
+            if (delta == 0) return;
+            if (delta <= kLinkRestartGap)
+                s.miss += static_cast<uint32_t>(delta - 1u);
+        }
+        s.seen = true;
+        s.last = seq;
+        s.got += 1;
+        float lat = now - sent_time;
+        if (lat < 0.0f) lat = 0.0f;
+        if (lat < 1.0f) {
+            s.lat_sum += lat;
+            s.lat_n += 1;
+        }
+    }
+
+    uint32_t got() const {
+        uint32_t n = 0;
+        for (uint32_t i = 0; i < kMaxFleet; ++i) n += slot_[i].got;
+        return n;
+    }
+    uint32_t miss() const {
+        uint32_t n = 0;
+        for (uint32_t i = 0; i < kMaxFleet; ++i) n += slot_[i].miss;
+        return n;
+    }
+    uint32_t origins() const {
+        uint32_t n = 0;
+        for (uint32_t i = 0; i < kMaxFleet; ++i)
+            if (slot_[i].got > 0) ++n;
+        return n;
+    }
+    bool ready() const { return got() >= kLinkReadyFrames; }
+    float Loss() const {
+        float rates[kMaxFleet];
+        uint32_t n = 0;
+        for (uint32_t i = 0; i < kMaxFleet; ++i) {
+            const uint32_t t = slot_[i].got + slot_[i].miss;
+            if (slot_[i].got < 10 || t == 0) continue;
+            rates[n++] = static_cast<float>(slot_[i].miss) /
+                         static_cast<float>(t);
+        }
+        if (n == 0) return 0.0f;
+        for (uint32_t i = 1; i < n; ++i) {
+            float v = rates[i];
+            uint32_t j = i;
+            while (j > 0 && rates[j - 1] > v) {
+                rates[j] = rates[j - 1];
+                --j;
+            }
+            rates[j] = v;
+        }
+        if (n % 2u == 1u) return rates[n / 2u];
+        return 0.5f * (rates[n / 2u - 1u] + rates[n / 2u]);
+    }
+    float MeanLatency() const {
+        uint32_t n = 0;
+        float sum = 0.0f;
+        for (uint32_t i = 0; i < kMaxFleet; ++i) {
+            n += slot_[i].lat_n;
+            sum += slot_[i].lat_sum;
+        }
+        if (n == 0) return 0.0f;
+        return sum / static_cast<float>(n);
+    }
+    /// Stale-frame window sized on measured hop-0 delay, not a constant.
+    float StaleAfter() const {
+        if (!ready()) return 2.0f;
+        float w = MeanLatency() * 40.0f;
+        if (w < 0.5f) w = 0.5f;
+        if (w > 2.0f) w = 2.0f;
+        return w;
+    }
+
+private:
+    struct Slot {
+        bool seen = false;
+        uint16_t last = 0;
+        uint32_t got = 0;
+        uint32_t miss = 0;
+        float lat_sum = 0.0f;
+        uint32_t lat_n = 0;
+    };
+    Slot slot_[kMaxFleet]{};
 };
 
 }  // namespace sw
