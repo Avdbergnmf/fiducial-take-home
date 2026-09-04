@@ -117,6 +117,20 @@ Vec3 StalkAim(const Vec3& slot, const Vec3& target_p, const Vec3& target_v,
 /// Push `goal` off the horizontal segment a→b when inside `clear`.
 Vec3 YieldOffCorridor(const Vec3& goal, const Vec3& a, const Vec3& b, float clear);
 
+/// True if this mate has already stepped off a→b (fully clear, or peeling
+/// away faster than `kYieldAway`). First yielder wins; same-tick both
+/// still on the line both yield (D59, ACK later).
+bool MateAlreadyYielded(const Vec3& pos, const Vec3& vel,
+                        const Vec3& a, const Vec3& b, float clear);
+
+/// Yield for a mate's remaining intercept, unless they have already
+/// yielded. Null mate pre-clears the owner slot, except when we ourselves
+/// are already flying at the inbound.
+Vec3 YieldForMate(const Vec3& goal, const Vec3& self_p, const Vec3& self_v,
+                  const Vec3& owner_slot, const Vec3& hostile_p,
+                  const Vec3& hostile_v, const Vec3* mate_p, const Vec3* mate_v,
+                  float clear);
+
 class Policy {
 public:
     void Configure(const Config& cfg, Rng rng);

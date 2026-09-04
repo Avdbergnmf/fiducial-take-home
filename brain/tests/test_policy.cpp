@@ -635,6 +635,45 @@ static void TestYieldHorizonIsRemainingFlight() {
     CHECK(Horiz(YieldOffCorridor(far, from, none, clear), far) < 0.1f);
 }
 
+static void TestFirstYielderKeepsTheIntercept() {
+    std::printf("a mate already peeling off the corridor is not yielded to\n");
+    const Vec3 slot(75.0f, 0.0f, -30.0f);
+    const Vec3 hostile(170.0f, 0.0f, -40.0f);
+    const Vec3 inbound(-16.0f, 0.0f, 0.0f);
+    const float clear = 19.0f;
+    const Vec3 end = CorridorHorizon(slot, hostile, inbound);
+
+    // Still on the line, chasing: not yielded.
+    CHECK(!MateAlreadyYielded(Vec3(100.0f, 0.5f, -30.0f), Vec3(14.0f, 0.0f, 0.0f),
+                              slot, end, clear));
+    // Off by a metre but still flying along the LOS: interceptor weave, stay.
+    CHECK(!MateAlreadyYielded(Vec3(100.0f, 1.0f, -30.0f), Vec3(14.0f, 0.5f, 0.0f),
+                              slot, end, clear));
+    // Peeling +y at 8 m/s, 8 m off: first yielder.
+    CHECK(MateAlreadyYielded(Vec3(100.0f, 8.0f, -30.0f), Vec3(2.0f, 8.0f, 0.0f),
+                             slot, end, clear));
+    // Fully clear of keep-out, even if still pointed inbound.
+    CHECK(MateAlreadyYielded(Vec3(100.0f, 20.0f, -30.0f), Vec3(14.0f, 0.0f, 0.0f),
+                             slot, end, clear));
+
+    const Vec3 self(110.0f, 2.0f, -30.0f);
+    const Vec3 chase_v(14.0f, 0.0f, 0.0f);
+    const Vec3 peeled(100.0f, 8.0f, -30.0f);
+    const Vec3 peel_v(2.0f, 8.0f, 0.0f);
+    // We are flying at it and they already yielded: keep the intercept.
+    const Vec3 kept = YieldForMate(self, self, chase_v, slot, hostile, inbound,
+                                   &peeled, &peel_v, clear);
+    CHECK(Horiz(kept, self) < 0.1f);
+
+    // They are still on the corridor: we step off (we do not own).
+    const Vec3 mate(90.0f, 1.0f, -30.0f);
+    const Vec3 mate_v(14.0f, 0.0f, 0.0f);
+    const Vec3 parked(110.0f, 5.0f, -30.0f);
+    const Vec3 still = YieldForMate(parked, parked, Vec3(), slot, hostile, inbound,
+                                    &mate, &mate_v, clear);
+    CHECK(Horiz(still, parked) > 1.0f);
+}
+
 static void TestStalkAimLeadsNotPursues() {
     std::printf("stalk aim uses the same small lead and stays leashed\n");
     const Vec3 slot(70, 0, -30);
@@ -815,6 +854,7 @@ int main() {
     TestHeardSilenceIsDeadEverywhere();
     TestApproachingFarSilenceDoesNotKill();
     TestYieldHorizonIsRemainingFlight();
+    TestFirstYielderKeepsTheIntercept();
     TestStalkAimLeadsNotPursues();
     TestInterceptorKeepsGoingAtTheMerge();
     TestBornOutsideRing();

@@ -30,6 +30,7 @@ constexpr float kFacingTie = 0.08f;        // slots; bisector band so two observ
 constexpr float kMateIdGate = 20.0f;       // m; heartbeat pose → sensor track (same as FacingReceding)
 constexpr float kOwnerSilent = 1.5f;       // s; three missed 2 Hz heartbeats
 constexpr float kNeverHeard = -1.0e8f;
+constexpr float kYieldAway = 3.0f;         // m/s further off the corridor: already yielded (D59)
 
 constexpr uint8_t kPrioTrack = 3;
 constexpr uint8_t kPrioTrackFirst = 6;      // first Hostile report, above heartbeat
@@ -679,17 +680,6 @@ bool FlyingAt(const Track& craft, const Track& hostile) {
     return closing >= kMinClosing;
 }
 
-Vec3 CorridorOrigin(const TrackStore& store, const Track& hostile, const Vec3& slot) {
-    const Track* best = nullptr;
-    float best_d = 1.0e9f;
-    for (const Track& t : store.tracks()) {
-        if (!FlyingAt(t, hostile)) continue;
-        const float d = swarm::Distance(t.position, hostile.position);
-        if (d < best_d) { best_d = d; best = &t; }
-    }
-    return best ? best->position : slot;
-}
-
 }  // namespace
 
 int Policy::MateId(const Track& mate) const {
@@ -754,20 +744,40 @@ Vec3 StalkAim(const Vec3& slot, const Vec3& target_p, const Vec3& target_v,
     return slot + to_aim * (along / len);
 }
 
-Vec3 YieldOffCorridor(const Vec3& goal, const Vec3& a, const Vec3& b, float clear) {
+float CorridorOffset(const Vec3& p, const Vec3& a, const Vec3& b, Vec3& closest) {
     const Vec3 ab(b.x - a.x, b.y - a.y, 0.0f);
     const float ab2 = ab.x * ab.x + ab.y * ab.y;
-    if (ab2 < 1e-4f || clear <= 0.0f) return goal;
-    const Vec3 ap(goal.x - a.x, goal.y - a.y, 0.0f);
+    closest = Vec3(p.x, p.y, p.z);
+    if (ab2 < 1e-4f) return 1.0e9f;
+    const Vec3 ap(p.x - a.x, p.y - a.y, 0.0f);
     float t = (ap.x * ab.x + ap.y * ab.y) / ab2;
     if (t < 0.0f) t = 0.0f;
     if (t > 1.0f) t = 1.0f;
-    const float cx = a.x + t * ab.x;
-    const float cy = a.y + t * ab.y;
-    Vec3 off(goal.x - cx, goal.y - cy, 0.0f);
-    const float dist = std::sqrt(off.x * off.x + off.y * off.y);
+    closest = Vec3(a.x + t * ab.x, a.y + t * ab.y, p.z);
+    const float dx = p.x - closest.x;
+    const float dy = p.y - closest.y;
+    return std::sqrt(dx * dx + dy * dy);
+}
+
+bool MateAlreadyYielded(const Vec3& pos, const Vec3& vel,
+                        const Vec3& a, const Vec3& b, float clear) {
+    Vec3 closest;
+    const float dist = CorridorOffset(pos, a, b, closest);
+    if (dist >= 1.0e8f) return false;
+    if (clear > 0.0f && dist >= clear) return true;
+    if (dist < 1.5f) return false;
+    const Vec3 off(pos.x - closest.x, pos.y - closest.y, 0.0f);
+    const float away = swarm::Dot(Vec3(vel.x, vel.y, 0.0f), off / dist);
+    return away > kYieldAway;
+}
+
+Vec3 YieldOffCorridor(const Vec3& goal, const Vec3& a, const Vec3& b, float clear) {
+    Vec3 closest;
+    const float dist = CorridorOffset(goal, a, b, closest);
+    if (dist >= 1.0e8f || clear <= 0.0f) return goal;
     if (dist >= clear) return goal;
-    Vec3 dir = off;
+    const Vec3 ab(b.x - a.x, b.y - a.y, 0.0f);
+    Vec3 dir(goal.x - closest.x, goal.y - closest.y, 0.0f);
     if (dist < 1e-3f) dir = Vec3(-ab.y, ab.x, 0.0f);
     const float len = std::sqrt(dir.x * dir.x + dir.y * dir.y);
     if (len < 1e-6f) return goal;
@@ -775,6 +785,28 @@ Vec3 YieldOffCorridor(const Vec3& goal, const Vec3& a, const Vec3& b, float clea
     return Vec3(goal.x + dir.x / len * need,
                 goal.y + dir.y / len * need,
                 goal.z);
+}
+
+Vec3 YieldForMate(const Vec3& goal, const Vec3& self_p, const Vec3& self_v,
+                  const Vec3& owner_slot, const Vec3& hostile_p,
+                  const Vec3& hostile_v, const Vec3* mate_p, const Vec3* mate_v,
+                  float clear) {
+    const Vec3 slot_end = CorridorHorizon(owner_slot, hostile_p, hostile_v);
+    const bool they_chase = mate_p && mate_v &&
+        !MateAlreadyYielded(*mate_p, *mate_v, owner_slot, slot_end, clear);
+    const bool we_chase =
+        TowardTarget(self_p, self_v, hostile_p) >= kChasingToward &&
+        ClosingSpeed(self_p, self_v, hostile_p, hostile_v) >= kMinClosing;
+
+    if (!they_chase) {
+        // First mover already stepped off, or nobody is coming. If we are
+        // already flying at this inbound, keep it (D59). Else pre-clear
+        // the owner's remaining flight (D15 / D17).
+        if (we_chase) return goal;
+        return YieldOffCorridor(goal, owner_slot, slot_end, clear);
+    }
+    const Vec3 end = CorridorHorizon(*mate_p, hostile_p, hostile_v);
+    return YieldOffCorridor(goal, *mate_p, end, clear);
 }
 
 Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) {
@@ -858,9 +890,22 @@ Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) 
                            heard_at_, obs.position(), cfg_.comm_radius, now,
                            confirmed_dead_),
             cfg_.asset, ring_radius_, ring_altitude_);
-        const Vec3 from = CorridorOrigin(store, t, owner_slot);
-        const Vec3 end = CorridorHorizon(from, t.position, t.velocity);
-        goal = YieldOffCorridor(goal, from, end, cfg_.friendly_margin);
+        const Track* chase = nullptr;
+        float best_d = 1.0e9f;
+        const Vec3 slot_end = CorridorHorizon(owner_slot, t.position, t.velocity);
+        for (const Track& m : store.tracks()) {
+            if (!FlyingAt(m, t)) continue;
+            if (MateAlreadyYielded(m.position, m.velocity, owner_slot, slot_end,
+                                   cfg_.friendly_margin))
+                continue;
+            const float d = swarm::Distance(m.position, t.position);
+            if (d < best_d) { best_d = d; chase = &m; }
+        }
+        const Vec3* mate_p = chase ? &chase->position : nullptr;
+        const Vec3* mate_v = chase ? &chase->velocity : nullptr;
+        goal = YieldForMate(goal, obs.position(), obs.velocity(), owner_slot,
+                            t.position, t.velocity, mate_p, mate_v,
+                            cfg_.friendly_margin);
     }
     return goal;
 }

@@ -2568,3 +2568,28 @@ still 4/4, 2 civ (D44). Hard id still **2/3**, hostile_0 still
 **21.31 s**, score **−109 → −113.6** (comms 32.4 → 30.8). Default 25 m
 is not D54's 20/12 wash and not a D55 pull-in. Keep.
 
+---
+
+## D59 — First yielder keeps the intercept
+
+**The leak.** `x2-34c55aeb5ae617e74dac318d1645dd2c` missed the first
+inbound because two drones both flew at it, then **both** stepped off
+the same remaining-flight corridor. Each treated the other as the
+interceptor (`FlyingAt`). Yield is symmetric, so the path emptied.
+
+**Chosen.** When a picket would yield, ignore a mate who has already
+yielded: fully outside `friendly_margin` of the owner-slot corridor, or
+peeling away from it faster than 3 m/s with at least 1.5 m of offset.
+If that leaves nobody intercepting and **we** are already flying at the
+inbound, keep our goal. Same-tick both still on the line both still
+yield — ACK later.
+
+**Not chosen.** Duplicate abort (`CloserChaser`) is already asymmetric
+(range, then lower id). This is the picket corridor, not that gate.
+Do not put yield on interceptors (D51).
+
+**Measured.** `x2-34c55aeb…` **4/5 −16.4 → 5/5 +190.4**, 0 breaches.
+Identity 8/8 unchanged (mean **154.5 → 154.6**, worst x1-a **−3.6**,
+2 civ, D44). s2 still 6/6 **182.8**.
+
+
