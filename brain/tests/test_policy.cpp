@@ -531,10 +531,13 @@ static void TestCollisionCourseCutsOffACrossingInbound() {
     const Vec3 p0(60.85f, 41.5f, -26.11f);
     const Vec3 q0(82.55f, 98.41f, -20.95f);
     const Vec3 w0(-11.66f, -13.9f, 2.96f);
-    const flight::Course c_tau = flight::SolveCollisionCourse(
+    const flight::Course c0 = flight::SolveCollisionCourse(
         p0, Vec3(), q0, w0, settled);
-    CHECK(c_tau.t_go + 1e-4f >= flight::TiltSettle(settled) + 0.12f);
-    CHECK(swarm::Length(c_tau.meeting - q0) > 1.0f);
+    CHECK(c0.t_go > 0.5f);
+    CHECK(swarm::Length(c0.meeting - q0) > 1.0f);
+    const flight::Course c1 = flight::SolveCollisionCourse(
+        p0, Vec3(), q0, w0, settled, Vec3(), Vec3(), c0.t_go - 0.01f);
+    CHECK(std::fabs(c1.t_go - (c0.t_go - 0.01f)) < 1e-3f);
 
     const Vec3 slew = flight::SlewHorizontal(
         Vec3(6.71f, 0.0f, 1.0f), Vec3(0.0f, 6.71f, -2.0f), 0.01f, settled);

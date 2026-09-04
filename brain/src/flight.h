@@ -65,14 +65,15 @@ Vec3 InertialAccel(const swarm::Quat& attitude, const Vec3& specific_force);
 /// z is thrust and is copied from `to`. Identity when rate is unpublished.
 Vec3 SlewHorizontal(const Vec3& from, const Vec3& to, float dt, const Config& cfg);
 
-/// Vector ZEM intercept for scramble / ram (D49 / D61).
+/// Vector ZEM intercept for scramble / ram (D49 / D62).
 ///
-/// Full 3-D ZEM, not ZEMn + along-LOS. t_go is the earliest arrival, not
-/// range/closing. N=2 is the constant-accel intercept on a double
-/// integrator after tilt has settled: a = 2 ZEM / (t − τ)² with
-/// τ = max_tilt / max_body_rate. Saturates with LimitAccel (5.4 cylinder:
-/// leftover z does not steal xy, D51). Do not add g. Do not add τ onto
-/// t_go (that softens the command; D49).
+/// Full 3-D ZEM, not ZEMn + along-LOS. t_go is a held intercept clock,
+/// not a fresh earliest-bin every tick (bin jumps rotated xy 20–40° and
+/// the attitude loop never settled). N=2 is a = 2 ZEM / t². Saturates
+/// with LimitAccel (5.4 cylinder: leftover z does not steal xy, D51).
+/// Do not add g. Do not add tilt settle onto t_go (that softens the
+/// command; D49 / D61). `prefer_t` is last t_go minus dt; keep it while
+/// it still hits.
 struct Course {
     Vec3 accel;
     Vec3 meeting;
@@ -82,12 +83,14 @@ Course SolveCollisionCourse(const Vec3& self_p, const Vec3& self_v,
                             const Vec3& tgt_p, const Vec3& tgt_v,
                             const Config& cfg,
                             const Vec3& tgt_a = {},
-                            const Vec3& self_a = {});
+                            const Vec3& self_a = {},
+                            float prefer_t = 0.0f);
 Vec3 CollisionCourse(const Vec3& self_p, const Vec3& self_v,
                      const Vec3& tgt_p, const Vec3& tgt_v,
                      const Config& cfg,
                      const Vec3& tgt_a = {},
-                     const Vec3& self_a = {});
+                     const Vec3& self_a = {},
+                     float prefer_t = 0.0f);
 
 /// True if a ram is still possible. Inside 2·kill we stay in the merge.
 /// Past CPA and outside that bubble, or a leftover miss `Reach` (½ a t²

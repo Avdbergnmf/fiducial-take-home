@@ -4,8 +4,9 @@ Policy names one `Mode` per tick. Flight is a `switch` on that mode, then
 constraints. There is no Brake mode and no `likely` flag. While intercepting,
 arena springs are off. If a collision is physically impossible, abort back to
 picket. Scramble / ram fly a vector-ZEM collision course to the predicted
-meeting point, not ProNav at the current body (D49). N=2 uses
-`(t − τ)²` with `τ = max_tilt / max_body_rate` (D61). The Aim cue is
+meeting point, not ProNav at the current body (D49). t_go is a held
+clock (last t minus dt) while that meeting still hits; it is not a
+fresh t-bin every tick and not `(t − τ)²` (D62). The Aim cue is
 that meeting (`in=/ie=`), not the believed body. Station altitude is the
 inbound cone at the picket radius once the fleet has a linear ray (D52),
 else 25 m (cap still 30 m, D58). Stations even over the live roster

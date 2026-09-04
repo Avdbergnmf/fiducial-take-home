@@ -2688,4 +2688,31 @@ Hard id still **2/3, −113.6**, hostile_0 still the first-arrival miss.
 `params` now logs `rate=8.0`. `in=` on a commit sits metres ahead of
 `n=/e=` (e.g. body 80/98 vs meeting 41/52).
 
+---
+
+## D62 — Drop τ-invert; hold the intercept clock
+
+**τ out.** `(t − τ)²` was a fake delay on the shot, not a better
+prediction of where we will be. N=2 is `a = 2 ZEM / t²` again.
+`SlewHorizontal` stays: that is the published body-rate cap on issued
+xy, not a number added onto t_go.
+
+**The lever.** Receding-horizon over discrete t-bins hopped t_go every
+few ticks and rotated commanded xy 20–40° / 0.1 s, so the attitude loop
+never sat at 6.7 (D60). Denser earliest-t made this id *worse*. Hold
+`prefer_t = last t_go − dt`. Keep it while predicted miss ≤ kill. Only
+re-bin if the held clock no longer hits and a bin does, or neither hits
+and a bin is more than a kill-radius better.
+
+First commit still takes the earliest killable bin. After that the
+clock counts down instead of re-picking 2.4 vs 2.8.
+
+**Measured.** `x2-fa56ef…` **2/3 −112.1 → 3/3 +84.0**, 0 breaches,
+asset survived. Hostile_0 is the ram that used to miss at 1.78 m.
+
+Identity 8/8, 0 breaches, mean **149.8 → 140.0**. All kill counts
+hold: s1 6/6 **203.9 → 182.1**, s2 6/6 **180.9 → 175.5**, x1-a 4/4
+**−2.0 → −15.5** still 2 civ (D44). x2-b **105.9 → 139.1**. Hard id
+still **2/3, −113.4**. The named-bar dip is timing/comms on intercepts
+that already hit, not a new leak.
 

@@ -232,9 +232,23 @@ private:
         const sw::Track* focus = policy_.focus();
 
         const sw::Vec3 a_now = sw::flight::InertialAccel(obs.attitude(), obs.accel());
-        sw::Vec3 accel = sw::flight::DesiredAccel(
-            mode, position, velocity, policy_.DesiredPosition(obs),
-            focus, policy_.leashed(), obs.dt(), cfg_, a_now);
+        sw::Vec3 accel;
+        if (sw::Intercepting(mode) && focus) {
+            const sw::Vec3 weave = sw::flight::EstimatedAccel(
+                focus->velocity, focus->last_velocity, obs.dt(),
+                cfg_.lateral_limit);
+            const float prefer = last_t_go_ > 0.12f ? last_t_go_ - obs.dt() : 0.0f;
+            const sw::flight::Course course = sw::flight::SolveCollisionCourse(
+                position, velocity, focus->position, focus->velocity, cfg_,
+                weave, a_now, prefer);
+            accel = course.accel;
+            last_t_go_ = course.t_go;
+        } else {
+            last_t_go_ = 0.0f;
+            accel = sw::flight::DesiredAccel(
+                mode, position, velocity, policy_.DesiredPosition(obs),
+                focus, policy_.leashed(), obs.dt(), cfg_, a_now);
+        }
 
         if (sw::Intercepting(mode))
             accel = sw::flight::SlewHorizontal(last_accel_, accel, obs.dt(), cfg_);
@@ -333,7 +347,8 @@ private:
                     t.velocity, t.last_velocity, obs.dt(), cfg_.lateral_limit);
                 const sw::flight::Course course = sw::flight::SolveCollisionCourse(
                     position, velocity, t.position, t.velocity, cfg_, weave,
-                    sw::flight::InertialAccel(obs.attitude(), obs.accel()));
+                    sw::flight::InertialAccel(obs.attitude(), obs.accel()),
+                    last_t_go_);
                 host().Logf("%s trk=%u class=%s rng=%.1f close=%.1f n=%.1f e=%.1f alt=%.1f vn=%.1f ve=%.1f in=%.1f ie=%.1f ialt=%.1f",
                             verb,
                             t.has_local_id ? t.track_id : 0,
@@ -370,6 +385,7 @@ private:
     bool radio_logged_ = false;
     float last_aim_log_at_ = -1.0f;
     sw::Vec3 last_accel_{};
+    float last_t_go_ = 0.0f;
 };
 
 }  // namespace
