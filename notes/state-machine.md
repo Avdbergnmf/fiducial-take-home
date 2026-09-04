@@ -9,7 +9,7 @@ clock (last t minus dt) while that meeting still hits; it is not a
 fresh t-bin every tick and not `(t − τ)²` (D62). The Aim cue is
 that meeting (`in=/ie=`), not the believed body. Station altitude is the
 inbound cone at the picket radius once the fleet has a linear ray (D52),
-else 25 m (cap still 30 m, D58), and never below the kill-envelope floor
+else 20 m (cap still 30 m, D72), and never below the kill-envelope floor
 (`R·tan(10°)` or half the first-sight Reach pancake, D68). Stations even
 over the live roster (hopped heartbeats, D56). Radius shrinks if that
 `(R, H)` cannot catch the Voronoi-edge inbound (D58).
@@ -76,7 +76,7 @@ uses these names; hover is the paragraph.
 | Mode | In English | Accel | Yaw | Abort |
 |---|---|---|---|---|
 | **Forming** | Just spawned (or still en route). Flying out to its assigned slot on the picket ring. Not chasing anyone. Logs `picket` once it is within 8 m of the slot. | Cruise / GoTo station | watch if set, else velocity | n/a |
-| **Picketing** | On station. Holding the ring around the asset, heading along the orbit tangent (outward if parked), watching its sector. Has not spent itself. Altitude is 25 m until an inbound cone is ready, then the predicted height at this radius (capped at 30 m). | GoTo (yielded) goal | velocity | n/a |
+| **Picketing** | On station. Holding the ring around the asset, heading along the orbit tangent (outward if parked), watching its sector. Has not spent itself. Altitude is 20 m until an inbound cone is ready, then the predicted height at this radius (capped at 30 m). | GoTo (yielded) goal | velocity | n/a |
 | **Watching** | Still sitting on the ring, but turned toward an inbound it owns, classifying it. Does not leave the slot until 0.1 s of path-through-the-asset-cylinder (scramble) or a Hostile call (ram). | GoTo goal | at the inbound | n/a |
 | **Stalking** | Eased a little off the slot toward a compact inbound that is not yet called Hostile. Cap is 40 m, so it can still reverse home if the latch never comes. | ProNav if `leashed`, else GoTo station | velocity | n/a |
 | **Scrambling** | Left the ring on an **early** intercept **before** the Hostile latch. Same flight as a ram (arena springs off), but it will abort if the inbound is a civilian or a friend, or if the path no longer hits the asset. | Vector ZEM | velocity | soft (`not-threat` / `not-hostile`) |
@@ -90,7 +90,7 @@ uses these names; hover is the paragraph.
 | Reason | Who | Meaning |
 |---|---|---|
 | `lost` | both | Track vanished (dead, out of sense, hearsay aged out). |
-| `duplicate` | both | Another friendly is clearly closer, or similar range and lower id. |
+| `duplicate` | both | Another friendly is clearly closer, or similar range and lower id. A sitting ring wall (inbound running onto them, toward can be negative) also counts if they are ≥ 12 m closer and not the facing incumbent (D71). |
 | `timeout` | both | 12 s since we left. One spawn interval is ~14 s; come home. |
 | `not-hostile` | both | Class is no longer Hostile (scramble: also Friendly / Wreckage). |
 | `not-threat` | scramble only | Cylinder LOS gone, or a level overflight that never dived (1 s). |

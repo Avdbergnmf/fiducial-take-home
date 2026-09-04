@@ -174,7 +174,7 @@ constexpr float kRayReady = 2.0f;
 constexpr float kRayOutlier = 15.0f;
 constexpr float kRayMaxSlope = 1.0f;
 constexpr float kRayMinRange = 15.0f;
-constexpr float kRayDefaultAlt = 25.0f;
+constexpr float kRayDefaultAlt = 20.0f;
 constexpr float kRayCapAlt = 30.0f;
 constexpr float kRayFloorAlt = 6.0f;
 

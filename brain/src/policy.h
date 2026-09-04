@@ -138,6 +138,16 @@ float PicketFloorAltitude(const Config& cfg, float radius);
 bool OtherInterceptorWins(float us_range, uint32_t us_id,
                           float them_range, int them_id);
 
+/// True when a Friendly on the picket ring is the wall this inbound is
+/// running onto. Toward can be negative — the hostile flies into them,
+/// so they never look like a chaser (`kChasingToward` = 5). Duplicate
+/// abort uses this so a sitting interceptor still sends the farther
+/// neighbour home, and only when they are at least 12 m closer. Yield
+/// still requires a chaser. Mates outside `ring_radius + 10 m` are not
+/// walls (s2's outer seer).
+bool SittingWall(const Track& craft, const Track& hostile,
+                 const Vec3& asset, float ring_radius);
+
 /// True if this id is still treated as on station. Self is always alive.
 /// Never-heard is assumed alive so we do not steal sectors before the first
 /// heartbeat. 1.5 s of silence (three missed 2 Hz beats) is death.

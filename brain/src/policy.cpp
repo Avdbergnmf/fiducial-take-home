@@ -25,6 +25,9 @@ constexpr float kScrambleCivHold = 1.0f;   // s; level overflight never dives
 constexpr float kUncatchableHold = 0.4f;   // s; one weave beat must not abort (D11)
 
 constexpr float kChasingToward = 5.0f;     // m/s along LOS; pickets sit below this
+constexpr float kSittingToward = -5.0f;    // inbound running onto a picket; canary d4 was -1.7
+constexpr float kSittingRingPad = 10.0f;   // m outside live ring still a wall (d4 was ~3)
+constexpr float kSittingCloserBy = 12.0f;  // m; canary 14, fa56 facing-incumbent 10.4
 constexpr float kCloserBy = 2.0f;          // m; farther duplicate aborts
 constexpr float kFacingTie = 0.08f;        // slots; bisector band so two observers agree (D38)
 constexpr float kMateIdGate = 20.0f;       // m; heartbeat pose → sensor track (same as FacingReceding)
@@ -280,7 +283,7 @@ void Policy::Configure(const Config& cfg, Rng rng) {
     // with kCoverSlack metres of leftover Reach. Same first-sight / Reach
     // arithmetic as the kill-envelope bracelet. It does not grow: a larger
     // ring that "buys time" is the D21 failure past F0.75. Height is an
-    // input because a lower station (default 25 m, or a fitted cone)
+    // input because a lower station (default 20 m, or a fitted cone)
     // changes the divert. Cover may pull in as far as the asset cylinder;
     // that is a late intercept, not a collision.
     ring_altitude_ = kRayDefaultAlt;
@@ -863,6 +866,28 @@ bool FlyingAt(const Track& craft, const Track& hostile) {
 
 }  // namespace
 
+bool SittingWall(const Track& craft, const Track& hostile,
+                 const Vec3& asset, float ring_radius) {
+    if (craft.belief != Belief::Friendly) return false;
+    if (craft.has_local_id && hostile.has_local_id &&
+        craft.track_id == hostile.track_id)
+        return false;
+    const float gx = craft.position.x - asset.x;
+    const float gy = craft.position.y - asset.y;
+    const float g = std::sqrt(gx * gx + gy * gy);
+    if (g > ring_radius + kSittingRingPad) return false;
+    const Vec3 los(hostile.position.x - craft.position.x,
+                   hostile.position.y - craft.position.y, 0.0f);
+    const float range_h = swarm::Length(los);
+    if (range_h < 1.0f) return false;
+    const float toward = swarm::Dot(
+        Vec3(craft.velocity.x, craft.velocity.y, 0.0f), los / range_h);
+    if (toward < kSittingToward) return false;
+    const float closing = ClosingSpeed(craft.position, craft.velocity,
+                                       hostile.position, hostile.velocity);
+    return closing >= kMinClosing;
+}
+
 int Policy::MateId(const Track& mate) const {
     const uint32_t n = cfg_.fleet_size < kMaxFleet ? cfg_.fleet_size : kMaxFleet;
     float best = kMateIdGate;
@@ -887,10 +912,30 @@ bool OtherInterceptorWins(float us_range, uint32_t us_id,
 bool Policy::CloserChaser(const Track& hostile, const TrackStore& store,
                           const swarm::Observation& obs) const {
     const float us_range = swarm::Distance(obs.position(), hostile.position);
+    const uint32_t facing = FacingOwner(hostile, store, obs);
     for (const Track& t : store.tracks()) {
-        if (!FlyingAt(t, hostile)) continue;
+        const int mid = MateId(t);
+        const bool chasing = FlyingAt(t, hostile);
         const float d = swarm::Distance(t.position, hostile.position);
-        if (OtherInterceptorWins(us_range, cfg_.drone_id, d, MateId(t)))
+        if (!chasing) {
+            if (!SittingWall(t, hostile, cfg_.asset, ring_radius_)) continue;
+            // Parked facing looks like a wall. Handoff already beat them;
+            // treating them as the interceptor would send the neighbour
+            // home and nobody would go (s1 / s2 / fa56 with toward = -5).
+            // Name them, or match their last heartbeat if the sensor
+            // track has no id yet (fa56 d0 aborted to unnamed facing).
+            if (mid >= 0 && static_cast<uint32_t>(mid) == facing) continue;
+            if (facing != cfg_.drone_id && facing < kMaxFleet &&
+                heard_[facing] > kNeverHeard &&
+                swarm::Distance(t.position, heard_at_[facing]) < kMateIdGate)
+                continue;
+            // Adjacent pickets are a couple of metres closer on a near
+            // inbound. That is not a duplicate; the canary was 14 m,
+            // fa56's receding incumbent was 10.4 m.
+            if (d < us_range - kSittingCloserBy) return true;
+            continue;
+        }
+        if (OtherInterceptorWins(us_range, cfg_.drone_id, d, mid))
             return true;
     }
     return false;

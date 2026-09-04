@@ -64,6 +64,26 @@ static void TestOtherInterceptorTieBreak() {
     CHECK(OtherInterceptorWins(49.0f, 13, 49.0f, -1) == false);
 }
 
+static void TestSittingWallIsTheCanaryInterceptor() {
+    std::printf("sitting ring wall counts; outer seer does not\n");
+    Track wall{};
+    wall.belief = Belief::Friendly;
+    wall.position = Vec3(-26.0f, -19.5f, -6.0f);
+    wall.velocity = Vec3(-0.1f, 2.4f, 0.0f);
+
+    Track hostile{};
+    hostile.belief = Belief::Hostile;
+    hostile.position = Vec3(-49.0f, -46.0f, -12.0f);
+    hostile.velocity = Vec3(12.8f, 12.1f, 0.0f);
+
+    const Vec3 asset(0, 0, 0);
+    CHECK(SittingWall(wall, hostile, asset, 29.8f));
+
+    Track seer = wall;
+    seer.position = Vec3(-200.0f, -200.0f, -20.0f);
+    CHECK(!SittingWall(seer, hostile, asset, 86.0f));
+}
+
 static void TestInterceptorKeepsGoingAtTheMerge() {
     std::printf("interceptor does not brake for a wingman at the ram\n");
     Config cfg;
@@ -340,13 +360,13 @@ static void TestClosedCoverBindsOnTightSense() {
     CHECK(r < 84.0f);
 }
 
-static void TestDefaultPicketAltitudeIsTwentyFive() {
-    std::printf("boot picket sits at 25 m; fitted cone may still rise to 30\n");
+static void TestDefaultPicketAltitudeIsTwenty() {
+    std::printf("boot picket sits at 20 m; fitted cone may still rise to 30\n");
     Policy p;
     p.Configure(WideRadioCfg(), Rng());
     CHECK(p.ring_altitude() > kRayDefaultAlt - 0.1f &&
           p.ring_altitude() < kRayDefaultAlt + 0.1f);
-    CHECK(kRayDefaultAlt == 25.0f);
+    CHECK(kRayDefaultAlt == 20.0f);
     CHECK(kRayCapAlt == 30.0f);
     CHECK(kRayCapAlt > kRayDefaultAlt);
 }
@@ -1008,6 +1028,7 @@ int main() {
     TestFacingSlotMatchesRing();
     TestFacingSlotAgreesOnABisector();
     TestOtherInterceptorTieBreak();
+    TestSittingWallIsTheCanaryInterceptor();
     TestUniqueOwnerIsOneDrone();
     TestInboundOwnerSkipsARecedingFacing();
     TestLiveRingRespaces();
@@ -1015,7 +1036,7 @@ int main() {
     TestClosedCoverLeavesAFullS1Ring();
     TestClosedCoverPullsASparseRingIn();
     TestClosedCoverBindsOnTightSense();
-    TestDefaultPicketAltitudeIsTwentyFive();
+    TestDefaultPicketAltitudeIsTwenty();
     TestAimAheadUsesConfiguredDistance();
     TestProNavSteersAtTheZem();
     TestArenaAllowsADiveIntercept();

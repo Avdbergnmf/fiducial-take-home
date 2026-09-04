@@ -3299,3 +3299,116 @@ Identity 8: **unchanged**, mean **150.7**, 0 breaches, x1-a still 2 civ
 rammed at 20.65 (was a breach at 21.31). One wreckage waste on that id
 (−40), not a breach. fa56 still 3/3 83.5.
 
+---
+
+## D71 — Sitting ring wall is a duplicate; do not lower `kChasingToward`
+
+**The waste.** Hard canary after D70 is 3/3 +45.5 with one wreckage
+(−40). Drone 4 is handed the inbound at 26.48 (`hand=5`) and rams at
+28.93. Drone 5 hearsay-commits 0.53 s later (`peer`) and rams the
+same body 0.26 s after the kill. They had time to stay on station.
+
+**Why `CloserChaser` missed it.** Duplicate abort needs `FlyingAt`:
+toward ≥ `kChasingToward` = 5 m/s along LOS. Drone 4 is the wall the
+inbound runs onto. At t=27, toward ≈ **−1.7 m/s** (orbit tangent, still
+on slot), closing ≈ +16. Range 35 m vs drone 5's 49 m — `kCloserBy` = 2
+would have been enough if FlyingAt had been true. Lowering toward to 0
+still fails; **−5** converts the canary (3/3 +85.4, wasted 0).
+
+**That parameter does not ship.** −5 makes parked facing pickets look
+like interceptors (radial inbound, tangent ⊥ LOS ⇒ toward ≈ 0, closing
+high). Handoff neighbour is usually *farther* than facing, so
+CloserChaser sends them home and nobody goes:
+
+| | identity 8 | s1 | s2 | fa56 | canary |
+|---|---:|---|---|---|---|
+| toward=5 (D70) | 150.7 | 6/6 | 6/6 | 3/3 83.5 | 3/3 45.5, waste 1 |
+| toward=−5 | wash | **3/6** | **5/6** | **0/3** | 3/3 85.4, waste 0 |
+
+**Chosen.** Keep `kChasingToward` = 5 for chase / yield. Add
+`SittingWall`: Friendly on the live ring (`g ≤ R + 10 m`), closing ≥ 1,
+toward ≥ −5. CloserChaser treats that as a duplicate only when they are
+**≥ 12 m closer**, and never when they are the facing incumbent
+(named, or unnamed but on that heartbeat pose). 10 m pad: drone 4 sat
+~3 m outside the shrunk ring. 12 m gap: canary was 14 m; fa56's receding
+facing incumbent was 10.4 m (at 8 m, drone 0 aborted to them and drone 1
+took the D60 miss). Outer seer (s2) is not a wall.
+
+Yield is unchanged. FlyingAt still means chasing.
+
+**Not chosen.** Range-only hearsay duplicate (s2: seer is closer).
+CatchableRam from rest (facing parked is catchable; handoff dies).
+Hearsay-only SittingWall (drone 5 enters sense ~0.14 s later and would
+commit on the local track).
+
+**Measured.** Identity 8 mean **150.7** (flat), x1-a still 2 civ (D44).
+Canary **3/3 +85.0**, wasted 0, drone 5 never leaves station. fa56
+still 3/3 **83.5**. s1 6/6, s2 6/6.
+
+---
+
+## D72 — Default picket 20 m (re-grid after D71)
+
+D54's 20/12 was an identity wash on a brain that still missed the
+canary's first inbound at 21.31 s. Slack converted that kill (D70);
+sitting-wall dropped the wreckage (D71). Height is still the lever for
+the downward pancake covering low inbounds. Do not AND the 0° horizon
+cell into `CoverCloses` (D58). Do not sit under the D68 floor.
+
+**Grid** on the same 10 ids, D71 brain, `kCoverSlack` = 5:
+
+| H | identity 8 | s0 aware | s1 | canary | fa56 | notes |
+|---|---:|---:|---:|---|---|---|
+| 25 | 150.7 | 60.0 | 176.9 | 85.0 3/3 | 83.5 3/3 | D71 |
+| **20** | **152.3** | **60.0** | **188.0** | **87.2 3/3** | 83.2 3/3 | s1 W_kill |
+| 18 | 151.5 | **50.4** | 188.2 | 88.5 3/3 | 84.1 3/3 | s0 awareness |
+| 15 | — | 40.8 | 185.7 | **−112.1 2/3** | 82.5 3/3 | D68 floor; canary re-opens |
+
+x1-a stays 4/4 / 2 civ at every value (D44). 15 m is `R·tan(10°)` on an
+s1-like ring and puts the canary back to hostile_0 at the wall. 18 m
+is a dive prior on empty air (s0). 20 m is 10 m below spawn, keeps s0,
+and is the first height that actually pays W_kill on s1 without
+re-opening a named breach.
+
+**11 m inbounds.** An 11 m crossing at R = 86 m is 7.3°, under the 10°
+bracelet (~15 m). Sitting at 11 m is under D68. Covering that cell is
+still shrink-R or a horizon AND (rejected), not a lower default.
+Canary R ≈ 33 m: 11 m is 18°, already above a 20 m station. The
+canary conversion remains slack, not height.
+
+**Ship 20.** Cap still 30. Floor still `max(6, R tan 10°, ½ Reach)`,
+now clamped to 20.
+
+---
+
+## D73 — Slack vs W_kill: 5 m stays; 10 m is past the plateau
+
+Early engagement vs the outer sense shell is leftover Reach on the
+bracelet inbound (`kCoverSlack`) vs `W_kill · (1 − t_engage/t_free)`.
+More slack shrinks R when cover binds (later kills, less reward) and
+should close holes when it does not yet tile. 5 m was D70's first
+conservative value. Re-grid after D71/D72 on the frozen D69 24
+(`runs/margin-sweep/fresh-ids.txt`) plus the named 10. Do not grow R
+(D21 F0.75).
+
+**Named 10** (H=20). Slack does not bind the identity 8. `W_kill` sum
+is **821.7** at 0 / 2 / 5 (mission 521.8, 36/36, 0 breaches). 10 m is
+823.0 (fa56 +2). Canary stays 3/3; 0 and 10 are +90.1, 5 is +87.2.
+
+**Fresh 24**, same tokens as D69:
+
+| s | mean | mission | W_kill | t1 W_kill | t2 W_kill | breach | civ |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 0 | 79.9 | 22.0 | **1772** | 455 | 1317 | 2 | 9 |
+| **5** | **79.6** | 14.9 | 1765 | 448 | 1317 | 2 | 9 |
+| 10 | 77.8 | −36.4 | 1714 | **400** | 1314 | 2 | 9 |
+
+The two breaches are `x2-25893f…` (1/3) at every value. Slack does not
+buy that cover. 10 m costs ~50 W_kill, almost all on t1
+(`x1-2cd97dca` 112 → 67). 0 m is a few points of earlier reward on
+layouts that bind, with a knife-edge bracelet.
+
+**Keep 5.** Overlay margin, not a score win. 0 is the W_kill peak on
+this draw; 10 is past the plateau. The remaining 25893f hole is not
+this knob.
+
