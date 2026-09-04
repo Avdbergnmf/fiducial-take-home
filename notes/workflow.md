@@ -129,5 +129,7 @@ What we look for, concretely:
   are the attribution figures. Delta stack height is **Δmean**, not the
   sum of eight totals. `ablation-timeline.png` is the ladder on git
   commit time (V1–V14 is one day; V23/V24 diamonds are sweep times).
+  `ablation-heatmap-x.png` is the generated x1/x2 rows on their own
+  colour scale (s1’s −1500 flattens them on the eight-id heatmap).
   `orbit-cover-tradeoff.png` is a D70 plant at
   H=25; live picket is 20 m (D72).

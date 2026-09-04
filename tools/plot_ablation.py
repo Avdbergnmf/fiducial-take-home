@@ -37,6 +37,8 @@ ABLATION = REPO / "runs" / "ablation"
 NOTES = REPO / "notes"
 MANIFEST = REPO / "scripts" / "versions.csv"
 IDS = ["s0", "s1", "s2", "x1-a", "x1-b", "x1-c", "x2-a", "x2-b"]
+# Generated named ids. Own heatmap: s1's −1500 compresses these on the 8-row plot.
+IDS_X = ["x1-a", "x1-b", "x1-c", "x2-a", "x2-b"]
 # tab10, stable per id so the delta stack and the trajectories match.
 ID_COLORS = {
     "s0": "#4e79a7",
@@ -264,17 +266,23 @@ def plot_timeline(rows: list[dict]) -> None:
     save(fig, "ablation-timeline.png")
 
 
-def plot_heatmap(rows: list[dict]) -> None:
-    mat = np.full((len(IDS), len(rows)), np.nan)
+def plot_heatmap(
+    rows: list[dict],
+    ids: list[str] | None = None,
+    name: str = "ablation-heatmap.png",
+    title: str = "Identity 8 — per-id total",
+) -> None:
+    ids = ids or IDS
+    mat = np.full((len(ids), len(rows)), np.nan)
     for j, r in enumerate(rows):
         per = r["_per"]
-        for i, sid in enumerate(IDS):
+        for i, sid in enumerate(ids):
             if sid in per:
                 mat[i, j] = fget(per[sid], "Total")
 
     finite = mat[np.isfinite(mat)]
     vmax = max(abs(finite.min()), abs(finite.max()), 1.0) if finite.size else 1.0
-    fig, ax = plt.subplots(figsize=(11.5, 4.2))
+    fig, ax = plt.subplots(figsize=(11.5, 2.4 + 0.28 * len(ids)))
     im = ax.imshow(
         mat,
         aspect="auto",
@@ -283,16 +291,140 @@ def plot_heatmap(rows: list[dict]) -> None:
         vmax=vmax,
         interpolation="nearest",
     )
-    ax.set_yticks(np.arange(len(IDS)))
-    ax.set_yticklabels(IDS)
+    ax.set_yticks(np.arange(len(ids)))
+    ax.set_yticklabels(ids)
     ax.set_xticks(np.arange(len(rows)))
     ax.set_xticklabels([r["version"] for r in rows], rotation=45, ha="right")
-    ax.set_title("Per-id total")
+    ax.set_title(title)
     ax.grid(False)
     cb = fig.colorbar(im, ax=ax, fraction=0.03, pad=0.02)
     cb.set_label("total")
     fig.tight_layout()
-    save(fig, "ablation-heatmap.png")
+    save(fig, name)
+
+
+def live_row(rows: list[dict]) -> dict | None:
+    for r in rows:
+        if r.get("working_tree") or str(r.get("commit_short") or "") == "WORKING":
+            return r
+    for r in rows:
+        if str(r.get("version") or "") == "V24":
+            return r
+    return rows[-1] if rows else None
+
+
+def plot_live_results(rows: list[dict]) -> None:
+    """Identity 8 for this brain only — not the version ladder."""
+    live = live_row(rows)
+    if live is None:
+        return
+    per = live["_per"]
+    recs = []
+    for sid in IDS:
+        rec = per.get(sid)
+        if not rec:
+            continue
+        recs.append(
+            {
+                "id": sid,
+                "total": fget(rec, "Total"),
+                "mission": fget(rec, "Mission"),
+                "aware": fget(rec, "Awareness"),
+                "comms": fget(rec, "Comms"),
+                "kills": iget(rec, "Kills"),
+                "hostiles": iget(rec, "HostilesTotal"),
+                "breaches": iget(rec, "Breaches"),
+                "civ": iget(rec, "Civilians"),
+            }
+        )
+    recs.sort(key=lambda d: d["total"], reverse=True)
+    n = len(recs)
+    if n == 0:
+        return
+
+    totals = [d["total"] for d in recs]
+    mean = round1(sum(totals) / n)
+    labels = [d["id"] for d in recs]
+    colors = []
+    for d in recs:
+        if d["breaches"] > 0:
+            colors.append(COL_BREACH)
+        elif d["civ"] > 0:
+            colors.append("#b45309")
+        else:
+            colors.append(ID_COLORS.get(d["id"], COL_OK))
+
+    fig, (ax, axb) = plt.subplots(
+        2, 1, figsize=(11.5, 7.0), height_ratios=[1.15, 1.0], sharex=False
+    )
+    y = np.arange(n)
+    ax.barh(y, totals, color=colors, height=0.72, zorder=3)
+    ax.axvline(0.0, color="#94a3b8", lw=0.8, zorder=1)
+    ax.axvline(mean, color=COL_MEAN, lw=1.2, ls="--", zorder=2, label=f"mean {mean:.1f}")
+    ax.set_yticks(y)
+    ax.set_yticklabels(labels)
+    ax.invert_yaxis()
+    ax.set_xlabel("total")
+    ax.set_title(
+        f"Live brain — identity 8   min {min(totals):.1f} · mean {mean:.1f} · max {max(totals):.1f} · 0 breaches"
+    )
+    for i, d in enumerate(recs):
+        tag = f"{d['total']:.1f}   {d['kills']}/{d['hostiles']}"
+        if d["civ"]:
+            tag += f"   {d['civ']} civ"
+        x = d["total"]
+        ax.text(
+            x + (4 if x >= 0 else -4),
+            i,
+            tag,
+            va="center",
+            ha="left" if x >= 0 else "right",
+            fontsize=8.5,
+            color="#334155",
+        )
+    ax.legend(loc="lower right", framealpha=0.95)
+    ax.set_xlim(min(totals) - 40, max(totals) + 55)
+
+    # Same order: what the total is made of.
+    mission = np.array([d["mission"] for d in recs])
+    aware = np.array([d["aware"] for d in recs])
+    comms = np.array([d["comms"] for d in recs])
+    # Same order: grouped terms so a negative mission (x1-a) is readable.
+    w = 0.24
+    axb.barh(y - w, mission, height=w, color="#1d4ed8", label="mission", zorder=3)
+    axb.barh(y, aware, height=w, color="#0d9488", label="awareness", zorder=3)
+    axb.barh(y + w, comms, height=w, color="#64748b", label="comms", zorder=3)
+    axb.axvline(0.0, color="#94a3b8", lw=0.8, zorder=1)
+    axb.set_yticks(y)
+    axb.set_yticklabels(labels)
+    axb.invert_yaxis()
+    axb.set_xlabel("score term")
+    axb.set_title("Same eight — mission / awareness / comms")
+    axb.legend(loc="lower right", framealpha=0.95, ncol=3)
+    fig.tight_layout()
+    save(fig, "live-results.png")
+
+    # Named extras, not in the eight. Totals from RESULTS.md (canary/fa56 D75, s3 D76).
+    extras = [
+        ("s3", 172.8, "6/6", "hardening, D76"),
+        ("canary", 87.1, "3/3", "x1-06b926af…  wasted 0"),
+        ("fa56", 83.2, "3/3", "x2-fa56ef…"),
+    ]
+    fig2, ax2 = plt.subplots(figsize=(11.5, 3.2))
+    ye = np.arange(len(extras))
+    vals = [e[1] for e in extras]
+    ax2.barh(ye, vals, color=["#15803d", "#4e79a7", "#b07aa1"], height=0.55, zorder=3)
+    ax2.axvline(0.0, color="#94a3b8", lw=0.8)
+    ax2.set_yticks(ye)
+    ax2.set_yticklabels([e[0] for e in extras])
+    ax2.invert_yaxis()
+    ax2.set_xlabel("total")
+    ax2.set_title("Live brain — named extras (not in the identity eight)")
+    for i, (name, total, kills, note) in enumerate(extras):
+        ax2.text(total + 3, i, f"{total:.1f}   {kills}   {note}", va="center", fontsize=8.5, color="#334155")
+    ax2.set_xlim(0, max(vals) + 80)
+    fig2.tight_layout()
+    save(fig2, "live-results-extras.png")
 
 
 def plot_breaches(rows: list[dict]) -> None:
@@ -487,10 +619,14 @@ def write_summary_md(rows: list[dict]) -> None:
         "stack height is Δmean), `ablation-waterfall.png` (same Δmean as bars).",
         "`ablation-timeline.png` is the same floor/mean/max on **commit time**",
         "(V23/V24 diamonds are sweep times, not git).",
+        "`ablation-heatmap-x.png` is x1/x2 only — own scale, because s1's",
+        "−1500 flattens those rows on the eight-id heatmap.",
         "",
         "![floor / mean / max](ablation-ladder.png)",
         "",
         "![per-id totals](ablation-heatmap.png)",
+        "",
+        "![generated x1/x2 totals](ablation-heatmap-x.png)",
         "",
         "![kills / breaches / civilians](ablation-mission.png)",
         "",
@@ -503,6 +639,10 @@ def write_summary_md(rows: list[dict]) -> None:
         "![mean waterfall](ablation-waterfall.png)",
         "",
         "![score vs commit time](ablation-timeline.png)",
+        "",
+        "![live brain identity 8](live-results.png)",
+        "",
+        "![live brain named extras](live-results-extras.png)",
         "",
         "| ver | commit | change | min | mean | max | worst |",
         "| --- | --- | --- | ---: | ---: | ---: | --- |",
@@ -577,12 +717,19 @@ def main() -> int:
     style()
     plot_ladder(rows)
     plot_heatmap(rows)
+    plot_heatmap(
+        rows,
+        ids=IDS_X,
+        name="ablation-heatmap-x.png",
+        title="Generated x1 / x2 — per-id total (own colour scale)",
+    )
     plot_breaches(rows)
     plot_floor(rows)
     plot_trajectories(rows)
     plot_deltas(rows)
     plot_mean_waterfall(rows)
     plot_timeline(rows)
+    plot_live_results(rows)
     write_summary_md(rows)
     if args.update_csv:
         update_csv(rows)

@@ -14,10 +14,14 @@ Attribution: `ablation-ids.png` (where each id sits),
 stack height is Δmean), `ablation-waterfall.png` (same Δmean as bars).
 `ablation-timeline.png` is the same floor/mean/max on **commit time**
 (V23/V24 diamonds are sweep times, not git).
+`ablation-heatmap-x.png` is x1/x2 only — own scale, because s1's
+−1500 flattens those rows on the eight-id heatmap.
 
 ![floor / mean / max](ablation-ladder.png)
 
 ![per-id totals](ablation-heatmap.png)
+
+![generated x1/x2 totals](ablation-heatmap-x.png)
 
 ![kills / breaches / civilians](ablation-mission.png)
 
@@ -30,6 +34,10 @@ stack height is Δmean), `ablation-waterfall.png` (same Δmean as bars).
 ![mean waterfall](ablation-waterfall.png)
 
 ![score vs commit time](ablation-timeline.png)
+
+![live brain identity 8](live-results.png)
+
+![live brain named extras](live-results-extras.png)
 
 | ver | commit | change | min | mean | max | worst |
 | --- | --- | --- | ---: | ---: | ---: | --- |

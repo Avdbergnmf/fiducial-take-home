@@ -38,6 +38,8 @@ are `notes/GAPS.md`.
 **min −7.7 · mean 152.3 · max +237.6.** Breaches on this set: **0.**
 Detection is `n/a` / 0: `declare_identity` is never called.
 
+![live brain identity 8](notes/live-results.png)
+
 Hard generated ids (not in the eight): canary
 `x1-06b926af3deab4600494418d7ece5944` **3/3 +87.1**, wasted 0; fa56
 `x2-fa56ef171718281fef54383d2dba36d6` **3/3 +83.2**. D75 exists for the
@@ -51,6 +53,8 @@ s3 was already +192.2 6/6; this is not a rescue. Hopped reports are still
 trusted. Identity eight is a wash (floor −7.7 → −7.9). Three fresh x3:
 +54.4 (3/3, 1 ground waste — F2, not impersonation), +127.1 4/4,
 +198.6 3/3.
+
+![live brain named extras](notes/live-results-extras.png)
 
 V10 on the same eight was min **−524.6** (x2-b 0/3, three breaches),
 mean **−136.4**. The floor moved off breaches and onto x1-a's civilian
@@ -107,6 +111,8 @@ older table; the rest of V0–V10 matched.
 ![floor / mean / max](notes/ablation-ladder.png)
 
 ![per-id totals](notes/ablation-heatmap.png)
+
+![generated x1/x2 totals (own scale)](notes/ablation-heatmap-x.png)
 
 ![kills / breaches / civilians](notes/ablation-mission.png)
 
@@ -255,7 +261,8 @@ V10's floor (x2-b −524.6, 0/3, three × −200) is closed.
 figures. Attribution (where points go) is `ablation-ids.png` (each id
 across versions), `ablation-delta.png` (each id's share of Δmean),
 `ablation-waterfall.png` (Δmean as bars), `ablation-timeline.png`
-(same scores vs commit time). `notes/workflow.md` is
+(same scores vs commit time), `ablation-heatmap-x.png` (x1/x2 only,
+own colour scale). `notes/workflow.md` is
 the test loop. `notes/GAPS.md` is the unfinished list.
 `notes/sense-sample.json` is generated-id `sense_radius` (mean 76.1 m,
 SD 15.9); Cover already uses boot, not this mean.
