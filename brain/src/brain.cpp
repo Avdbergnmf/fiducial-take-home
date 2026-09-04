@@ -63,9 +63,9 @@ private:
         host().Logf("drone %u/%u up, lateral limit %.2f m/s^2, kill r %.1f, tier %u",
                     cfg_.drone_id, cfg_.fleet_size, cfg_.lateral_limit,
                     cfg_.kill_radius, cfg_.tier);
-        host().Logf("params sense=%.1f comm=%.1f maxv=%.1f maxa=%.1f tilt=%.2f lat=%.1f sep=%.1f fsep=%.1f ring=%.1f alt=%.1f fix=%.2f",
+        host().Logf("params sense=%.1f comm=%.1f maxv=%.1f maxa=%.1f tilt=%.2f rate=%.1f lat=%.1f sep=%.1f fsep=%.1f ring=%.1f alt=%.1f fix=%.2f",
                     cfg_.sense_radius, cfg_.comm_radius, cfg_.max_speed, cfg_.max_accel,
-                    cfg_.max_tilt, cfg_.lateral_limit, cfg_.separation_margin,
+                    cfg_.max_tilt, cfg_.max_body_rate, cfg_.lateral_limit, cfg_.separation_margin,
                     cfg_.friendly_margin,
                     policy_.ring_radius(), policy_.ring_altitude(),
                     obs.self().fix_sigma);
@@ -231,9 +231,13 @@ private:
         const sw::Track* target = policy_.target();
         const sw::Track* focus = policy_.focus();
 
+        const sw::Vec3 a_now = sw::flight::InertialAccel(obs.attitude(), obs.accel());
         sw::Vec3 accel = sw::flight::DesiredAccel(
             mode, position, velocity, policy_.DesiredPosition(obs),
-            focus, policy_.leashed(), obs.dt(), cfg_);
+            focus, policy_.leashed(), obs.dt(), cfg_, a_now);
+
+        if (sw::Intercepting(mode))
+            accel = sw::flight::SlewHorizontal(last_accel_, accel, obs.dt(), cfg_);
 
         accel = sw::flight::EnforceSeparation(accel, position, velocity,
                                               store_.tracks(), cfg_, target,
@@ -244,6 +248,7 @@ private:
         if (!sw::Intercepting(mode))
             accel = sw::flight::EnforceArena(accel, position, velocity, cfg_);
 
+        last_accel_ = accel;
         LogProximity(obs, target);
 
         const float yaw = sw::flight::DesiredYaw(mode, position, velocity,
@@ -323,12 +328,27 @@ private:
             // "ram" is reserved for the last metres of a committed intercept.
             // A 12 m pass of a civilian we are trying not to hit is "near".
             const char* verb = (intercept && band >= 3) ? "ram" : "near";
-            host().Logf("%s trk=%u class=%s rng=%.1f close=%.1f n=%.1f e=%.1f alt=%.1f vn=%.1f ve=%.1f",
-                        verb,
-                        t.has_local_id ? t.track_id : 0,
-                        sw::BeliefName(t.belief), d, closing,
-                        t.position.x, t.position.y, -t.position.z,
-                        t.velocity.x, t.velocity.y);
+            if (intercept) {
+                const sw::Vec3 weave = sw::flight::EstimatedAccel(
+                    t.velocity, t.last_velocity, obs.dt(), cfg_.lateral_limit);
+                const sw::flight::Course course = sw::flight::SolveCollisionCourse(
+                    position, velocity, t.position, t.velocity, cfg_, weave,
+                    sw::flight::InertialAccel(obs.attitude(), obs.accel()));
+                host().Logf("%s trk=%u class=%s rng=%.1f close=%.1f n=%.1f e=%.1f alt=%.1f vn=%.1f ve=%.1f in=%.1f ie=%.1f ialt=%.1f",
+                            verb,
+                            t.has_local_id ? t.track_id : 0,
+                            sw::BeliefName(t.belief), d, closing,
+                            t.position.x, t.position.y, -t.position.z,
+                            t.velocity.x, t.velocity.y,
+                            course.meeting.x, course.meeting.y, -course.meeting.z);
+            } else {
+                host().Logf("%s trk=%u class=%s rng=%.1f close=%.1f n=%.1f e=%.1f alt=%.1f vn=%.1f ve=%.1f",
+                            verb,
+                            t.has_local_id ? t.track_id : 0,
+                            sw::BeliefName(t.belief), d, closing,
+                            t.position.x, t.position.y, -t.position.z,
+                            t.velocity.x, t.velocity.y);
+            }
             if (terminal_aim) last_aim_log_at_ = now;
         }
     }
@@ -349,6 +369,7 @@ private:
     float logged_link_at_ = -1.0f;
     bool radio_logged_ = false;
     float last_aim_log_at_ = -1.0f;
+    sw::Vec3 last_accel_{};
 };
 
 }  // namespace

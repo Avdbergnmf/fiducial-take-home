@@ -225,7 +225,7 @@ private:
     uint32_t last_abort_id_ = 0;
     uint32_t last_abort_store_id_ = 0;
     float last_abort_at_ = -1.0e9f;
-    char last_log_[256]{};
+    char last_log_[384]{};
 
     uint16_t next_seq_ = 0;
     float last_heartbeat_ = -1.0e9f;

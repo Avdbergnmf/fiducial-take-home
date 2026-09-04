@@ -426,13 +426,21 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
                                                        candidate->velocity, cfg_.asset);
             const float ttg = TimeToCylinder(candidate->position, candidate->velocity,
                                              cfg_.asset, cfg_.asset_radius);
+            const Vec3 weave = flight::EstimatedAccel(
+                candidate->velocity, candidate->last_velocity, obs.dt(),
+                cfg_.lateral_limit);
+            const flight::Course course = flight::SolveCollisionCourse(
+                obs.position(), obs.velocity(), candidate->position,
+                candidate->velocity, cfg_, weave,
+                flight::InertialAccel(obs.attitude(), obs.accel()));
             std::snprintf(last_log_, sizeof(last_log_),
-                          "commit trk=%u score=%.2f miss=%.1f rng=%.0f close=%.1f ttg=%.1f n=%.1f e=%.1f alt=%.1f vn=%.1f ve=%.1f%s%s",
+                          "commit trk=%u score=%.2f miss=%.1f rng=%.0f close=%.1f ttg=%.1f n=%.1f e=%.1f alt=%.1f vn=%.1f ve=%.1f in=%.1f ie=%.1f ialt=%.1f%s%s",
                           candidate->has_local_id ? candidate->track_id : 0,
                           candidate->closing_score, miss, rng, closing, ttg,
                           candidate->position.x, candidate->position.y,
                           -candidate->position.z,
                           candidate->velocity.x, candidate->velocity.y,
+                          course.meeting.x, course.meeting.y, -course.meeting.z,
                           candidate->has_local_id ? "" : " peer",
                           early ? " early" : "");
         }

@@ -119,6 +119,7 @@ struct Config {
     float max_speed = 20.0f;
     float max_accel = 15.0f;
     float max_tilt = 0.6f;
+    float max_body_rate = 0.0f;  // rad/s; 0 = unpublished / tests, instant xy
     float kill_radius = 1.0f;   // s1 value; --dump-params drone.kill_radius=1
 
     Vec3 asset{};
@@ -162,6 +163,7 @@ struct Config {
         c.max_speed = b.max_speed;
         c.max_accel = b.max_accel;
         c.max_tilt = b.max_tilt;
+        c.max_body_rate = b.max_body_rate;
         c.kill_radius = b.kill_radius;
 
         c.asset = b.asset_position;

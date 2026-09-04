@@ -54,16 +54,40 @@ Vec3 ProNav(const Vec3& self_position, const Vec3& self_velocity,
             float lead_kill_radii = kPnLeadKillRadii,
             float navigation_gain = kPnGain);
 
-/// Vector ZEM intercept for scramble / ram (D49).
+/// Time to establish max tilt at published max_body_rate. 0 if rate is
+/// unpublished (tests). s1: 0.6 rad / 8 rad/s ≈ 75 ms, not a 0.4 s lag.
+float TiltSettle(const Config& cfg);
+
+/// Specific force (body FRD, includes gravity reaction) → inertial NED.
+Vec3 InertialAccel(const swarm::Quat& attitude, const Vec3& specific_force);
+
+/// Rotate / scale horizontal accel toward `to` at max_body_rate.
+/// z is thrust and is copied from `to`. Identity when rate is unpublished.
+Vec3 SlewHorizontal(const Vec3& from, const Vec3& to, float dt, const Config& cfg);
+
+/// Vector ZEM intercept for scramble / ram (D49 / D61).
 ///
 /// Full 3-D ZEM, not ZEMn + along-LOS. t_go is the earliest arrival, not
 /// range/closing. N=2 is the constant-accel intercept on a double
-/// integrator. Saturates with LimitAccel (5.4 cylinder: leftover z does
-/// not steal xy, D51). Do not add g. Do not bake tilt lag into t_go.
+/// integrator after tilt has settled: a = 2 ZEM / (t − τ)² with
+/// τ = max_tilt / max_body_rate. Saturates with LimitAccel (5.4 cylinder:
+/// leftover z does not steal xy, D51). Do not add g. Do not add τ onto
+/// t_go (that softens the command; D49).
+struct Course {
+    Vec3 accel;
+    Vec3 meeting;
+    float t_go = 0.0f;
+};
+Course SolveCollisionCourse(const Vec3& self_p, const Vec3& self_v,
+                            const Vec3& tgt_p, const Vec3& tgt_v,
+                            const Config& cfg,
+                            const Vec3& tgt_a = {},
+                            const Vec3& self_a = {});
 Vec3 CollisionCourse(const Vec3& self_p, const Vec3& self_v,
                      const Vec3& tgt_p, const Vec3& tgt_v,
                      const Config& cfg,
-                     const Vec3& tgt_a = {});
+                     const Vec3& tgt_a = {},
+                     const Vec3& self_a = {});
 
 /// True if a ram is still possible. Inside 2·kill we stay in the merge.
 /// Past CPA and outside that bubble, or a leftover miss `Reach` (½ a t²
@@ -76,7 +100,7 @@ bool CatchableRam(const Vec3& self_p, const Vec3& self_v,
 /// after this, in Fly.
 Vec3 DesiredAccel(Mode mode, const Vec3& position, const Vec3& velocity,
                   const Vec3& goal, const Track* focus, bool leashed,
-                  float dt, const Config& cfg);
+                  float dt, const Config& cfg, const Vec3& self_a = {});
 
 /// Yaw for the named mode. Outward on station, at the watch target, or
 /// along velocity when intercepting / stalking.

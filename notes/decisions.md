@@ -2592,4 +2592,100 @@ Do not put yield on interceptors (D51).
 Identity 8/8 unchanged (mean **154.5 → 154.6**, worst x1-a **−3.6**,
 2 civ, D44). s2 still 6/6 **182.8**.
 
+---
+
+## D60 — Aim cue is the believed body, coasted; this miss is tilt
+
+**The miss.** `x2-fa56ef171718281fef54383d2dba36d6`, drone 1 vs
+hostile_0. Closest **1.78 m** at 15.90 against kill **1.16**. Abort
+`uncatchable` at 15.93 (already past, closing −15.6), breach at 17.85.
+Scramble 12.74, ram 13.24. Drone 2 committed the same inbound at 14.66
+and aborted `duplicate` 0.1 s later — they had a 28 m CPA miss; this
+geometry is drone 1's or nobody's.
+
+**The cue is not the intercept, and should not sit ahead.** `commit` /
+`near` / `ram` log `t.position` (believed **current** pose). Guidance
+flies CollisionCourse to `I(t) = tgt + v t`, which *is* metres ahead
+along their track (4–26 m on this pass). AimIndex used n=/e=/alt= only,
+so the ghost sat on the last sample: the commit pose for ~2 s, then
+0–0.1 s old in the last second (~0–2 m behind at 18 m/s). Own-fix is
+another ~1.8 m off the truth tetrahedron. Along-track error vs truth at
+the log instants is **0.00–0.05 s** — not a stale track.
+
+**Chosen (viewer).** Coast the Aim ghost with `vn/ve` to the playhead.
+Still the believed body, still not I. Without vz the altitude stays on
+the sample.
+
+**The unused accel.** Commanded xy is **maxed from ~14.5** (6.71) and
+~5.3 before that (N=2 thinks a double integrator hits with that).
+**Achieved** xy from 10 Hz Δv is **~4.2 for the whole chase**, almost
+independent of commanded 4.8–6.7. Tilt 0.6 rad takes ~0.4 s to deliver
+xy (D49). The t-bin also jumps every few ticks and rotates the xy
+heading 20–40° / 0.1 s, so the attitude loop never settles. In the last
+second t_cpa is already < tilt; there is no leftover plant to spend.
+Passing behind is the leftover 0.57 m after 3.2 s of ~4 m/s², not a
+steer at the current body.
+
+**Tried and rejected on this id.**
+
+1. Denser earliest-t (0.05 s). First kill sat between 2.4 s and 2.8 s
+   and saturated, but the shorter meeting aligned velocities;
+   CatchableRam aborted at 3 m still closing 1.4. Closest **1.78 → 2.33**.
+2. Same I, scale xy to `lateral_limit` once N=2 says killable. Achieved
+   xy still ~4.2. Closest **1.80**. Score −111.2 → −114.4.
+
+**Not chosen.** Baking tilt into t_go (D49). 0.5·kill lead on
+CollisionCourse (at CPA it picked a 7 s stern chase). Dropping
+`closing ≥ 5 ⇒ catchable` — drone 2 cannot take this shot.
+
+**Flight unchanged.** The 0.57 m is actuator lag on a crossing
+overtake (hostile 18.4 m/s, interceptor peaked at 13). Commanding
+harder does not raise delivered xy. A shorter t makes the merge worse.
+
+**Measured.** Cue only; this id still 2/3, −111.2. Identity not re-run
+(command path untouched).
+
+---
+
+## D61 — Aim is I; reach-horizon cue; published tilt plant
+
+**Aim.** The ghost sat on the believed body (`n=/e=`), so it looked
+beside the hostile. CollisionCourse already flies to `I(t)`. `commit` /
+`near` / `ram` now also log `in=/ie=/ialt=`. AimIndex draws that meeting
+when present. `fix_sigma` is not added — the sample is already believed;
+inspector sigma is the noise display. Old traces without `in=` fall back
+to the body.
+
+**Reach horizon.** Not a tetrahedron. Own-fix uncertainty is the
+tetrahedron (inspector sigma). The double-integrator reachable set in N
+seconds is a ball of radius `Reach(N, lat, maxv)` around the ballistic
+point `p + v N` — same closed form as the kill envelope, from the current
+velocity rather than from rest. New cue, slider 0.2–4 s (default 1).
+Viewer-only; not a recorded field. Cover/picket `Reach` is unchanged.
+
+**Tilt.** D49's ~0.4 s was *observed* Δv vs command, not the published
+plant. `--dump-params`: `drone.max_tilt=0.6`, `drone.max_body_rate=8`.
+CHALLENGE.md: no actuator delay; xy bound is `g·tan(max_tilt)`; inner
+loop has finite bandwidth. `φ = atan(a_h / g)`, `|φ̇| ≤ ω`, so time to
+max tilt from 0 is `τ = 0.6/8 ≈ 75 ms`, and `|ȧ_h| ≈ g ω ≈ 78 m/s³` near
+hover.
+
+Two uses of that, not D49's `t_go += delay` (that *softens* the command):
+
+1. N=2 invert: `a = 2 ZEM / (t − τ)²`, skip bins with `t − τ < 0.12`.
+   Scoring still `PredictedPosition` on the full `t`, so the chosen bin
+   can move later rather than always commanding harder.
+2. Issued xy is slewed at `g ω dt` while intercepting (`SlewHorizontal`).
+   z is copied through. Separation still after.
+
+75 ms will not turn a 1.78 m miss into a 1.16 m kill by itself. Identity
+and this id re-measured after the command path changed.
+
+**Measured.** This id still 2/3, **−111.2 → −112.1**, breach still 17.85.
+Identity 8/8, 0 breaches, mean **154.6 → 149.8**, worst x1-a **−3.6 →
+−2.0**, still 4/4 with 2 civ (D44). s2 6/6 **180.9**, s1 6/6 **203.9**.
+Hard id still **2/3, −113.6**, hostile_0 still the first-arrival miss.
+`params` now logs `rate=8.0`. `in=` on a commit sits metres ahead of
+`n=/e=` (e.g. body 80/98 vs meeting 41/52).
+
 

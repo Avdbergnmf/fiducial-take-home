@@ -56,6 +56,32 @@ Vec3 PredictedPosition(const Vec3& p, const Vec3& v, const Vec3& a,
 
 }  // namespace
 
+float TiltSettle(const Config& cfg) {
+    if (cfg.max_body_rate < 0.05f || cfg.max_tilt < 1e-4f) return 0.0f;
+    return cfg.max_tilt / cfg.max_body_rate;
+}
+
+Vec3 InertialAccel(const swarm::Quat& attitude, const Vec3& specific_force) {
+    const Vec3 f = attitude.Rotate(specific_force);
+    return Vec3(f.x, f.y, f.z + 9.81f);
+}
+
+Vec3 SlewHorizontal(const Vec3& from, const Vec3& to, float dt, const Config& cfg) {
+    if (dt < 1e-6f || cfg.max_body_rate < 0.05f) return to;
+    const float max_da = 9.81f * cfg.max_body_rate * dt;
+    const float dx = to.x - from.x;
+    const float dy = to.y - from.y;
+    const float dh = std::sqrt(dx * dx + dy * dy);
+    Vec3 out = to;
+    if (dh > max_da && dh > 1e-6f) {
+        const float s = max_da / dh;
+        out.x = from.x + dx * s;
+        out.y = from.y + dy * s;
+    }
+    out.z = to.z;
+    return LimitAccel(out, cfg);
+}
+
 float TimeToClose(const Vec3& p, const Vec3& v, const Vec3& q, const Vec3& w,
                   float radius) {
     const Vec3 offset = p - q;
@@ -200,40 +226,54 @@ Vec3 ProNav(const Vec3& self_position, const Vec3& self_velocity,
 
 Vec3 CollisionCourse(const Vec3& self_p, const Vec3& self_v,
                      const Vec3& tgt_p, const Vec3& tgt_v,
-                     const Config& cfg, const Vec3& tgt_a) {
+                     const Config& cfg, const Vec3& tgt_a, const Vec3& self_a) {
+    return SolveCollisionCourse(self_p, self_v, tgt_p, tgt_v, cfg, tgt_a,
+                                self_a).accel;
+}
+
+Course SolveCollisionCourse(const Vec3& self_p, const Vec3& self_v,
+                            const Vec3& tgt_p, const Vec3& tgt_v,
+                            const Config& cfg, const Vec3& tgt_a,
+                            const Vec3& self_a) {
+    (void)self_a;
+    Course out;
     const Vec3 los = tgt_p - self_p;
     const float range = swarm::Length(los);
-    if (range < 1e-3f) return Vec3();
+    if (range < 1e-3f) return out;
 
-    // Vector ZEM: ZEM = r + v_rel t + ½ At t². Not ZEMn, not range/closing.
-    // N=2 arrives at I. LimitAccel is the 5.4 cylinder (D51). Do not add g.
+    // Vector ZEM. N=2 after tilt has settled: a = 2 ZEM / (t − τ)².
+    // τ = max_tilt / max_body_rate (D61). Do not add τ onto t_go (D49).
     static constexpr float kTs[] = {
         0.25f, 0.40f, 0.55f, 0.70f, 0.85f, 1.00f,
         1.20f, 1.45f, 1.70f, 2.00f, 2.40f, 2.80f,
         3.30f, 3.80f, 4.50f, 5.50f, 7.00f, 9.00f, 12.00f};
 
     const float kill = cfg.kill_radius > 0.1f ? cfg.kill_radius : 0.1f;
+    const float tau = TiltSettle(cfg);
     float best_miss = 1.0e9f;
     Vec3 best_a = LimitAccel(los * (cfg.max_accel / range), cfg);
     Vec3 best_I = tgt_p;
+    float best_t = 0.0f;
 
     for (float t : kTs) {
+        const float t_apply = t - tau;
+        if (t_apply < 0.12f) continue;
         const Vec3 I = tgt_p + tgt_v * t + tgt_a * (0.5f * t * t);
         const Vec3 zem = I - self_p - self_v * t;
-        const Vec3 arrive = LimitAccel(zem * (2.0f / (t * t)), cfg);
+        const Vec3 arrive = LimitAccel(zem * (2.0f / (t_apply * t_apply)), cfg);
         const float miss = swarm::Length(
             PredictedPosition(self_p, self_v, arrive, t, cfg.max_speed) - I);
         if (miss < best_miss) {
             best_miss = miss;
             best_a = arrive;
             best_I = I;
+            best_t = t;
         }
         if (miss <= kill) break;
     }
 
     Vec3 accel = best_a;
 
-    // Never command away from the intercept (D45, along I not the body).
     const Vec3 to_I = best_I - self_p;
     const float dI = swarm::Length(to_I);
     if (dI > 1e-3f) {
@@ -244,7 +284,10 @@ Vec3 CollisionCourse(const Vec3& self_p, const Vec3& self_v,
             accel = LimitAccel(accel, cfg);
         }
     }
-    return accel;
+    out.accel = accel;
+    out.meeting = best_I;
+    out.t_go = best_t;
+    return out;
 }
 
 bool CatchableRam(const Vec3& self_p, const Vec3& self_v,
@@ -300,7 +343,7 @@ bool CatchableRam(const Vec3& self_p, const Vec3& self_v,
 
 Vec3 DesiredAccel(Mode mode, const Vec3& position, const Vec3& velocity,
                   const Vec3& goal, const Track* focus, bool leashed,
-                  float dt, const Config& cfg) {
+                  float dt, const Config& cfg, const Vec3& self_a) {
     auto weave_of = [&](const Track& t) {
         return EstimatedAccel(t.velocity, t.last_velocity, dt,
                               cfg.lateral_limit);
@@ -311,7 +354,8 @@ Vec3 DesiredAccel(Mode mode, const Vec3& position, const Vec3& velocity,
         case Mode::Ramming:
             if (focus) {
                 return CollisionCourse(position, velocity, focus->position,
-                                       focus->velocity, cfg, weave_of(*focus));
+                                       focus->velocity, cfg, weave_of(*focus),
+                                       self_a);
             }
             break;
         case Mode::Stalking:
