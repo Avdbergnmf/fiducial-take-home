@@ -6,7 +6,8 @@ arena springs are off. If a collision is physically impossible, abort back to
 picket. Scramble / ram fly a vector-ZEM collision course to the predicted
 meeting point, not ProNav at the current body (D49). Station altitude is the
 inbound cone at the picket radius once the fleet has a linear ray (D52),
-else 30 m. See D46 / D48 / D51.
+else 30 m. Stations even over the live roster (hopped heartbeats, D56).
+See D46 / D48 / D51 / D56.
 
 ```mermaid
 stateDiagram-v2
@@ -48,10 +49,11 @@ whatever station we were in.
 | **Hostile_latch** | Already Scrambling, and that track's belief becomes Hostile. | Rename to Ramming. Same guidance. Abort rules get stricter. |
 | **abort** | See abort table below. | Station-keeping again. Arena springs come back. 2 s before we re-chase the same track. |
 
-**Who owns an inbound.** Facing ring slot for its bearing, else the first live
-drone clockwise. A receding facing slot yields once. Two observers on a
-bisector name the same owner. A mate already flying at it (closing along the
-LOS ≥ 5 m/s) is the interceptor; we abort as `duplicate`.
+**Who owns an inbound.** Facing slot among the **live** equally-spaced
+stations, then that live id. A receding owner yields one step clockwise
+on the live ring. Two observers on a bisector name the same owner. A mate
+already flying at it (closing along the LOS ≥ 5 m/s) is the interceptor;
+we abort as `duplicate`.
 
 ## Modes
 

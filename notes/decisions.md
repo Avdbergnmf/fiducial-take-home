@@ -2395,3 +2395,101 @@ score because it left coverage; this Z lean keeps coverage and still
 does not convert the first inbound. Default stays friendly spawn.
 The remaining hard-id miss is time / north geometry, not station
 height.
+
+---
+
+## D55 — Compact ring starts in; measured spawn opens it (rejected)
+
+**The question.** The first inbound is missed because we sit on the D37
+outer ring before any cone or spawn measurement exists. Sit closer until
+that first hit, then open to a radius whose catch cones just tile the
+horizon at the inbound height — never past where hostiles actually
+appear.
+
+**Not in the brief.** `spawn.enemy_radius` is still unpublished. D28's
+0.80·arena is a ceiling, not a measurement of *this* run.
+
+**Tried.**
+
+- **Inner, compact only.** When the radio/0.65 cap is already inside
+  D37's 3.5 s react, do nothing (D40: extra pull-in on roomy layouts
+  costs reward). When react binds, sit at 5.0 s until evidence.
+- **Horizon birth → loosen.** A local Hostile / diving-aimed track whose
+  `first_position` is at or beyond `ring + 0.75·sense` spawned outside
+  sense. `spawn_hat = r0 + dash·1.5 s` (D32 spool). Desired radius
+  `min(D37 outer, spawn_hat − 3.5·max_speed)`. Expand at 8 m/s, not a
+  jump.
+- **Near birth → freeze.** First sight inside that horizon is
+  spawn-inside-sense. Cap at that range minus 3.5 s. Never open past it.
+- **Coverage shrink.** At the chosen `(R, H)` a picket must still reach
+  a bisector inbound at the sense horizon in `ttg − 2 s` of cruise, with
+  15 % extra half-angle so neighbouring cones overlap. Depleted fleets
+  pull in; a full ring on recorded layouts already tiles.
+
+**Not chosen.** A static smaller ring (D40). Boot-time Pythagoras from
+unpublished 40 m (D52). Opening to 0.80·arena without a measured
+horizon.
+
+**Measured, rejected.** Identity mean **122.9 → 12.1**. s2 5/6 −28.6 →
+**4/6 −272** (two breaches). s1 still 6/6 but **224 → 171** (later
+kills). x1-a 4/4 −6.8 → **−254** (3 civilians, 1 wasted). x2-a 4 wasted
+ground. Hard id still **2/3**, hostile_0 still 21.31 s.
+
+First sight is not spawn. `ring + 0.75·sense` tagged ordinary s1/s2
+inbounds as spawn-inside and pulled the ring in by tens of metres.
+D37's unpublished 0.80·arena cap is already the conservative outer;
+shrinking from a sense contact is a false inner. Coverage never bound
+on a full fleet — neighbouring cones already overlap. The first
+hard-id inbound is still a north-reach miss, not a ring-size miss
+(D54).
+
+---
+
+## D56 — Hop heartbeats; even the ring over the live roster
+
+**The question.** On s2 the ring does not rebalance. After five rams the
+survivors still sit on their original bearings. Is the live-list /
+even-spacing code missing, or is it doing something else on purpose?
+
+**What was in place.** `CountLive` / `LiveRank` existed. Stations did
+**not** use them. `StationBearing` bisected the local gap and **capped
+the slide at two slots**, so only the lips of a hole moved. Heartbeats
+did not hop, so `RingAlive` treated far silence as a live interceptor
+and kept a ghost station on the opposite side (D19 / D21 / D30). That
+is why a 93° hole stayed open: it was implemented, as local diffusion
+with a 2-slot cap, not as even spacing.
+
+**D30 EvenSpacingBearing** (local neighbour midpoint) evened the fixed
+set and lost on fresh ids. **D19 global rank** failed because every
+drone had a different roster. The missing piece was a shared live set,
+which hops give us now that TrackReport and Ray already flood.
+
+**Chosen.**
+
+- Relay heartbeats, same `kMaxHops` / `kPrioRelay` / SeenSet as
+  TrackReport. Hop-0 still `MarkFriendly` (measured range is to the
+  transmitter). Relays only `NoteAlive`.
+- `RingAlive`: heard-then-silent is dead at any range, latched until a
+  heartbeat. Never-heard stays alive (boot).
+- `StationBearing = 2π · LiveRank / CountLive`. Full strength is a
+  fixed point. Ownership uses the same live facing (D35 receding still
+  yields one live step).
+
+**Not chosen.** Re-running D55 (start the ring in, open from first
+sight). That leak was the empty arc this entry closes. First-sight is
+still not spawn; D55 stays rejected.
+
+**Measured.** Identity 8/8, mean **122.9 → 153.8**, worst **s2 −28.6 →
+x1-a −4.5**. s2 **5/6 → 6/6** (180.7); hostile_5 rammed at 103.86 s
+instead of leaking at 106.78. s1 still 6/6 (224 → 202: comms 39-ish →
+34.3 from the heartbeat flood; `frames_dropped_budget` 0, bytes 587 of
+4096). x1-a still 4/4, 2 civ, −6.8 → −4.5 (D44 not reversed). x2-a
+4/4, 0 wasted. Hard-id still **2/3, −109**, Hostile_0 at **21.31 s** —
+same first-arrival miss. s2 `max_hops_observed` 2.
+
+Fresh 8 tier-1: mean 218.2, **0 breaches**. Fresh 8 tier-2: mean 143.6,
+one leak (4/5) and one wasted ground — not the D30 collapse.
+
+**D55 re-eval.** Leave rejected. The leftover was the empty arc, not
+spawn-inside or default height (D54). Sitting the ring in still does
+not convert the hard-id north miss, and first sight is still not spawn.

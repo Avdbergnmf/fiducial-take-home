@@ -36,12 +36,10 @@ bool OtherInterceptorWins(float us_range, uint32_t us_id,
 bool SlotAlive(uint32_t drone_id, uint32_t self_id, const float* heard, float now);
 
 /// True if this id still holds a ring station. Self is always alive.
-/// Never-heard is alive (boot). Silence is a nearby death when we are still
-/// in radio of the last heartbeat pose (D19/D30). That death *latches*:
-/// leaving the stale bubble does not resurrect them — that reverse was the
-/// ping-pong (D37). An interceptor who went silent while far was never
-/// latched, so their station stays. A heartbeat clears the latch.
-/// `confirmed_dead` is that latch; null keeps the pure D30 rule (tests).
+/// Never-heard is alive (boot). Heard-then-silent is dead, latched until
+/// a heartbeat (D56). Heartbeats hop, so the far side of the ring sees
+/// the same deaths; "out of radio" no longer keeps a ghost interceptor.
+/// `confirmed_dead` is that latch; null skips the latch (const callers).
 bool RingAlive(uint32_t drone_id, uint32_t self_id, const float* heard,
                const Vec3* heard_at, const Vec3& self_pos, float comm_radius,
                float now, uint32_t fleet_size = 0,
@@ -64,9 +62,8 @@ uint32_t LiveId(uint32_t rank, uint32_t fleet_size, uint32_t self_id,
                 float comm_radius, float now,
                 uint8_t* confirmed_dead = nullptr);
 
-/// Bearing drone `id` should hold, bisecting the gap between the nearest
-/// drones either side of it that WE still believe are flying (D21). A fixed
-/// point at full strength; slides toward a hole as neighbours fall silent.
+/// Bearing drone `id` should hold. Equal 2π / CountLive among RingAlive
+/// ids (D56). A fixed point at full strength.
 float StationBearing(uint32_t id, uint32_t fleet_size, uint32_t self_id,
                      const float* heard, const Vec3* heard_at,
                      const Vec3& self_pos, float comm_radius, float now,

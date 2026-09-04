@@ -183,7 +183,7 @@ static void FillStations(Vec3* at, const Vec3& asset, uint32_t n) {
 }
 
 static void TestLiveRingRespaces() {
-    std::printf("live ring re-spaces a nearby death, ignores radio loss\n");
+    std::printf("live ring re-spaces a death the whole fleet can hear\n");
     float heard[kMaxFleet];
     Vec3 at[kMaxFleet];
     InitHeard(heard);
@@ -204,15 +204,12 @@ static void TestLiveRingRespaces() {
         CHECK(FacingSlot(at[id], asset, n0) == id);
     }
 
-    // Opposite-side silence is radio loss, not death. Slot 0 still counts 16.
+    // Heard, then silent: dead everywhere, not only next door (D56).
     heard[8] = now - 2.0f;
     CHECK(SlotAlive(8, 0, heard, now) == false);
-    CHECK(RingAlive(8, 0, heard, at, self0, comm, now) == true);
-    CHECK(CountLive(n0, 0, heard, at, self0, comm, now) == 16);
-
-    // Neighbour of 8 sees a nearby death. 15 live; 9 slides toward the hole.
+    CHECK(RingAlive(8, 0, heard, at, self0, comm, now) == false);
+    CHECK(CountLive(n0, 0, heard, at, self0, comm, now) == 15);
     CHECK(RingAlive(8, 7, heard, at, self7, comm, now) == false);
-    CHECK(CountLive(n0, 7, heard, at, self7, comm, now) == 15);
     CHECK(LiveRank(7, n0, 7, heard, at, self7, comm, now) == 7);
     CHECK(LiveRank(9, n0, 9, heard, at, self9, comm, now) == 8);
     CHECK(LiveId(8, n0, 7, heard, at, self7, comm, now) == 9);
@@ -224,7 +221,6 @@ static void TestLiveRingRespaces() {
     const uint32_t facing = FacingSlot(at[8], asset, 15);
     CHECK(LiveId(facing, n0, 7, heard, at, self7, comm, now) == 9);
 
-    // Wrap: slot 15 dead, seen from 14. Live ring gives the inbound to 14.
     InitHeard(heard);
     FillStations(at, asset, n0);
     heard[15] = now - 2.0f;
@@ -466,14 +462,8 @@ static void TestCollisionCourseCutsOffACrossingInbound() {
     CHECK(swarm::Dot(a7, to_tgt) > 0.0f);
 }
 
-static void TestStationBisectsTheGap() {
-    std::printf("station bisects the gap a run of deaths leaves\n");
-    // The s2 leak, in numbers. Ring 70 m, 16 drones, comm 75. Slots 0, 1 and 2
-    // died to rams in sequence; the next hostile came in at bearing 20 deg,
-    // the centre of the arc they left. Measured on the trace: the survivors
-    // held 335 deg and 68 deg and never closed the 93 deg hole, because the
-    // old rank/CountLive re-space needs a roster nobody has -- at this radius
-    // only +/-2 neighbours are inside comm_radius.
+static void TestStationEvensTheLiveRing() {
+    std::printf("stations even out over the live roster\n");
     float heard[kMaxFleet];
     Vec3 at[kMaxFleet];
     InitHeard(heard);
@@ -485,7 +475,6 @@ static void TestStationBisectsTheGap() {
         at[i] = flight::RingSlot(i, n0, asset, 70.0f, 30.0f);
     const float step = 2.0f * 3.14159265358979f / 16.0f;
 
-    // Full strength is a fixed point: nobody abandons their own sector.
     for (uint32_t id = 0; id < n0; ++id) {
         const float b = StationBearing(id, n0, id, heard, at, at[id], comm, now);
         CHECK(std::fabs(b - step * static_cast<float>(id)) < 1e-4f);
@@ -495,48 +484,22 @@ static void TestStationBisectsTheGap() {
     heard[1] = now - 3.0f;
     heard[2] = now - 3.0f;
 
-    // How far the death signal reaches is RingAlive's business, and it reaches
-    // exactly as far as the radio: a mate whose last pose was inside comm_radius
-    // has no innocent reason to be silent. On this ring the slot chords run
-    // 27 m, 54 m, 80 m against a 75 m radio, so drone 3 registers BOTH 2 and 1
-    // as dead and only 0, genuinely out of range, stays a ghost.
-    CHECK(RingAlive(2, 3, heard, at, at[3], comm, now) == false);
-    CHECK(RingAlive(1, 3, heard, at, at[3], comm, now) == false);
-    CHECK(RingAlive(0, 3, heard, at, at[3], comm, now) == true);
+    CHECK(CountLive(n0, 3, heard, at, at[3], comm, now) == 13);
+    CHECK(CountLive(n0, 8, heard, at, at[8], comm, now) == 13);
 
-    // So each lip of the hole sees two empty slots on that side against one
-    // full slot on the other, and bisects: a whole slot inward. The older
-    // threshold allowed for a mate having flown out of range during the
-    // silence, which on the ring they never do, and it cost half this slide.
+    const float live_step = 2.0f * 3.14159265358979f / 13.0f;
     const float b3 = StationBearing(3, n0, 3, heard, at, at[3], comm, now);
-    CHECK(std::fabs(b3 - (step * 3.0f - step)) < 1e-4f);
+    CHECK(std::fabs(b3 - 0.0f) < 1e-4f);
+
+    const float b8 = StationBearing(8, n0, 8, heard, at, at[8], comm, now);
+    CHECK(std::fabs(b8 - live_step * 5.0f) < 1e-4f);
 
     const float b15 = StationBearing(15, n0, 15, heard, at, at[15], comm, now);
-    CHECK(std::fabs(b15 - (step * 15.0f + step)) < 1e-4f);
-
-    // Which is the point: the 90 deg hole closes by a slot from the two
-    // drones that can see it, without anyone needing the full roster.
-    const float two_pi = 2.0f * 3.14159265358979f;
-    const float before = step * 3.0f - step * 15.0f + two_pi;
-    const float after = b3 - b15 + two_pi;
-    CHECK(after < before - 1.9f * step);
-
-    // Far from the hole, nothing moves: this is local, not a global reshuffle.
-    const float b8 = StationBearing(8, n0, 8, heard, at, at[8], comm, now);
-    CHECK(std::fabs(b8 - step * 8.0f) < 1e-4f);
-
-    // Whatever it believes, a picket never walks off its own sector: the
-    // shift is capped at two slots. Reachable only on a wider ring, where
-    // more than one neighbour falls inside the death radius.
-    for (uint32_t id = 0; id < 13; ++id) heard[id] = now - 3.0f;
-    const float b14 = StationBearing(14, n0, 14, heard, at, at[14], comm, now);
-    CHECK(std::fabs(b14 - step * 14.0f) <= 2.0f * step + 1e-4f);
+    CHECK(std::fabs(b15 - live_step * 12.0f) < 1e-4f);
 }
 
-static void TestSilentNeighbourIsGoneEvenFar() {
-    std::printf("an interceptor who left radio keeps their station\n");
-    // Silent and far: never confirmed from inside the bubble, so D19 keeps
-    // the station. A neighbour we are still next to is a nearby death.
+static void TestHeardSilenceIsDeadEverywhere() {
+    std::printf("heard-then-silent is dead at any range\n");
     float heard[kMaxFleet];
     Vec3 at[kMaxFleet];
     uint8_t dead[kMaxFleet]{};
@@ -548,10 +511,9 @@ static void TestSilentNeighbourIsGoneEvenFar() {
     FillStations(at, asset, n0);
 
     heard[1] = now - 2.0f;
-    CHECK(RingAlive(1, 0, heard, at, at[8], comm, now, n0, dead) == true);
-    CHECK(dead[1] == 0);
-    CHECK(RingAlive(1, 0, heard, at, at[0], comm, now, n0, dead) == false);
+    CHECK(RingAlive(1, 0, heard, at, at[8], comm, now, n0, dead) == false);
     CHECK(dead[1] != 0);
+    CHECK(RingAlive(1, 0, heard, at, at[0], comm, now, n0, dead) == false);
 
     heard[1] = now;
     CHECK(RingAlive(1, 0, heard, at, at[0], comm, now, n0, dead) == true);
@@ -559,11 +521,7 @@ static void TestSilentNeighbourIsGoneEvenFar() {
 }
 
 static void TestApproachingFarSilenceDoesNotKill() {
-    std::printf("a confirmed nearby death stays dead after we leave the bubble\n");
-    // D19: opposite-side silence is radio loss. The ping-pong was treating
-    // current range to a stale pose as a nearby death: approach, they die,
-    // reverse, they live, approach. Latch the death so leaving does not
-    // resurrect them. A heartbeat still would.
+    std::printf("a confirmed death stays dead until a heartbeat\n");
     float heard[kMaxFleet];
     Vec3 at[kMaxFleet];
     uint8_t dead[kMaxFleet]{};
@@ -575,14 +533,13 @@ static void TestApproachingFarSilenceDoesNotKill() {
     FillStations(at, asset, n0);
 
     heard[8] = now - 2.0f;
-    CHECK(RingAlive(8, 0, heard, at, at[0], comm, now, n0, dead) == true);
-    CHECK(dead[8] == 0);
-    CHECK(RingAlive(8, 0, heard, at, at[8], comm, now, n0, dead) == false);
-    CHECK(dead[8] != 0);
     CHECK(RingAlive(8, 0, heard, at, at[0], comm, now, n0, dead) == false);
+    CHECK(dead[8] != 0);
+    CHECK(RingAlive(8, 0, heard, at, at[8], comm, now, n0, dead) == false);
 
     heard[8] = now;
     CHECK(RingAlive(8, 0, heard, at, at[0], comm, now, n0, dead) == true);
+    CHECK(dead[8] == 0);
 }
 
 static void TestYieldHorizonIsRemainingFlight() {
@@ -793,8 +750,8 @@ int main() {
     TestArenaAllowsADiveIntercept();
     TestProNavDoesNotBrakeAlongTheLos();
     TestCollisionCourseCutsOffACrossingInbound();
-    TestStationBisectsTheGap();
-    TestSilentNeighbourIsGoneEvenFar();
+    TestStationEvensTheLiveRing();
+    TestHeardSilenceIsDeadEverywhere();
     TestApproachingFarSilenceDoesNotKill();
     TestYieldHorizonIsRemainingFlight();
     TestStalkAimLeadsNotPursues();

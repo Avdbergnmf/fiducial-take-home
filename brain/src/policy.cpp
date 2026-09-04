@@ -92,7 +92,9 @@ void Policy::Configure(const Config& cfg, Rng rng) {
 
     // Ring sizing: neighbours must be able to hear each other, so spacing is
     // driven by comm_radius, and the ring must sit outside the asset radius.
-    // Survivors bisect the gap left by a neighbour that falls silent (D21).
+    // Survivors even out over the live roster (D56). Heartbeats hop, so
+    // that roster is a fleet fact. Radius still shrinks with CountLive so
+    // the neighbour chord stays inside sense (D21).
     //
     // The standoff and the gap rule are ONE decision, not two. Meeting a
     // hostile further out is paid straight into the score -- W_kill scales
@@ -364,28 +366,21 @@ bool SlotAlive(uint32_t drone_id, uint32_t self_id, const float* heard, float no
 bool RingAlive(uint32_t drone_id, uint32_t self_id, const float* heard,
                const Vec3* heard_at, const Vec3& self_pos, float comm_radius,
                float now, uint32_t fleet_size, uint8_t* confirmed_dead) {
+    (void)heard_at;
+    (void)self_pos;
+    (void)comm_radius;
     (void)fleet_size;
     if (SlotAlive(drone_id, self_id, heard, now)) {
         if (confirmed_dead != nullptr && drone_id < kMaxFleet)
             confirmed_dead[drone_id] = 0;
         return true;
     }
-    if (drone_id >= kMaxFleet || heard_at == nullptr) return false;
-
-    const float dx = heard_at[drone_id].x - self_pos.x;
-    const float dy = heard_at[drone_id].y - self_pos.y;
-    const bool now_in_range = (dx * dx + dy * dy) <= comm_radius * comm_radius;
-    if (now_in_range) {
-        // Nearby silence. Latch so flying out of the stale bubble does not
-        // resurrect them and reverse the slide (D37).
-        if (confirmed_dead != nullptr) confirmed_dead[drone_id] = 1;
-        return false;
-    }
-    // Far silence: interceptor / opposite-side radio loss, unless we already
-    // confirmed the death from inside the bubble.
-    if (confirmed_dead != nullptr && confirmed_dead[drone_id] != 0)
-        return false;
-    return true;
+    // Heard them, then silence. Hopped heartbeats (D56) reach the far side
+    // of the ring, so "out of radio" is no longer an excuse to keep a ghost
+    // station. Latch so a gap in the flood cannot resurrect them.
+    if (drone_id >= kMaxFleet) return false;
+    if (confirmed_dead != nullptr) confirmed_dead[drone_id] = 1;
+    return false;
 }
 
 uint32_t CountLive(uint32_t fleet_size, uint32_t self_id, const float* heard,
@@ -437,48 +432,21 @@ uint32_t LiveId(uint32_t rank, uint32_t fleet_size, uint32_t self_id,
     return self_id;
 }
 
-/// Where drone `id` should stand, in bearing, given only who WE can hear.
-///
-/// D19 re-spaced by global rank: index among the live, spread over CountLive
-/// slots. That needs a liveness vector no drone has. On s2 the ring chord puts
-/// only +/-2 neighbours inside comm_radius and max_hops_observed is 1, so each
-/// drone re-indexes against a different, mostly-stale roster; measured, the
-/// survivors rotate a couple of degrees and a 93 deg hole stays open (three
-/// adjacent slots died to rams, the next hostile came in at its centre).
-///
-/// Bisect instead. Walk out from our own slot in both directions to the first
-/// drone we still believe is flying, and stand at the midpoint of that gap.
-/// Uses nothing beyond the neighbours we can actually hear. A nearby death
-/// latches (D37), so leaving the stale bubble cannot flip the bitmap and
-/// reverse the slide. A fixed point when nobody has died. Neighbours of the
-/// hole slide in, their neighbours follow, and the ring closes by diffusion
-/// rather than by consensus.
+/// Where drone `id` should stand. Equal bearings among RingAlive ids
+/// (D56). Heartbeats hop, so the live set is a fleet fact, not a radio
+/// neighbourhood. Full strength is a fixed point (rank == id). A death
+/// re-ranks everyone; the 2-slot cap on gap bisection is gone — that is
+/// why s2 never evened out.
 float StationBearing(uint32_t id, uint32_t fleet_size, uint32_t self_id,
                      const float* heard, const Vec3* heard_at,
                      const Vec3& self_pos, float comm_radius, float now,
                      uint8_t* confirmed_dead) {
     const uint32_t n = fleet_size > 0 ? fleet_size : 1;
-    const float step = 2.0f * kPi / static_cast<float>(n);
-    const float base = step * static_cast<float>(id % n);
-    if (n < 3) return base;
-
-    uint32_t up = 1, down = 1;
-    while (up < n && !RingAlive((id + up) % n, self_id, heard, heard_at,
-                                self_pos, comm_radius, now, fleet_size,
-                                confirmed_dead)) ++up;
-    while (down < n && !RingAlive((id + n - down) % n, self_id, heard,
-                                  heard_at, self_pos, comm_radius, now,
-                                  fleet_size, confirmed_dead)) ++down;
-    // Alone, or the two searches met on the same drone: no gap to bisect.
-    if (up >= n || down >= n || up + down >= n) return base;
-
-    float shift = 0.5f * (static_cast<float>(up) - static_cast<float>(down)) * step;
-    // A picket that walks further than two slots has stopped covering its own
-    // sector to cover someone else's.
-    const float cap = 2.0f * step;
-    if (shift > cap) shift = cap;
-    if (shift < -cap) shift = -cap;
-    return base + shift;
+    const uint32_t live = CountLive(n, self_id, heard, heard_at, self_pos,
+                                    comm_radius, now, confirmed_dead);
+    const uint32_t rank = LiveRank(id, n, self_id, heard, heard_at, self_pos,
+                                   comm_radius, now, confirmed_dead);
+    return 2.0f * kPi * static_cast<float>(rank) / static_cast<float>(live);
 }
 
 Vec3 StationAt(float bearing, const Vec3& centre, float radius, float altitude) {
@@ -540,15 +508,22 @@ bool Policy::FacingReceding(uint32_t facing, const Track& hostile,
 
 bool Policy::OwnsInbound(const Track& t, const TrackStore& store,
                          const swarm::Observation& obs) const {
-    // Allocation stays on the original id ring: facing slot, then first
-    // live clockwise (D15). Stations re-space (D19); who may spend does not,
-    // so a ghost far-side silence cannot hand the inbound to nobody.
-    // D35: if that facing drone is flying away from the inbound, the
-    // clockwise neighbour is the one who can still catch it.
-    const uint32_t facing = FacingSlot(t.position, cfg_.asset, cfg_.fleet_size);
-    const bool receding = FacingReceding(facing, t, store, obs);
-    return InboundOwner(facing, cfg_.fleet_size, cfg_.drone_id, heard_,
-                        obs.time(), receding) == cfg_.drone_id;
+    // Stations and ownership share the live ring (D56). Facing slot among
+    // CountLive equally spaced stations, then that LiveId. A receding owner
+    // yields one step clockwise on the live ring (D35).
+    const float now = obs.time();
+    const uint32_t live = CountLive(cfg_.fleet_size, cfg_.drone_id, heard_,
+                                    heard_at_, obs.position(), cfg_.comm_radius,
+                                    now, nullptr);
+    uint32_t face = FacingSlot(t.position, cfg_.asset, live);
+    uint32_t owner = LiveId(face, cfg_.fleet_size, cfg_.drone_id, heard_,
+                            heard_at_, obs.position(), cfg_.comm_radius, now,
+                            nullptr);
+    if (FacingReceding(owner, t, store, obs))
+        owner = LiveId(face + 1, cfg_.fleet_size, cfg_.drone_id, heard_,
+                       heard_at_, obs.position(), cfg_.comm_radius, now,
+                       nullptr);
+    return owner == cfg_.drone_id;
 }
 
 namespace {
@@ -736,10 +711,17 @@ Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) 
     for (const Track& t : store.tracks()) {
         if (t.belief != Belief::Hostile) continue;
         if (OwnsInbound(t, store, obs)) continue;
-        const uint32_t facing = FacingSlot(t.position, cfg_.asset, cfg_.fleet_size);
-        const bool receding = FacingReceding(facing, t, store, obs);
-        const uint32_t owner = InboundOwner(facing, cfg_.fleet_size, cfg_.drone_id,
-                                            heard_, now, receding);
+        const uint32_t live = CountLive(
+            cfg_.fleet_size, cfg_.drone_id, heard_, heard_at_,
+            obs.position(), cfg_.comm_radius, now, confirmed_dead_);
+        const uint32_t face = FacingSlot(t.position, cfg_.asset, live);
+        uint32_t owner = LiveId(face, cfg_.fleet_size, cfg_.drone_id, heard_,
+                                heard_at_, obs.position(), cfg_.comm_radius,
+                                now, confirmed_dead_);
+        if (FacingReceding(owner, t, store, obs))
+            owner = LiveId(face + 1, cfg_.fleet_size, cfg_.drone_id, heard_,
+                           heard_at_, obs.position(), cfg_.comm_radius, now,
+                           confirmed_dead_);
         const Vec3 owner_slot = StationAt(
             StationBearing(owner, cfg_.fleet_size, cfg_.drone_id, heard_,
                            heard_at_, obs.position(), cfg_.comm_radius, now,
@@ -779,7 +761,7 @@ bool Policy::ShouldCommit(const Track& t, const TrackStore& store,
     if (closing < kMinClosing) return false;
 
     // Stationary t_meet (range/closing) is the picket waiting for them.
-    // After a death the live ring slides into the hole (D19); still count
+    // After a death the live ring re-ranks (D56); still count
     // cruise along the line of sight if we are not yet on the new station.
     // extra = cruise - toward used to CANCEL an outbound velocity and treat
     // a reverse as free. A drone sliding away from the inbound (D19 respace)
@@ -1062,10 +1044,10 @@ void Policy::Compose(Outbox<24>& outbox, TrackStore& store,
 
     // Claims stay off the wire. D11: unread Claims won the one frame/tick,
     // interceptors went silent, neighbours stacked. G4 allocation is
-    // UniqueOwner (facing slot, then first live clockwise) plus a closer
+    // UniqueOwner on the live ring (D56) plus a closer
     // chaser abort — radio-free, so two drones cannot disagree on a dropped
-    // Claim. Stations re-space on nearby death (D19). Heartbeat remains
-    // the highest priority.
+    // Claim. Stations even over that same live roster. Heartbeat remains
+    // the highest priority; relays of it sit at kPrioRelay.
 
     outbox.Expire(now, 2.0f);
 }

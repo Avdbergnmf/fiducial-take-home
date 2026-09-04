@@ -62,9 +62,12 @@ version, unknown type, overflow, and garbage that must not read past `len`.
 
 **Header (10 bytes):** version, type, origin, hops, seq, sent_time.
 `hops` is incremented by each relay; origin/seq/`sent_time` stay the author's.
-Cap 4 on TrackReport and Ray (D18 / D52). Heartbeats are not forwarded.
+Cap 4 on TrackReport, Ray, and Heartbeat (D18 / D52 / D56). Hop-0
+heartbeats are still identity (`MarkFriendly`); relays only update the
+live roster.
 
-- **Heartbeat** — claimed position and velocity, 0.125 m quantised. Identity.
+- **Heartbeat** — claimed position and velocity, 0.125 m quantised. Identity
+  on hop 0; hopped so the far side of the ring shares who is still alive.
 - **Track report** — pose, belief, confidence. No `track_id` (observer-local).
   Association is geometry plus time (D14). Says *there is a Hostile here*,
   not *I am going after it*.
@@ -85,13 +88,13 @@ proves only that something transmitted it.
 **s4 — hostiles listen.** Everything we send is in the clear and in range of
 the inbound. Traffic that names which drone is going after which target is
 usable against us. That is why Claim stays off the wire: UniqueOwner is a
-local function of bearing and who we can still hear, so a hostile that
-overhears the radio does not get a map of interceptors. The cost is two
-drones with disagreeing `heard_[]` can both think they own the inbound
-(closer-chaser abort is the backstop). TrackReport and Ray still leak
-*where we think a Hostile is* and *how high the fence sits*. We accepted
-that: without those, s2 never intercepts. Encryption is a later-tier job;
-the trade-off is the design, not a missing flag.
+local function of bearing and the live roster. Hopped heartbeats keep that
+roster in agreement across the radio horizon so s2 can close (D56). The
+cost is leaking *that a friendly is still alive somewhere*, plus TrackReport
+and Ray leaking *where we think a Hostile is* and *how high the fence sits*.
+Closer-chaser abort is the backstop if two drones still disagree for a tick.
+Encryption is a later-tier job; the trade-off is the design, not a missing
+flag.
 
 **Loss and latency are unpublished** (0–20% loss, 1–5 ticks plus jitter).
 Each drone measures them on **hop-0** frames: sequence gaps per origin are
@@ -255,13 +258,15 @@ the *lowest* resident, not the newest arrival — tested. Heartbeat is highest
 because unread Claims used to starve it and neighbours stole intercepts.
 Frames older than 2 s expire unsent.
 
-A TrackReport we have not seen is copied with `hops++` (origin, seq and
-`sent_time` stay the author's) and queued if `hops+1 ≤ 4`. Heartbeats are not
-forwarded: never-heard is already assumed alive, and flooding them is the
-example's naive scheme. Compose reports local Hostiles only; hearsay rides
-the author's frame. `Pump` still will not spend the last 64 bytes.
+A TrackReport, Ray, or Heartbeat we have not seen is copied with `hops++`
+(origin, seq and `sent_time` stay the author's) and queued if
+`hops+1 ≤ 4` (D56). Hop-0 heartbeats still `MarkFriendly`; relays only
+update the live roster. Compose reports local Hostiles only; hearsay
+rides the author's frame. `Pump` still will not spend the last 64 bytes.
 
-s1 comms is **39.3 of 40**. Silence scores 0, so this is not "say nothing".
+s1 comms was **39.3 of 40** before heartbeats hopped. D56 pays a few
+points there (s1 34.3) so the far side of the ring shares who is alive.
+Silence still scores 0, so this is not "say nothing".
 `propagation_p95_s` is the hop metric: a real number means a frame crossed
 more than one radio range. It is not scored; on s2 it is the difference
 between an intercept and a breach.
@@ -308,9 +313,8 @@ collision.
 
 - **s3 will lie.** Hopped TrackReports are trusted. A replay with a plausible
   pose pulls UniqueOwner off the ring.
-- **s2 late pair.** 4/6 (was 3/6). Two dashes still arrive on spent bearings
-  after the local re-space; UniqueOwner does not hand those to a picket who
-  is on the hole but not the clockwise successor.
+- **s2 late pair.** Closed (D56). Heartbeats hop; stations even over the
+  live roster. 6/6, 180.7. A 2-slot local bisection left the hole open.
 - **x2-b never commits.** Strict catchable-fresh is a hole, not a
   tuning miss. D19 does not lower the catchable bar.
 - **x1-a civilians.** 4/4 hostiles, 0 breaches, 2 civilians (−61.1). The
@@ -318,8 +322,10 @@ collision.
 - **No insider handling.** `declare_identity` unused; Accuse unused; a
   plausible heartbeat marks the sender Friendly.
 - **Claims unused.** UniqueOwner plus closer-chaser abort is the substitute.
-  Two drones with disagreeing `heard_[]` can both think they own the inbound.
-  That is the s4 trade: we will not put assignment on a channel hostiles hear.
+  Two drones with a tick of roster lag can both think they own the inbound.
+  Hopped heartbeats (D56) keep that lag to a missed beat, not a radio
+  horizon. That is the s4 trade: we will not put assignment on a channel
+  hostiles hear.
 - **D13 local drop.** Tracks die with the sensor picture. Correct against an
   unpublished `track_drop_time`; it cost ~200 points each on s2, x1-a, x2-a
   until D15 recovered most of it.

@@ -13,12 +13,12 @@ namespace sw {
 
 constexpr uint8_t kProtocolVersion = 1;
 
-/// Hop-limited forward of TrackReport. s2 spawn is 220 m out, comm 75 m, so
-/// three hops crosses the ring; four matches the example and leaves a spare.
-/// Relays sit below original reports and heartbeats so a flood cannot starve
-/// identity (D11) or the seer's own 0.5 s hostile reports (D18). The inbound
-/// ray (D52) sits between heartbeat and routine tracks: identity first, then
-/// the cone, then "I still see it".
+/// Hop-limited forward of TrackReport, Ray, and Heartbeat. s2 spawn is
+/// 220 m out, comm 75 m, so three hops crosses the ring; four matches the
+/// example and leaves a spare. Relays sit below original reports and
+/// heartbeats so a flood cannot starve identity (D11) or the seer's own
+/// 0.5 s hostile reports (D18). Heartbeats hop so the far side of the
+/// ring shares a live roster (D56); hop-0 is still identity (MarkFriendly).
 constexpr uint8_t kMaxHops = 4;
 constexpr uint8_t kPrioRelay = 2;
 constexpr uint8_t kPrioRay = 4;
@@ -241,7 +241,7 @@ struct ClaimMsg {
 
 /// Linear inbound cone, same units as InboundRay: altitude = h0 + slope · r.
 /// Hopped like TrackReport so the far side of the ring can sit on the cone
-/// before that hostile is in sense (D52). Heartbeats do not hop.
+/// before that hostile is in sense (D52). Heartbeats hop too (D56).
 struct RayMsg {
     float h0 = 0.0f;
     float slope = 0.0f;

@@ -142,14 +142,25 @@ private:
                     sw::HeartbeatMsg m;
                     m.Read(r);
                     if (!r.ok()) break;
-                    // Range is measured at reception; the payload is as-sent.
-                    // Extrapolate so association is not 8 m behind a 16 m/s mate.
                     float age = now - h.sent_time;
                     if (age < 0.0f) age = 0.0f;
+                    if (h.hops > 0 && age > links_.StaleAfter()) break;
                     const sw::Vec3 predicted = m.position + m.velocity * age;
                     NotePeer(h.origin, predicted, now);
-                    store_.MarkFriendly(predicted, obs.position(),
-                                        f.range, f.range_sigma, now);
+                    // Measured range is to the transmitter. Only hop-0 is
+                    // the origin; a relay would fail HeartbeatPlausible and
+                    // smear identity onto the neighbour (D56).
+                    if (h.hops == 0) {
+                        store_.MarkFriendly(predicted, obs.position(),
+                                            f.range, f.range_sigma, now);
+                    }
+                    if (h.hops + 1u <= sw::kMaxHops) {
+                        uint8_t relayed[SW_MTU];
+                        if (sw::RelayCopy(f.data, f.len, relayed, sizeof(relayed),
+                                          static_cast<uint8_t>(h.hops + 1u))) {
+                            outbox_.Push(relayed, f.len, sw::kPrioRelay, now);
+                        }
+                    }
                     break;
                 }
                 case sw::MsgType::TrackReport: {
