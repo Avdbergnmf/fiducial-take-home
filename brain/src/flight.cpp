@@ -407,19 +407,19 @@ Vec3 DesiredAccel(Mode mode, const Vec3& position, const Vec3& velocity,
 
 float DesiredYaw(Mode mode, const Vec3& position, const Vec3& velocity,
                  const Vec3& asset, const Track* focus) {
-    const bool along_velocity = Intercepting(mode) || mode == Mode::Stalking;
-    if (!along_velocity) {
-        if (focus && (mode == Mode::Watching || mode == Mode::Forming)) {
-            return std::atan2(focus->position.y - position.y,
-                              focus->position.x - position.x);
-        }
-        const float dx = position.x - asset.x;
-        const float dy = position.y - asset.y;
-        if (dx * dx + dy * dy > 1.0f)
-            return std::atan2(dy, dx);
+    // ACCEL_NED translation is tilt, not yaw. Heading is cosmetic except
+    // as a cue: watching looks at the inbound; everyone else who is moving
+    // looks along velocity (orbit tangent on station, LOS on a chase).
+    if (focus && (mode == Mode::Watching || mode == Mode::Forming)) {
+        return std::atan2(focus->position.y - position.y,
+                          focus->position.x - position.x);
     }
     if (swarm::LengthSq(velocity) > 1.0f)
         return std::atan2(velocity.y, velocity.x);
+    const float dx = position.x - asset.x;
+    const float dy = position.y - asset.y;
+    if (dx * dx + dy * dy > 1.0f)
+        return std::atan2(dy, dx);
     return 0.0f;
 }
 
@@ -496,8 +496,9 @@ Vec3 EnforceSeparation(const Vec3& desired, const Vec3& position, const Vec3& ve
 }
 
 Vec3 EnforceArena(const Vec3& desired, const Vec3& position, const Vec3& velocity,
-                  const Config& cfg, bool ground_only) {
+                  const Config& cfg, bool ground_only, bool hard_floor) {
     constexpr float kSlack = 2.0f;
+    constexpr float kHardSlack = 5.0f;
     Vec3 push;
 
     auto wall = [&](float p, float lo, float hi, float v, float bound, float& out) {
@@ -516,18 +517,37 @@ Vec3 EnforceArena(const Vec3& desired, const Vec3& position, const Vec3& velocit
              cfg.lateral_limit, push.x);
         wall(position.y, cfg.arena_min.y, cfg.arena_max.y, velocity.y,
              cfg.lateral_limit, push.y);
-        // NED: z is down. arena_min.z is the ceiling, arena_max.z is the ground.
-        wall(position.z, cfg.arena_min.z, cfg.arena_max.z, velocity.z,
+        // NED: z is down. arena_min.z is the ceiling. Floor is handled below
+        // so hard_floor can replace az instead of blending with a dive.
+        wall(position.z, cfg.arena_min.z, 1.0e9f, velocity.z,
              cfg.max_accel, push.z);
-    } else {
-        // Floor only. Same stopping-distance band, and the ceiling half of
-        // the z wall is deliberately absent: climbing is never fatal.
-        const float p = position.z, v = velocity.z, hi = cfg.arena_max.z;
-        float stop_hi = kSlack;
-        if (cfg.max_accel > 0.1f && v > 0.1f)
-            stop_hi = (v * v) / (2.0f * cfg.max_accel) + kSlack;
-        if (p > hi - stop_hi) push.z -= (p - (hi - stop_hi)) * 0.5f + v * 0.8f;
     }
+
+    const float p = position.z;
+    const float v = velocity.z;
+    const float hi = cfg.arena_max.z;
+    const float a = cfg.max_accel > 0.1f ? cfg.max_accel : 15.0f;
+
+    if (hard_floor) {
+        float stop = kHardSlack;
+        if (v > 0.1f) stop = (v * v) / (2.0f * a) + kHardSlack;
+        if (p > hi - stop) {
+            const float z_goal = hi - stop;
+            float az = (z_goal - p) * 4.0f - v * 4.0f;
+            if (az > 0.0f) az = 0.0f;
+            if (az < -a) az = -a;
+            Vec3 out = desired;
+            out.x += push.x;
+            out.y += push.y;
+            out.z = az;
+            return LimitAccel(out, cfg);
+        }
+    }
+
+    float stop_hi = kSlack;
+    if (a > 0.1f && v > 0.1f)
+        stop_hi = (v * v) / (2.0f * a) + kSlack;
+    if (p > hi - stop_hi) push.z -= (p - (hi - stop_hi)) * 0.5f + v * 0.8f;
 
     if (swarm::LengthSq(push) < 1e-6f) return desired;
     return LimitAccel(desired + push, cfg);

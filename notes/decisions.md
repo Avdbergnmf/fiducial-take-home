@@ -3041,3 +3041,161 @@ measure against the shared `kOrbitRate·now` and pass at any rate. Added: the
 de-spin round-trip over four phases, that a hit outranks a miss and the sooner
 hit wins, and that 25 m of vertical offset scores better than 25 m of lateral.
 Determinism re-checked with the orbit on, threads 1 → 8, 5/5.
+
+---
+
+## D67 — Receding incumbent: equal t_go is a handoff
+
+x2-fa56ef171718281fef54383d2dba36d6 still breached at 17.85 s under D66.
+Drone 1 (facing slot) committed at 12.54, passed the hostile at 1.4 m
+(kill 1.157), aborted `uncatchable`, and nobody else was allowed to try.
+
+Geometry at that tick, scored with the same `SolveCollisionCourse` the
+ram flies:
+
+| drone | bearing | TowardTarget | InterceptScore |
+|---|---:|---:|---:|
+| 1 (facing) | 78° | −1.2 m/s | **2.80** (hit) |
+| 0 (neighbour) | 43° | **+3.8 m/s** | **2.80** (hit) |
+
+Both connect in the same discrete t_go bin. The 1.0 s `kHandoffMargin`
+then keeps the incumbent. That is exactly the case the orbit exists for
+— the facing drone's tangential velocity is square across the corridor,
+the neighbour is already moving toward the intercept — and the margin
+was sized for a different failure (D65 thrash between two *approaching*
+drones whose heartbeats flicker a tenth of a second).
+
+`BeatsIncumbent` waives the 1 s tax when the incumbent's last-broadcast
+velocity is receding from the track. Equal or better score takes it.
+Two approaching drones still pay the full margin. `BestInterceptor`
+breaks a t_go tie on toward so the challenger is the closing neighbour
+even when it has the higher id.
+
+Yaw on station follows velocity when moving (orbit tangent). Under
+`ACCEL_NED` translation is tilt; heading is a cue.
+
+### Measured
+
+This id: **−112.6, 2/3, 1 breach → +83.9, 3/3, 0 breach.** Drone 0
+commits at 13.07 `hand=1 s=2.80 si=2.80` (peer from origin 1) and rams
+at 16.43.
+
+Identity 8: mean **148.4**, 0 breaches, all 8 survived. x1-a still 2
+civilians (the pair-floor case, not new). Hard canary
+`x1-06b926af3deab4600494418d7ece5944` still 2/3 −113.4.
+
+**Cost accepted:** a receding facing drone can lose a knife-edge shot it
+would have made. The measured miss here was 1.4 m against a 1.16 m kill.
+
+---
+
+## D68 — Kill-envelope floor on the picket; hard ground unless ramming
+
+x2-02e2bfe568984ac0eef01b9c2569dec7: the fitted cone walked the ring
+from 25 m down to **8 m** (ray `h0≈−2, slope≈0.20` at R=49 m). The
+kill-envelope bracelet sits at `atan(8/49) ≈ 9°` — the overlay's
+horizon cell — and half the from-rest Reach pancake is underground.
+Drone 13 was at 5.7 m AGL around t=61. D64 already named the remaining
+ground deaths: they happen **on station**, where the 0.5/0.8 PD is a
+suggestion `GoTo` toward that low slot can out-vote. max_accel on this
+id is only 13.3.
+
+**Altitude floor.** A fitted ray may not pull the station below
+`PicketFloorAltitude(R)`:
+
+```
+max( kRayFloorAlt,
+     R · tan(10°),                              bracelet off the horizon
+     0.5 · Reach(sense/maxv, lat, maxv) )       half the Cover pancake
+```
+
+clamped to the 25 m default. 10° is two cells up the overlay's 0–40°
+grid. Divert is `lat`, same as CoverCloses / the kill-envelope cue.
+On this layout that is ~17 m rather than 8.
+
+Not D54 (default 20/12 wash) and not "never lower" — the cone still
+drops from 25 onto the inbound, just not onto the dirt.
+
+**Hard floor.** `EnforceArena(..., hard_floor)` for every mode except
+Ramming: inside `v²/(2 max_accel) + 5 m`, **replace** az, never command
+down. Scramble included (user: not in Ramming). Rams keep D64's soft
+blend so a live intercept is not forfeited.
+
+**Handoff knobs.** `kHandoffMargin` is seconds of InterceptScore.
+`kHandoffAspect` is m/s of TowardTarget on a receding tied bin
+(default 0.5). Both in `policy.h`. The seconds tax is the
+heartbeat-thrash control; do not set it to 0. Default was 1.0 until
+D69 measured 0.25.
+
+### Measured
+
+This id: **5/5, 0 wasted**, ring holds **alt=16.8** at R=49 (was 8 m).
+Score 172.3 → 174.6. Identity 8: mean **148.4 → 150.7**, 0 breaches,
+x1-a still 2 civilians. Hard canary still 2/3 −113.4.
+
+---
+
+## D69 — `kHandoffMargin` is 0.25 s, measured
+
+D65 sized the approaching-incumbent tax at 1.0 s after a bare comparison
+lost 13 airframes to heartbeat thrash. D67 then waived that tax for a
+*receding* incumbent on a tied t_go bin (`kHandoffAspect`), which is the
+orbit case. The 1.0 s number itself was never swept against the score
+that actually uses it: `InterceptScore` (discrete t_go when both
+connect, ~0.4 s bins near 2.8 s).
+
+Grid: **0 / 0.25 / 0.5 / 0.75 / 1.0 / 1.5 / 2.0**. `kHandoffAspect`
+held at 0.5. Same brain otherwise.
+
+### Named 11 (identity 8 + canary + fa56 + 02e2)
+
+Flat. Receding equal-bin handoff is `kHandoffAspect`, so fa56 stays
+3/3 at every value including 0.
+
+| margin | n=11 mean | identity 8 | fa56 | 02e2 | canary | breach / wasted / pf |
+|---|---:|---:|---:|---:|---:|---|
+| 0.0 | 122.5 | 150.7 | 83.5 3/3 | 171.5 5/5 | −113.4 2/3 | 1 / 0 / 0 |
+| 0.25 | 122.7 | 150.7 | 83.5 | 174.4 | −113.4 | 1 / 0 / 0 |
+| 0.5–0.75 | 122.7 | 150.7 | 83.5 | ~174.5 | −113.4 | 1 / 0 / 0 |
+| **1.0** | **122.8** | 150.7 | 83.5 | 174.6 | −113.4 | 1 / 0 / 0 |
+| 1.5 | 122.8 | 150.7 | 83.5 | 174.5 | −113.4 | 1 / 0 / 0 |
+| 2.0 | 122.7 | 150.7 | 83.5 | 174.5 | −113.4 | 1 / 0 / 0 |
+
+Canary is still D44. Do not reverse it.
+
+### Fresh 24, one token list (8 t1 + 16 t2)
+
+This is the discriminating set. Tokens in `runs/margin-sweep/fresh-ids.txt`.
+
+| margin | mean | t1 | t2 | worst (x2-ebbfbb…) | civ | breach | wasted | pf |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 0.0 | 48.8 | 102.1 | 22.2 | −1283.1 (9 civ) | 11 | **4** | 1 | 0 |
+| **0.25** | **68.9** | 101.5 | **52.6** | **−982.0 (7 civ)** | **9** | 3 | 1 | 0 |
+| 0.5 | 56.7 | 101.6 | 34.2 | −1281.8 (9 civ) | 11 | 3 | 1 | 0 |
+| 1.0 | 53.6 | 101.0 | 29.8 | −1282.6 (9 civ) | 11 | 3 | **2** | 0 |
+| 1.5 | 54.5 | 98.8 | 32.4 | −1282.0 (9 civ) | 11 | 3 | 1 | 0 |
+| 2.0 | 53.7 | 98.8 | 31.1 | −1321.6 (9 civ) | 11 | 3 | **2** | 0 |
+
+Movers:
+
+- `x2-d2c10eb0e2c4b816439a887a9a2735b7`: margin 0 → **2/3 −128.8
+  breach**; ≥0.25 → **3/3 ~+71–88**. Zero re-opens the extra kill D65
+  named.
+- `x2-ebbfbb453a0af576c1f78185793af103`: 4/4 hostiles, asset survived,
+  score is civilians. Only 0.25 is 7 lost; every other value is 9.
+- `x2-e23ef580fdeee36390b0ba497442bb22`: 0.5 best (~139); 1.0 drops to
+  67.2 with **wasted=1**.
+
+Dropping ebbfbb, 0.25 and 0.5 tie (~114.6 vs 114.8) and both beat 1.0
+(111.7). p10 is −131.5 at every value. pf=0 on this draw — D65's
+13-airframe thrash did not reproduce, including at 0.
+
+**Ship 0.25.** Best full mean, best t2, fewest civilians, closes the
+0.0 breach, identity / canary / fa56 unchanged. 0.5 is the conservative
+neighbour if the 2-civilian swing on ebbfbb is luck; 1.0 is strictly
+worse on fresh t2 with no identity gain.
+
+**Caveat.** 0.25 is less than one t_go bin (~0.4 s near 2.8), so a bin
+flicker can still swap two *approaching* incumbents. This draw did not
+show that. 0.25 is measured better than 1.0 here, not a proof D65
+cannot return. Do not set the tax to 0.

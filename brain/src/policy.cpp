@@ -194,6 +194,25 @@ float ComputePicketRadius(const Config& cfg, uint32_t live_count,
     return ClampToClosedCover(cfg, radius, altitude, count, floor_r);
 }
 
+float ComputePicketFloor(const Config& cfg, float radius) {
+    float t = 3.0f;
+    if (cfg.max_speed > 0.1f && cfg.sense_radius > 1.0f)
+        t = cfg.sense_radius / cfg.max_speed;
+    const float a = cfg.lateral_limit > 0.1f ? cfg.lateral_limit : 6.7f;
+    const float vmax = cfg.max_speed > 0.1f ? cfg.max_speed : 20.0f;
+    const float pancake = kEnvelopeFloorFrac * CoverReach(t, a, vmax);
+
+    constexpr float kDeg = 3.14159265358979f / 180.0f;
+    float bracelet = 0.0f;
+    if (radius > 1.0f)
+        bracelet = radius * std::tan(kEnvelopeMinElevDeg * kDeg);
+
+    float h = pancake > bracelet ? pancake : bracelet;
+    if (h < kRayFloorAlt) h = kRayFloorAlt;
+    if (h > kRayDefaultAlt) h = kRayDefaultAlt;
+    return h;
+}
+
 /// Scoring hook, and the only channel the viewer has for "this drone called
 /// enemy." Intercept still uses Track.belief. Local Friendly and Hostile
 /// only — hearsay is skipped at the call site (track_id 0). Wreckage and
@@ -210,6 +229,10 @@ SwClass PublishedClass(const Track& t) {
 
 float PicketRadius(const Config& cfg, uint32_t live_count, float altitude) {
     return ComputePicketRadius(cfg, live_count, altitude);
+}
+
+float PicketFloorAltitude(const Config& cfg, float radius) {
+    return ComputePicketFloor(cfg, radius);
 }
 
 void Policy::Configure(const Config& cfg, Rng rng) {
@@ -351,7 +374,8 @@ void Policy::ObserveInbounds(const TrackStore& store, float dt) {
 void Policy::ApplyRayAltitude() {
     if (!ray_.ready()) return;
     float h = ray_.HeightAt(ring_radius_);
-    if (h < kRayFloorAlt) h = kRayFloorAlt;
+    const float floor_h = PicketFloorAltitude(cfg_, ring_radius_);
+    if (h < floor_h) h = floor_h;
     if (h > kRayCapAlt) h = kRayCapAlt;
     ring_altitude_ = h;
 }
@@ -692,6 +716,22 @@ float InterceptScore(const Vec3& position, const Vec3& velocity,
     return (c.miss <= kill) ? c.t_go : kNoHit + c.miss;
 }
 
+bool BeatsIncumbent(float challenger_score, float incumbent_score,
+                    float challenger_toward, float incumbent_toward) {
+    // Score gap is always `kHandoffMargin` seconds. Receding incumbent
+    // with a tied t_go bin is the orbit case: the facing drone's
+    // tangential v is square across the corridor, so equal score is a
+    // handoff if the neighbour is actually closing (D67). `kHandoffAspect`
+    // is the noise floor on that toward comparison.
+    if (challenger_score + kHandoffMargin < incumbent_score + 1.0e-3f)
+        return true;
+    if (incumbent_toward < 0.0f &&
+        challenger_score <= incumbent_score + 1.0e-3f &&
+        challenger_toward > incumbent_toward + kHandoffAspect)
+        return true;
+    return false;
+}
+
 float Policy::ScoreFor(uint32_t id, const Track& t,
                        const swarm::Observation& obs) const {
     if (id >= kMaxFleet || heard_[id] <= 0.0f) return 2.0f * kNoHit;
@@ -703,18 +743,38 @@ float Policy::ScoreFor(uint32_t id, const Track& t,
     return InterceptScore(p, heard_vel_[id], t.position, t.velocity, cfg_);
 }
 
+float Policy::TowardFor(uint32_t id, const Track& t,
+                        const swarm::Observation& obs) const {
+    if (id >= kMaxFleet || heard_[id] <= 0.0f) return 0.0f;
+    float age = obs.time() - heard_[id];
+    if (age < 0.0f) age = 0.0f;
+    const Vec3 p = heard_at_[id] + heard_vel_[id] * age;
+    return TowardTarget(p, heard_vel_[id], t.position);
+}
+
 uint32_t Policy::BestInterceptor(const Track& t,
                                  const swarm::Observation& obs) const {
     const float now = obs.time();
     const uint32_t n = cfg_.fleet_size < kMaxFleet ? cfg_.fleet_size : kMaxFleet;
     uint32_t best_id = cfg_.drone_id;
     float best = 1.0e30f;
+    float best_toward = -1.0e30f;
     for (uint32_t id = 0; id < n; ++id) {
         if (!RingAlive(id, cfg_.drone_id, heard_, heard_at_, obs.position(),
                        cfg_.comm_radius, now, cfg_.fleet_size, nullptr))
             continue;
         const float c = ScoreFor(id, t, obs);
-        if (c < best - 1.0e-3f) { best = c; best_id = id; }
+        const float toward = TowardFor(id, t, obs);
+        // Same t_go bin: the one already closing is the orbit's point.
+        // 0.5 m/s so a beat of pose noise does not swap two similar aspects.
+        const bool sooner = c < best - 1.0e-3f;
+        const bool same_better_aspect =
+            std::fabs(c - best) <= 1.0e-3f && toward > best_toward + 0.5f;
+        if (sooner || same_better_aspect) {
+            best = c;
+            best_toward = toward;
+            best_id = id;
+        }
     }
     return best_id;
 }
@@ -751,7 +811,10 @@ bool Policy::OwnsInbound(const Track& t, const TrackStore& store,
     if (kHandoff) {
         const uint32_t challenger = BestInterceptor(t, obs);
         if (challenger != owner &&
-            ScoreFor(challenger, t, obs) < ScoreFor(owner, t, obs) - kHandoffMargin)
+            BeatsIncumbent(ScoreFor(challenger, t, obs),
+                           ScoreFor(owner, t, obs),
+                           TowardFor(challenger, t, obs),
+                           TowardFor(owner, t, obs)))
             owner = challenger;
     }
     return owner == cfg_.drone_id;

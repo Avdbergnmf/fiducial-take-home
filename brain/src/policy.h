@@ -43,20 +43,35 @@ uint32_t FacingSlot(const Vec3& position, const Vec3& asset, uint32_t count,
 /// Cost is centripetal, v^2/R out of the 6.71 m/s^2 lateral budget: at R = 25 m
 /// even 4 m/s is 0.64 m/s^2. Small rings punish this much harder than the 90 m
 /// ring this was first tried on.
-constexpr float kOrbitRate = 0.0f;
+constexpr float kOrbitRate = 0.06f;
 
 /// Hand an inbound to the drone with the best intercept solution rather than
 /// to the one facing it. Off restores the facing-slot rule exactly.
 constexpr bool kHandoff = true;
 
-/// Seconds of score a challenger must beat the incumbent by before ownership
-/// moves. The facing drone stays the incumbent, so this is an override on the
-/// proven rule, not a replacement.
+/// Seconds of InterceptScore a challenger must beat the facing incumbent
+/// by. The unit is the score itself: `t_go` when both connect, `kNoHit +
+/// leftover miss` when they do not.
 ///
-/// It has to be "much better", not "better". With a bare comparison two
-/// near-equal candidates trade the track every time a heartbeat lands; an
-/// earlier build lost 13 airframes on one id to exactly that thrash (D66).
-constexpr float kHandoffMargin = 1.0f;
+/// Measured D69: 0 / 0.25 / 0.5 / 0.75 / 1.0 / 1.5 / 2.0 on the identity 8
+/// plus canary / fa56 / 02e2 (flat), then the same values on 24 fresh ids
+/// (8 t1 + 16 t2, one token list). 0.25 is the peak. 0 re-opens a breach
+/// D65 named; 1.0 is strictly worse on fresh t2 with no identity gain.
+/// Receding-incumbent ties are NOT this tax — they use `kHandoffAspect`.
+constexpr float kHandoffMargin = 0.25f;
+
+/// m/s of TowardTarget a challenger must beat a receding incumbent by to
+/// take a tied InterceptScore. Heartbeat dead-reckon jitters toward by
+/// a few tenths; 0.5 m/s is above that and well below the ~5 m/s gap
+/// between a tangent facing drone and its already-closing neighbour (D67).
+constexpr float kHandoffAspect = 0.5f;
+
+/// True when the challenger's InterceptScore (lower is better) takes the
+/// inbound from the facing incumbent. Score win: must beat by
+/// `kHandoffMargin` seconds. Receding incumbent, same t_go bin: also if
+/// the challenger is closing faster by `kHandoffAspect`.
+bool BeatsIncumbent(float challenger_score, float incumbent_score,
+                    float challenger_toward, float incumbent_toward);
 
 /// How well a drone at (position, velocity) can intercept a target, in
 /// seconds. LOWER IS BETTER. Two regimes:
@@ -87,6 +102,21 @@ constexpr float kNoHit = 1000.0f;
 /// kill-envelope bracelet. Never grows past those caps.
 float PicketRadius(const Config& cfg, uint32_t live_count,
                    float altitude = kRayDefaultAlt);
+
+/// Lowest station height that still keeps the kill-envelope bracelet off
+/// the dirt. Two cuts, both the Cover model the overlay draws:
+///
+///   1. `R · tan(kEnvelopeMinElevDeg)` — the bracelet is not allowed to
+///      sit on the horizon cell (0°) of the 0–40° grid.
+///   2. `kEnvelopeFloorFrac · Reach(sense/maxv, lat, maxv)` — half the
+///      from-rest pancake, using Cover's divert, so the downward lobe is
+///      not mostly buried.
+///
+/// Clamped to `[kRayFloorAlt, kRayDefaultAlt]`. A fitted inbound ray may
+/// not pull the ring below this (D68).
+constexpr float kEnvelopeMinElevDeg = 10.0f;
+constexpr float kEnvelopeFloorFrac = 0.5f;
+float PicketFloorAltitude(const Config& cfg, float radius);
 
 /// True if the other interceptor should keep this inbound. Clearly closer
 /// (2 m) wins regardless of id; similar range, lower fleet id (D38).
@@ -262,13 +292,17 @@ public:
     uint32_t FacingOwner(const Track& t, const TrackStore& store,
                          const swarm::Observation& obs) const;
 
-    /// Live drone with the best InterceptScore for this track. Ties go to the
-    /// lower id so two observers name the same drone.
+    /// Live drone with the best InterceptScore for this track. Equal t_go
+    /// prefers the one already moving toward the inbound; remaining ties
+    /// go to the lower id so two observers name the same drone.
     uint32_t BestInterceptor(const Track& t, const swarm::Observation& obs) const;
 
     /// InterceptScore for one id from its last broadcast pose, dead reckoned.
     /// kNoHit*2 if that id has no pose to score.
     float ScoreFor(uint32_t id, const Track& t, const swarm::Observation& obs) const;
+
+    /// Horizontal closing of that id's last broadcast velocity onto `t`.
+    float TowardFor(uint32_t id, const Track& t, const swarm::Observation& obs) const;
 
     /// A hopped inbound-ray fit. Weight is discounted by hops so a far
     /// rumour cannot overwrite a local cone (D52).

@@ -260,11 +260,12 @@ private:
                                               sw::Intercepting(mode));
         // Leaving the arena is a wasted loss on station, and a ram that can
         // still hit must not be steered around a wall or the ceiling (D48).
-        // The floor is not in that bargain (D64): no hostile is below the
-        // dirt, so pulling up gives up no intercept that was still live.
-        // Uncatchable aborts first.
+        // The floor is not in that bargain (D64). Non-ramming modes get a
+        // hard floor that replaces az in the stopping band (D68): the old
+        // PD was a suggestion GoTo toward a low slot could out-vote.
+        const bool ram = mode == sw::Mode::Ramming;
         accel = sw::flight::EnforceArena(accel, position, velocity, cfg_,
-                                         sw::Intercepting(mode));
+                                         sw::Intercepting(mode), !ram);
 
         last_accel_ = accel;
         LogProximity(obs, target);

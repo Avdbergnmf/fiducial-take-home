@@ -118,8 +118,9 @@ Vec3 DesiredAccel(Mode mode, const Vec3& position, const Vec3& velocity,
                   float dt, const Config& cfg, const Vec3& self_a = {},
                   const Vec3& goal_velocity = {});
 
-/// Yaw for the named mode. Outward on station, at the watch target, or
-/// along velocity when intercepting / stalking.
+/// Yaw for the named mode. Cosmetic under ACCEL_NED (translation is tilt).
+/// Watching / forming-with-focus look at that track; otherwise along
+/// velocity when moving (orbit tangent on station), else outward.
 float DesiredYaw(Mode mode, const Vec3& position, const Vec3& velocity,
                  const Vec3& asset, const Track* focus);
 
@@ -160,8 +161,13 @@ Vec3 EnforceSeparation(const Vec3& desired, const Vec3& position, const Vec3& ve
 /// and no hostile is ever below it -- so a ram diving into the floor is one
 /// whose geometry has already failed, and pulling it up forfeits no intercept
 /// (D64).
+///
+/// `hard_floor` is every mode except Ramming. The soft PD (0.5 / 0.8) is
+/// a suggestion that GoTo toward a low slot can out-vote; the hard floor
+/// *replaces* az in the stopping band and never commands down (D68).
 Vec3 EnforceArena(const Vec3& desired, const Vec3& position, const Vec3& velocity,
-                  const Config& cfg, bool ground_only = false);
+                  const Config& cfg, bool ground_only = false,
+                  bool hard_floor = false);
 
 /// Evenly spaced ring station. `index` is the rank among `count` stations
 /// (drone_id on a full fleet; live rank after a death, D19). No negotiation.

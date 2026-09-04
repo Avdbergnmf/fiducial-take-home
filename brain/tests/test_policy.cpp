@@ -465,6 +465,37 @@ static void TestScoreSeesTheVerticalBudget() {
     CHECK(vertical <= lateral);
 }
 
+static void TestRecedingIncumbentHandsEqualScore() {
+    std::printf("receding incumbent: equal t_go is a handoff, not a score tax (D67)\n");
+    // x2-fa56ef171718281fef54383d2dba36d6 t=12.5: facing drone 1 and the
+    // neighbour already closing both hit in the 2.80 s bin. A score margin
+    // kept the receding facing drone; it passed at 1.4 m and the inbound
+    // breached. Aspect 0.5 m/s is the noise floor on that tie. Approaching
+    // incumbents still pay kHandoffMargin (0.25 s, D69).
+    CHECK(BeatsIncumbent(2.80f, 2.80f, 3.8f, -1.2f));
+    CHECK(!BeatsIncumbent(2.80f, 2.80f, 3.8f, 3.8f));
+    CHECK(!BeatsIncumbent(3.80f, 2.80f, 3.8f, -1.2f));
+    CHECK(BeatsIncumbent(1.70f, 2.80f, 3.8f, 3.8f));
+    CHECK(!BeatsIncumbent(2.80f, 2.80f, -1.1f, -1.2f));
+    CHECK(BeatsIncumbent(2.50f, 2.80f, 3.8f, 3.8f));
+    CHECK(!BeatsIncumbent(2.60f, 2.80f, 3.8f, 3.8f));
+    CHECK(kHandoffMargin > 0.24f && kHandoffMargin < 0.26f);
+    CHECK(kHandoffAspect > 0.2f);
+}
+
+static void TestStationYawFollowsVelocity() {
+    std::printf("station yaw follows velocity when moving; outward when parked\n");
+    const Vec3 pos(80.0f, 0.0f, -25.0f);
+    const Vec3 asset(0.0f, 0.0f, 0.0f);
+    const float moving = flight::DesiredYaw(Mode::Picketing, pos,
+                                            Vec3(0.0f, 4.5f, 0.0f), asset,
+                                            nullptr);
+    CHECK(std::fabs(moving - std::atan2(4.5f, 0.0f)) < 0.05f);
+    const float parked = flight::DesiredYaw(Mode::Picketing, pos, Vec3(),
+                                            asset, nullptr);
+    CHECK(std::fabs(parked) < 0.05f);
+}
+
 static void TestFacingSlotDeSpinsTheOrbit() {
     std::printf("ownership de-spins the ring: a bearing maps to who is there now\n");
     const Vec3 asset(0, 0, 0);
@@ -840,7 +871,30 @@ static void TestRingAltitudeFollowsInboundRay() {
     p.Decide(store, obs);
     CHECK(p.inbound_ray().ready());
     CHECK(p.ring_altitude() < 20.0f);
-    CHECK(p.ring_altitude() > kRayFloorAlt - 0.1f);
+    CHECK(p.ring_altitude() > PicketFloorAltitude(TestCfg(), p.ring_radius()) - 0.2f);
+}
+
+static void TestPicketFloorKeepsTheEnvelopeUp() {
+    std::printf("picket floor keeps the kill-envelope bracelet off the dirt (D68)\n");
+    Config cfg = TestCfg();
+    cfg.sense_radius = 64.4f;
+    cfg.max_speed = 20.4f;
+    cfg.lateral_limit = 6.7f;
+    const float r = 49.1f;
+    const float h = PicketFloorAltitude(cfg, r);
+    CHECK(h > 12.0f);
+    CHECK(h <= kRayDefaultAlt + 1e-3f);
+    CHECK(h > kRayFloorAlt + 1.0f);
+
+    Policy p;
+    p.Configure(cfg, Rng());
+    p.NoteRay(0.0f, 0.0f, 16.0f, /*hops=*/0);
+    TrackStore store;
+    SwObservation raw{};
+    auto obs = MakeObs(raw, p.station(), Vec3(), 1.0f);
+    p.Decide(store, obs);
+    CHECK(p.ring_altitude() > 12.0f);
+    CHECK(p.ring_altitude() + 0.2f >= PicketFloorAltitude(cfg, p.ring_radius()));
 }
 
 static void TestFormingBecomesPicketingAtEightMetres() {
@@ -927,6 +981,14 @@ static void TestArenaSpringsOnStation() {
     const Vec3 ram_floor = flight::EnforceArena(
         Vec3(0, 0, 15.0f), Vec3(0, 0, -2.0f), Vec3(0, 0, 10.0f), cfg, true);
     CHECK(ram_floor.z < 14.0f);
+
+    // D68: non-ramming replaces az in the stopping band. Commanding 15 down
+    // at 2 m AGL, diving 10 m/s, must climb — the old 0.5/0.8 PD still
+    // netted downward.
+    const Vec3 hard = flight::EnforceArena(
+        Vec3(0, 0, 15.0f), Vec3(0, 0, -2.0f), Vec3(0, 0, 10.0f),
+        cfg, false, true);
+    CHECK(hard.z < 0.0f);
 }
 
 static void TestModeNames() {
@@ -959,6 +1021,8 @@ int main() {
     TestFacingSlotDeSpinsTheOrbit();
     TestInterceptScorePrefersTheOneThatConnects();
     TestScoreSeesTheVerticalBudget();
+    TestRecedingIncumbentHandsEqualScore();
+    TestStationYawFollowsVelocity();
     TestProNavDoesNotBrakeAlongTheLos();
     TestCollisionCourseCutsOffACrossingInbound();
     TestStationEvensTheLiveRing();
@@ -970,6 +1034,7 @@ int main() {
     TestInterceptorKeepsGoingAtTheMerge();
     TestBornOutsideRing();
     TestRingAltitudeFollowsInboundRay();
+    TestPicketFloorKeepsTheEnvelopeUp();
     TestFormingBecomesPicketingAtEightMetres();
     TestCatchableRamUsesDivert();
     TestArenaSpringsOnStation();

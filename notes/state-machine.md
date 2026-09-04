@@ -9,10 +9,11 @@ clock (last t minus dt) while that meeting still hits; it is not a
 fresh t-bin every tick and not `(t − τ)²` (D62). The Aim cue is
 that meeting (`in=/ie=`), not the believed body. Station altitude is the
 inbound cone at the picket radius once the fleet has a linear ray (D52),
-else 25 m (cap still 30 m, D58). Stations even over the live roster
-(hopped heartbeats, D56). Radius shrinks if that `(R, H)` cannot catch
-the Voronoi-edge inbound (D58).
-See D46 / D48 / D51 / D56 / D58.
+else 25 m (cap still 30 m, D58), and never below the kill-envelope floor
+(`R·tan(10°)` or half the first-sight Reach pancake, D68). Stations even
+over the live roster (hopped heartbeats, D56). Radius shrinks if that
+`(R, H)` cannot catch the Voronoi-edge inbound (D58).
+See D46 / D48 / D51 / D56 / D58 / D68.
 
 ```mermaid
 stateDiagram-v2
@@ -58,7 +59,12 @@ whatever station we were in.
 stations, then that live id. A receding owner yields one step clockwise
 on the live ring. Two observers on a bisector name the same owner. A mate
 already flying at it (closing along the LOS ≥ 5 m/s) is the interceptor;
-we abort as `duplicate`.
+we abort as `duplicate`. With the orbit on, a challenger with a better
+`InterceptScore` takes the inbound (`kHandoff`). Approaching incumbent:
+must win by `kHandoffMargin` seconds of score (default 0.25, D69). Receding
+incumbent, same t_go bin: also if closing faster by `kHandoffAspect` m/s
+(default 0.5) — that is the facing drone whose tangential velocity is
+square across the corridor (D67). Both knobs are in `policy.h`.
 
 ## Modes
 
@@ -67,8 +73,8 @@ uses these names; hover is the paragraph.
 
 | Mode | In English | Accel | Yaw | Abort |
 |---|---|---|---|---|
-| **Forming** | Just spawned (or still en route). Flying out to its assigned slot on the picket ring. Not chasing anyone. Logs `picket` once it is within 8 m of the slot. | Cruise / GoTo station | watch if set, else outward | n/a |
-| **Picketing** | On station. Holding the ring around the asset, facing outward, watching its sector. Has not spent itself. Altitude is 25 m until an inbound cone is ready, then the predicted height at this radius (capped at 30 m). | GoTo (yielded) goal | outward | n/a |
+| **Forming** | Just spawned (or still en route). Flying out to its assigned slot on the picket ring. Not chasing anyone. Logs `picket` once it is within 8 m of the slot. | Cruise / GoTo station | watch if set, else velocity | n/a |
+| **Picketing** | On station. Holding the ring around the asset, heading along the orbit tangent (outward if parked), watching its sector. Has not spent itself. Altitude is 25 m until an inbound cone is ready, then the predicted height at this radius (capped at 30 m). | GoTo (yielded) goal | velocity | n/a |
 | **Watching** | Still sitting on the ring, but turned toward an inbound it owns, classifying it. Does not leave the slot until 0.1 s of path-through-the-asset-cylinder (scramble) or a Hostile call (ram). | GoTo goal | at the inbound | n/a |
 | **Stalking** | Eased a little off the slot toward a compact inbound that is not yet called Hostile. Cap is 40 m, so it can still reverse home if the latch never comes. | ProNav if `leashed`, else GoTo station | velocity | n/a |
 | **Scrambling** | Left the ring on an **early** intercept **before** the Hostile latch. Same flight as a ram (arena springs off), but it will abort if the inbound is a civilian or a friend, or if the path no longer hits the asset. | Vector ZEM | velocity | soft (`not-threat` / `not-hostile`) |
@@ -101,11 +107,11 @@ past it. Scramble is not tested — it just left the ring.
 
 No `ram_likely`. Either the chase is still physically catchable, or we abort.
 
-**Arena.** Leaving the arena is a wasted loss. Walls, ceiling, and ground
-springs apply on station (Forming / Picketing / Watching / Stalking).
-Scrambling and Ramming skip the whole box — a ram that can still hit must
-not be steered around a wall. After `uncatchable`, we are picketing again
-and the springs come back.
+**Arena.** Leaving the arena is a wasted loss. Walls, ceiling, and a
+**hard** ground constraint apply on station and while scrambling: inside
+the vertical stopping band, az is replaced and never commands down (D68).
+Ramming keeps walls/ceiling off and the old soft floor (D64). After
+`uncatchable`, we are picketing again and the hard floor comes back.
 
 Separation still runs on intercepts (D15 / D38).
 
