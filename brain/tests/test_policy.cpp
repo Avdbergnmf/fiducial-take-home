@@ -423,6 +423,67 @@ static void TestProNavSteersAtTheZem() {
     CHECK(swarm::Distance(with_traj, along_v_only) > 1e-4f);
 }
 
+static void TestInterceptScorePrefersTheOneThatConnects() {
+    std::printf("score: a hit beats a miss, and the sooner hit wins (D66)\n");
+    Config cfg;
+    cfg.max_speed = 20.0f;
+    cfg.max_accel = 15.0f;
+    cfg.lateral_limit = 6.71f;
+    cfg.kill_radius = 1.0f;
+
+    // Hostile running in along -x at 30 m/s.
+    const Vec3 tp(120.0f, 0.0f, -30.0f), tv(-30.0f, 0.0f, 0.0f);
+
+    // Near drone, parked on the hostile's line: connects.
+    const float near = InterceptScore(Vec3(40, 0, -30), Vec3(), tp, tv, cfg);
+    // Far drone way off to the side: cannot get across in time.
+    const float far = InterceptScore(Vec3(-150, 160, -30), Vec3(), tp, tv, cfg);
+    CHECK(near < kNoHit);          // it hits, so the score is its t_go
+    CHECK(far >= kNoHit);          // it does not, so it is ranked below every hit
+    CHECK(near < far);
+
+    // Among two that both connect, the one arriving sooner scores lower.
+    const float closer = InterceptScore(Vec3(80, 0, -30), Vec3(), tp, tv, cfg);
+    CHECK(closer < kNoHit && closer <= near);
+}
+
+static void TestScoreSeesTheVerticalBudget() {
+    std::printf("score prices the anisotropy: z has max_accel, xy has tilt\n");
+    Config cfg;
+    cfg.max_speed = 20.0f;
+    cfg.max_accel = 15.0f;         // vertical authority
+    cfg.lateral_limit = 6.71f;     // horizontal is 2.2x smaller
+    cfg.kill_radius = 1.0f;
+
+    const Vec3 tp(120.0f, 0.0f, -30.0f), tv(-30.0f, 0.0f, 0.0f);
+
+    // Same 25 m of offset from the hostile's track, once vertical and once
+    // horizontal. The drone that must climb has the bigger budget, so it is
+    // the better interceptor -- which a range-only score cannot tell apart.
+    const float vertical = InterceptScore(Vec3(60, 0, -5), Vec3(), tp, tv, cfg);
+    const float lateral = InterceptScore(Vec3(60, 25, -30), Vec3(), tp, tv, cfg);
+    CHECK(vertical <= lateral);
+}
+
+static void TestFacingSlotDeSpinsTheOrbit() {
+    std::printf("ownership de-spins the ring: a bearing maps to who is there now\n");
+    const Vec3 asset(0, 0, 0);
+    const uint32_t n = 12;
+    const float step = 2.0f * 3.14159265358979f / static_cast<float>(n);
+
+    // Slot `id` has orbited to bearing step*id + phase. Quantising that world
+    // bearing with the same phase must name `id` again. Without the de-spin it
+    // names whoever used to stand there, which is how the fleet collapses.
+    static const float kPhases[] = {0.0f, 0.35f, 2.9f, 6.0f};
+    for (float phase : kPhases) {
+        for (uint32_t id = 0; id < n; ++id) {
+            const float b = step * static_cast<float>(id) + phase;
+            const Vec3 out(90.0f * std::cos(b), 90.0f * std::sin(b), -30.0f);
+            CHECK(FacingSlot(out, asset, n, phase) == id);
+        }
+    }
+}
+
 static void TestArenaAllowsADiveIntercept() {
     std::printf("arena floor is stopping distance, not a 20 m halo\n");
     Config cfg;
@@ -559,10 +620,14 @@ static void TestStationEvensTheLiveRing() {
     for (uint32_t i = 0; i < n0; ++i)
         at[i] = flight::RingSlot(i, n0, asset, 70.0f, 30.0f);
     const float step = 2.0f * 3.14159265358979f / 16.0f;
+    // The ring may be orbiting, in which case every bearing carries the same
+    // kOrbitRate*now phase. The invariant under test is even spacing in rank
+    // order, so measure against the phase rather than against zero (D66).
+    const float phase = kOrbitRate * now;
 
     for (uint32_t id = 0; id < n0; ++id) {
         const float b = StationBearing(id, n0, id, heard, at, at[id], comm, now);
-        CHECK(std::fabs(b - step * static_cast<float>(id)) < 1e-4f);
+        CHECK(std::fabs(b - phase - step * static_cast<float>(id)) < 1e-4f);
     }
 
     heard[0] = now - 3.0f;
@@ -574,13 +639,13 @@ static void TestStationEvensTheLiveRing() {
 
     const float live_step = 2.0f * 3.14159265358979f / 13.0f;
     const float b3 = StationBearing(3, n0, 3, heard, at, at[3], comm, now);
-    CHECK(std::fabs(b3 - 0.0f) < 1e-4f);
+    CHECK(std::fabs(b3 - phase - 0.0f) < 1e-4f);
 
     const float b8 = StationBearing(8, n0, 8, heard, at, at[8], comm, now);
-    CHECK(std::fabs(b8 - live_step * 5.0f) < 1e-4f);
+    CHECK(std::fabs(b8 - phase - live_step * 5.0f) < 1e-4f);
 
     const float b15 = StationBearing(15, n0, 15, heard, at, at[15], comm, now);
-    CHECK(std::fabs(b15 - live_step * 12.0f) < 1e-4f);
+    CHECK(std::fabs(b15 - phase - live_step * 12.0f) < 1e-4f);
 }
 
 static void TestHeardSilenceIsDeadEverywhere() {
@@ -891,6 +956,9 @@ int main() {
     TestAimAheadUsesConfiguredDistance();
     TestProNavSteersAtTheZem();
     TestArenaAllowsADiveIntercept();
+    TestFacingSlotDeSpinsTheOrbit();
+    TestInterceptScorePrefersTheOneThatConnects();
+    TestScoreSeesTheVerticalBudget();
     TestProNavDoesNotBrakeAlongTheLos();
     TestCollisionCourseCutsOffACrossingInbound();
     TestStationEvensTheLiveRing();

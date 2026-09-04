@@ -288,11 +288,21 @@ void Policy::Configure(const Config& cfg, Rng rng) {
     }
 }
 
-void Policy::NoteAlive(uint8_t drone_id, const Vec3& position, float now) {
+void Policy::NoteAlive(uint8_t drone_id, const Vec3& position,
+                       const Vec3& velocity, float now) {
     if (drone_id >= kMaxFleet) return;
     heard_[drone_id] = now;
     heard_at_[drone_id] = position;
+    heard_vel_[drone_id] = velocity;
     confirmed_dead_[drone_id] = 0;
+}
+
+void Policy::NoteSelfBroadcast(const Vec3& position, const Vec3& velocity,
+                               float now) {
+    if (cfg_.drone_id >= kMaxFleet) return;
+    heard_[cfg_.drone_id] = now;
+    heard_at_[cfg_.drone_id] = position;
+    heard_vel_[cfg_.drone_id] = velocity;
 }
 
 void Policy::NoteRay(float h0, float slope, float weight, uint8_t hops) {
@@ -443,6 +453,19 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
                           course.meeting.x, course.meeting.y, -course.meeting.z,
                           candidate->has_local_id ? "" : " peer",
                           early ? " early" : "");
+            // Who the ring would have sent, and the two solutions, so a
+            // handoff is legible in the viewer rather than inferred from a
+            // drone leaving a slot it was not facing (D66).
+            const uint32_t inc = FacingOwner(*candidate, store, obs);
+            if (inc != cfg_.drone_id) {
+                const size_t used = std::strlen(last_log_);
+                if (used + 40 < sizeof(last_log_)) {
+                    std::snprintf(last_log_ + used, sizeof(last_log_) - used,
+                                  " hand=%u s=%.2f si=%.2f", inc,
+                                  ScoreFor(cfg_.drone_id, *candidate, obs),
+                                  ScoreFor(inc, *candidate, obs));
+                }
+            }
         }
     }
 
@@ -474,15 +497,18 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
         stalk_ = nullptr;
         watch_ = nullptr;
         leashed_ = false;
+        goal_vel_ = Vec3();   // intercepting: the goal is a meeting point
     }
 }
 
-uint32_t FacingSlot(const Vec3& position, const Vec3& asset, uint32_t count) {
+uint32_t FacingSlot(const Vec3& position, const Vec3& asset, uint32_t count,
+                    float orbit_phase) {
     const uint32_t n = count > 0 ? count : 1;
     const float hx = position.x - asset.x;
     const float hy = position.y - asset.y;
     if (hx * hx + hy * hy < 1e-8f) return 0;
-    float u = std::atan2(hy, hx);
+    float u = std::atan2(hy, hx) - orbit_phase;
+    u = std::fmod(u, 2.0f * kPi);
     if (u < 0.0f) u += 2.0f * kPi;
     const float x = u * static_cast<float>(n) / (2.0f * kPi);
     // Nearest slot, except a band around the Voronoi edge. lround alone lets
@@ -587,7 +613,16 @@ float StationBearing(uint32_t id, uint32_t fleet_size, uint32_t self_id,
                                     comm_radius, now, confirmed_dead);
     const uint32_t rank = LiveRank(id, n, self_id, heard, heard_at, self_pos,
                                    comm_radius, now, confirmed_dead);
-    return 2.0f * kPi * static_cast<float>(rank) / static_cast<float>(live);
+    // Shared function of sim time, so every drone places every station
+    // identically without negotiating (D66).
+    return 2.0f * kPi * static_cast<float>(rank) / static_cast<float>(live)
+           + kOrbitRate * now;
+}
+
+Vec3 StationVelocityAt(float bearing, float radius) {
+    // d/dt of StationAt with bearing advancing at kOrbitRate: tangential, wR.
+    const float w = kOrbitRate * radius;
+    return Vec3(-w * std::sin(bearing), w * std::cos(bearing), 0.0f);
 }
 
 Vec3 StationAt(float bearing, const Vec3& centre, float radius, float altitude) {
@@ -648,8 +683,44 @@ bool Policy::FacingReceding(uint32_t facing, const Track& hostile,
     return TowardTarget(p, v, hostile.position) < -kReceding;
 }
 
-bool Policy::OwnsInbound(const Track& t, const TrackStore& store,
-                         const swarm::Observation& obs) const {
+float InterceptScore(const Vec3& position, const Vec3& velocity,
+                     const Vec3& target_position, const Vec3& target_velocity,
+                     const Config& cfg) {
+    const flight::Course c = flight::SolveCollisionCourse(
+        position, velocity, target_position, target_velocity, cfg);
+    const float kill = cfg.kill_radius > 0.1f ? cfg.kill_radius : 0.1f;
+    return (c.miss <= kill) ? c.t_go : kNoHit + c.miss;
+}
+
+float Policy::ScoreFor(uint32_t id, const Track& t,
+                       const swarm::Observation& obs) const {
+    if (id >= kMaxFleet || heard_[id] <= 0.0f) return 2.0f * kNoHit;
+    float age = obs.time() - heard_[id];
+    if (age < 0.0f) age = 0.0f;
+    // Every candidate from the same source, self included, or the fleet does
+    // not agree on the answer (D66).
+    const Vec3 p = heard_at_[id] + heard_vel_[id] * age;
+    return InterceptScore(p, heard_vel_[id], t.position, t.velocity, cfg_);
+}
+
+uint32_t Policy::BestInterceptor(const Track& t,
+                                 const swarm::Observation& obs) const {
+    const float now = obs.time();
+    const uint32_t n = cfg_.fleet_size < kMaxFleet ? cfg_.fleet_size : kMaxFleet;
+    uint32_t best_id = cfg_.drone_id;
+    float best = 1.0e30f;
+    for (uint32_t id = 0; id < n; ++id) {
+        if (!RingAlive(id, cfg_.drone_id, heard_, heard_at_, obs.position(),
+                       cfg_.comm_radius, now, cfg_.fleet_size, nullptr))
+            continue;
+        const float c = ScoreFor(id, t, obs);
+        if (c < best - 1.0e-3f) { best = c; best_id = id; }
+    }
+    return best_id;
+}
+
+uint32_t Policy::FacingOwner(const Track& t, const TrackStore& store,
+                             const swarm::Observation& obs) const {
     // Stations and ownership share the live ring (D56). Facing slot among
     // CountLive equally spaced stations, then that LiveId. A receding owner
     // yields one step clockwise on the live ring (D35).
@@ -657,7 +728,8 @@ bool Policy::OwnsInbound(const Track& t, const TrackStore& store,
     const uint32_t live = CountLive(cfg_.fleet_size, cfg_.drone_id, heard_,
                                     heard_at_, obs.position(), cfg_.comm_radius,
                                     now, nullptr);
-    uint32_t face = FacingSlot(t.position, cfg_.asset, live);
+    uint32_t face = FacingSlot(t.position, cfg_.asset, live,
+                               kOrbitRate * now);
     uint32_t owner = LiveId(face, cfg_.fleet_size, cfg_.drone_id, heard_,
                             heard_at_, obs.position(), cfg_.comm_radius, now,
                             nullptr);
@@ -665,6 +737,23 @@ bool Policy::OwnsInbound(const Track& t, const TrackStore& store,
         owner = LiveId(face + 1, cfg_.fleet_size, cfg_.drone_id, heard_,
                        heard_at_, obs.position(), cfg_.comm_radius, now,
                        nullptr);
+    return owner;
+}
+
+bool Policy::OwnsInbound(const Track& t, const TrackStore& store,
+                         const swarm::Observation& obs) const {
+    uint32_t owner = FacingOwner(t, store, obs);
+    // The facing drone is the incumbent. Hand over only to one with a
+    // decisively better solution -- already moving the right way, or able to
+    // spend its larger vertical authority -- rather than merely standing
+    // nearer (D66). Every drone scores every peer from the same broadcast
+    // poses, so this needs nothing extra on the wire and they all agree.
+    if (kHandoff) {
+        const uint32_t challenger = BestInterceptor(t, obs);
+        if (challenger != owner &&
+            ScoreFor(challenger, t, obs) < ScoreFor(owner, t, obs) - kHandoffMargin)
+            owner = challenger;
+    }
     return owner == cfg_.drone_id;
 }
 
@@ -838,6 +927,9 @@ Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) 
     stalk_ = nullptr;
     watch_ = nullptr;
     Vec3 goal = slot;
+    // Holding an orbiting ring means matching its motion. Zeroed below if the
+    // goal stops being the station.
+    goal_vel_ = StationVelocityAt(bearing, ring_radius_);
 
     // Ease toward a likely inbound before the Hostile latch, still close
     // enough to get back on station if it never confirms.
@@ -857,6 +949,7 @@ Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) 
         if (swarm::Distance(aim, slot) < 1.0f) continue;
         goal = aim;
         stalk_ = &t;
+        goal_vel_ = Vec3();   // a stalk aim is a fixed point, not the ring
         break;
     }
 
@@ -886,7 +979,8 @@ Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) 
     for (const Track& t : store.tracks()) {
         if (t.belief != Belief::Hostile) continue;
         if (OwnsInbound(t, store, obs)) continue;
-        const uint32_t face = FacingSlot(t.position, cfg_.asset, live);
+        const uint32_t face = FacingSlot(t.position, cfg_.asset, live,
+                                         kOrbitRate * now);
         uint32_t owner = LiveId(face, cfg_.fleet_size, cfg_.drone_id, heard_,
                                 heard_at_, obs.position(), cfg_.comm_radius,
                                 now, confirmed_dead_);
@@ -1165,6 +1259,9 @@ void Policy::Compose(Outbox<24>& outbox, TrackStore& store,
 
         if (w.ok() && outbox.Push(buffer, w.size(), kPrioHeartbeat, now)) {
             last_heartbeat_ = now;
+            // Peers will score us from exactly these bytes; score ourselves
+            // from them too so everyone computes the same owner (D66).
+            NoteSelfBroadcast(m.position, m.velocity, now);
         }
     }
 

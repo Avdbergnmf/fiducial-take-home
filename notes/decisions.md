@@ -2934,3 +2934,110 @@ baseline with no handoff at all. Consensus on who owns an inbound is not
 guaranteed — each drone scores itself from its true pose and its peers from
 beats up to 0.5 s old — and the closer-chaser `duplicate` abort is the only
 backstop. That is worth its own look.
+
+---
+
+## D66 — Score the handoff on achievable miss; the orbit is a tier-2 trade
+
+Re-opens D63 / D65 on the current brain, on 80 **fresh** ids (40 tier-1,
+40 tier-2, `--new-token`), because both were measured on a baseline that has
+since moved and D65 was scored with the wrong quantity.
+
+### The score
+
+D65 ranked candidates by `turn angle · |v| / lateral_limit + range / max_speed`.
+That is wrong in a way the geometry punishes: **acceleration is anisotropic.**
+`LimitAccel` caps horizontal at `lateral_limit` (6.71) and vertical at
+`max_accel` (15.0 on s1) — vertical authority is **2.24×** horizontal. A drone
+25 m below the hostile's track is far better placed than one 25 m to the side,
+and no range- or turn-based score can see it.
+
+The solver already computes the right number and threw it away. `eval(t)` inside
+`SolveCollisionCourse` builds the ZEM, pushes it through `LimitAccel` and the
+speed cap, and measures the **leftover miss** — what the airframe still cannot
+close. `Course` now carries it, and allocation scores a candidate with the same
+math the ram will fly:
+
+```
+hits  (miss <= kill_radius)  ->  t_go          soonest kill wins
+misses                       ->  kNoHit + miss  ranked below every hit
+```
+
+Anything that connects beats anything that does not; among those that connect,
+earliest wins, which is what the urgency-scaled reward pays for (§9.1).
+
+### Consensus, which D65 did not have
+
+D65 scored self from its true pose and peers from beats up to 0.5 s old, so two
+drones could reach different owners and both commit. Now every drone records
+its **own broadcast pose** at heartbeat time and scores every candidate, itself
+included, from the same last-broadcast poses. All of them compute the same
+owner from the same bytes. `pair_friendly` is **0 across all 80 ids** in every
+configuration below — the failure D65 accepted as open does not occur.
+
+The facing drone stays the **incumbent**; a challenger must beat it by
+`kHandoffMargin` = 1.0 s. Bare comparison thrashes (D65 lost 13 airframes on
+one id to it).
+
+### It does what it claims
+
+s2 trace, orbit on: **9 of 20 commits are handoffs**, and they split two ways.
+
+```
+t= 7.80 d7  trk5  hand=9  s=2.80 si=5.50      2.7 s sooner
+t=21.54 d15 trk5  hand=0  s=2.40 si=1001.29   incumbent cannot hit at all
+t=37.76 d13 trk8  hand=14 s=2.40 si=1001.10
+t=53.93 d9  trk8  hand=10 s=2.00 si=3.80
+```
+
+Four of the nine rescue a target whose ring owner scores **above kNoHit** — it
+physically cannot reach it (1.1–3.9 m of leftover miss against a 1.0 m kill
+radius) while exclusivity forbids anyone else trying. That is exactly the s2
+dead window D21 found and D24 could not close. The rest pick a materially
+faster solution. Logged as `hand=<incumbent> s=<ours> si=<theirs>` on the
+commit line so it is legible in the viewer.
+
+### Measured
+
+80 fresh ids. `pf` is 0 everywhere and omitted.
+
+| build | both | tier1 | tier2 | t1 cap | t2 cap | breach | p10 | min |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| baseline | **110.0** | **136.1** | 83.8 | 28.5% | 23.0% | 1 | −112.0 | −673.5 |
+| handoff only | 110.8 | 137.5 | 84.0 | 28.7% | 23.1% | 1 | −112.0 | −677.2 |
+| orbit 0.06, no handoff | 101.6 | 104.0 | 99.3 | 28.0% | 25.8% | **7** | −106.1 | −634.7 |
+| orbit 0.06 + handoff | 108.9 | 123.4 | **94.3** | 29.0% | **26.5%** | 3 | **−81.1** | **−634.7** |
+| orbit 0.10 + handoff | 105.2 | 110.3 | 100.0 | 29.9% | 27.2% | 7 | −102.5 | −643.5 |
+
+**The handoff is what makes the orbit survivable.** Alone it is worth +0.8;
+under orbit it is worth **+7.3**, and it halves the orbit's tier-1 breaches
+(6 → 3). That is D23's finding inverted: rotation with facing-slot ownership
+hands each inbound to the drone whose tangential velocity is square across the
+corridor, and the breaches are the bill.
+
+**The orbit is a tier trade, not a win or a loss.** Capture rises monotonically
+with rate on both tiers — tier-2 23.1 → 25.0 → 26.5 → 27.2% — so the
+kill-envelope effect is real and is exactly what rotation was supposed to buy.
+Tier 2 takes it (+10.3 mean, breach 1 → 0, p10 −171 → −81); tier 1 pays for it
+(−14.1 mean, breach 0 → 3), because everything is already locally visible there
+and the centripetal load `v²/R` is pure cost.
+
+### Shipped
+
+`kOrbitRate = 0.06` (≈5 m/s at the 86 m ring), `kHandoff = true`. Both are one
+constant; **0 restores the static ring exactly**. The default is on because the
+floor metrics favour it (p10 +31, min +43) and tier 2 is where the remaining
+mission points are — but the tier-1 breaches are real and the rate wants tuning
+per tier, which is not something one scalar can express.
+
+**Cost accepted:** three tier-1 breaches that the static ring does not have.
+
+**Still the dominant loss, and neither of these touches it:** 32 civilians
+across the 80 ids, against 1 breach. Everything here is worth less than that.
+
+**Tests now pin the invariant rather than the accident.** The station tests
+asserted `bearing == step·id`, which is only true at zero phase; they now
+measure against the shared `kOrbitRate·now` and pass at any rate. Added: the
+de-spin round-trip over four phases, that a hit outranks a miss and the sooner
+hit wins, and that 25 m of vertical offset scores better than 25 m of lateral.
+Determinism re-checked with the orbit on, threads 1 → 8, 5/5.

@@ -20,8 +20,14 @@ Vec3 LimitAccel(const Vec3& desired, const Config& cfg);
 
 /// PD station keeping. The workhorse: formation, waypoints and loiter are all
 /// this with a different target.
+/// `target_velocity` is the velocity of the target POINT. The damping term
+/// pulls toward it rather than toward zero, so a moving station is flown
+/// rather than chased: without it the same term brakes against the station's
+/// motion every tick, and the ring gets dragged round instead of orbited
+/// (D66). Zero for a fixed waypoint, which is every caller but the picket.
 Vec3 GoTo(const Vec3& target, const Vec3& position, const Vec3& velocity,
-          const Config& cfg, float pos_gain = 0.8f, float vel_gain = 1.6f);
+          const Config& cfg, float pos_gain = 0.8f, float vel_gain = 1.6f,
+          const Vec3& target_velocity = Vec3());
 
 /// Travel toward a point at a commanded speed, decelerating into it.
 Vec3 Cruise(const Vec3& target, const Vec3& position, const Vec3& velocity,
@@ -78,6 +84,12 @@ struct Course {
     Vec3 accel;
     Vec3 meeting;
     float t_go = 0.0f;
+    /// Leftover miss at `t_go` AFTER saturating: the solver already flies
+    /// the ZEM through LimitAccel and the speed cap, so this is what the
+    /// airframe cannot close, not what the geometry asks for. <= kill_radius
+    /// means this drone actually connects. Exposed so allocation can score a
+    /// candidate with the same math the ram will fly (D66).
+    float miss = 1.0e9f;
 };
 Course SolveCollisionCourse(const Vec3& self_p, const Vec3& self_v,
                             const Vec3& tgt_p, const Vec3& tgt_v,
@@ -103,7 +115,8 @@ bool CatchableRam(const Vec3& self_p, const Vec3& self_v,
 /// after this, in Fly.
 Vec3 DesiredAccel(Mode mode, const Vec3& position, const Vec3& velocity,
                   const Vec3& goal, const Track* focus, bool leashed,
-                  float dt, const Config& cfg, const Vec3& self_a = {});
+                  float dt, const Config& cfg, const Vec3& self_a = {},
+                  const Vec3& goal_velocity = {});
 
 /// Yaw for the named mode. Outward on station, at the watch target, or
 /// along velocity when intercepting / stalking.

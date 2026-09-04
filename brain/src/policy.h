@@ -17,7 +17,68 @@ namespace sw {
 /// `count` is the number of stations (live fleet after D19, original size
 /// on a full ring). Near a slot bisector the clockwise id wins, so
 /// two observers with a metre of track noise cannot both own the inbound.
-uint32_t FacingSlot(const Vec3& position, const Vec3& asset, uint32_t count);
+/// `orbit_phase` is the ring's current rotation (kOrbitRate * now), subtracted
+/// before quantising so a bearing maps to the slot standing there NOW, not to
+/// where that slot sat at t=0. Left out with the ring orbiting, every inbound
+/// goes to a drone that has rotated away and the fleet collapses (D66).
+uint32_t FacingSlot(const Vec3& position, const Vec3& asset, uint32_t count,
+                    float orbit_phase = 0.0f);
+
+/// Tangential orbit rate of the whole picket, rad/s. 0 is the static ring and
+/// restores the previous behaviour exactly.
+///
+/// Every drone computes `kOrbitRate * obs.time()`, a shared function of sim
+/// time, so the ring stays phase-locked with nothing on the wire.
+///
+/// The point is not coverage -- awareness is already 52-58 of 60. It is that a
+/// drone handed an inbound is already MOVING toward its intercept and only has
+/// to turn that velocity rather than build it. Turning speed v through angle
+/// phi costs about phi*v/a against v/a from rest, so it pays only while the
+/// turn is under ~1 rad -- which means the drone on the inbound bearing, whose
+/// tangential velocity is square across the corridor, is the WORST choice.
+/// Orbiting is therefore only worth anything with the handoff below; D23
+/// measured rotation while keeping facing-slot ownership and could only ever
+/// see it as a cost.
+///
+/// Cost is centripetal, v^2/R out of the 6.71 m/s^2 lateral budget: at R = 25 m
+/// even 4 m/s is 0.64 m/s^2. Small rings punish this much harder than the 90 m
+/// ring this was first tried on.
+constexpr float kOrbitRate = 0.0f;
+
+/// Hand an inbound to the drone with the best intercept solution rather than
+/// to the one facing it. Off restores the facing-slot rule exactly.
+constexpr bool kHandoff = true;
+
+/// Seconds of score a challenger must beat the incumbent by before ownership
+/// moves. The facing drone stays the incumbent, so this is an override on the
+/// proven rule, not a replacement.
+///
+/// It has to be "much better", not "better". With a bare comparison two
+/// near-equal candidates trade the track every time a heartbeat lands; an
+/// earlier build lost 13 airframes on one id to exactly that thrash (D66).
+constexpr float kHandoffMargin = 1.0f;
+
+/// How well a drone at (position, velocity) can intercept a target, in
+/// seconds. LOWER IS BETTER. Two regimes:
+///
+///   hits  (leftover miss <= kill_radius)  ->  t_go, so the soonest kill wins
+///   misses                                ->  kNoHit + leftover miss
+///
+/// so any drone that connects beats every drone that does not, and among
+/// those that connect the earliest wins -- which is what the urgency-scaled
+/// reward actually pays for (§9.1).
+///
+/// The quantity is `Course::miss`: the ZEM the airframe still cannot close
+/// after saturating. That matters because acceleration is ANISOTROPIC --
+/// LimitAccel caps horizontal at lateral_limit (6.71) and vertical at
+/// max_accel (~15-20), so a drone that must descend 20 m is far better placed
+/// than one that must translate 20 m, and a score built on range or on turn
+/// angle cannot see that. Scoring with the solver the ram will actually fly
+/// gets it for free, along with the speed cap and the lead geometry.
+float InterceptScore(const Vec3& position, const Vec3& velocity,
+                     const Vec3& target_position, const Vec3& target_velocity,
+                     const Config& cfg);
+constexpr float kNoHit = 1000.0f;
 
 /// Picket radius for the currently live fleet. Radio, spawn, reaction, and
 /// chord-preservation caps first; then the largest radius at `altitude`
@@ -71,6 +132,11 @@ float StationBearing(uint32_t id, uint32_t fleet_size, uint32_t self_id,
                      const float* heard, const Vec3* heard_at,
                      const Vec3& self_pos, float comm_radius, float now,
                      uint8_t* confirmed_dead = nullptr);
+
+/// Velocity of that ring point as the picket orbits: tangential, |v| = wR.
+/// Zero when kOrbitRate is zero. Fed to GoTo so station keeping damps toward
+/// the station's own motion instead of braking against it.
+Vec3 StationVelocityAt(float bearing, float radius);
 
 /// Ring point at a bearing, rather than at a slot index. NED, so -altitude.
 Vec3 StationAt(float bearing, const Vec3& centre, float radius, float altitude);
@@ -151,6 +217,10 @@ public:
     const Track* watch() const { return watch_; }
     bool leashed() const { return leashed_; }
     Vec3 station() const { return station_; }
+    /// Velocity of the goal point when the goal is the orbiting station; zero
+    /// when the goal is something else (a stalk aim) or the ring is static.
+    /// Feed-forward for GoTo, not a command in its own right.
+    Vec3 goal_velocity() const { return goal_vel_; }
     const char* last_log() const { return last_log_; }
     float ring_radius() const { return ring_radius_; }
     float ring_altitude() const { return ring_altitude_; }
@@ -171,7 +241,34 @@ public:
     void Pump(const swarm::Host& host, Outbox<24>& outbox, const swarm::Observation& obs);
 
     /// A heartbeat from this origin, with the claimed pose.
-    void NoteAlive(uint8_t drone_id, const Vec3& position, float now);
+    void NoteAlive(uint8_t drone_id, const Vec3& position, float now) {
+        NoteAlive(drone_id, position, Vec3(), now);
+    }
+    /// Heartbeats already carry velocity for dead reckoning; it was parsed and
+    /// discarded. Keeping it costs nothing on the wire and is what lets every
+    /// drone score every peer without a Claim frame (D66).
+    void NoteAlive(uint8_t drone_id, const Vec3& position, const Vec3& velocity,
+                   float now);
+
+    /// Record our own pose as broadcast. Every drone then scores every
+    /// candidate -- ourselves included -- from the same last-broadcast poses,
+    /// so all of them reach the SAME owner. Scoring self from its true pose
+    /// and peers from stale beats is what makes two drones disagree and both
+    /// commit (D66).
+    void NoteSelfBroadcast(const Vec3& position, const Vec3& velocity, float now);
+
+    /// Ring owner before any handoff: facing slot on the live ring, stepped
+    /// one clockwise if that drone is receding (D35). The incumbent.
+    uint32_t FacingOwner(const Track& t, const TrackStore& store,
+                         const swarm::Observation& obs) const;
+
+    /// Live drone with the best InterceptScore for this track. Ties go to the
+    /// lower id so two observers name the same drone.
+    uint32_t BestInterceptor(const Track& t, const swarm::Observation& obs) const;
+
+    /// InterceptScore for one id from its last broadcast pose, dead reckoned.
+    /// kNoHit*2 if that id has no pose to score.
+    float ScoreFor(uint32_t id, const Track& t, const swarm::Observation& obs) const;
 
     /// A hopped inbound-ray fit. Weight is discounted by hops so a far
     /// rumour cannot overwrite a local cone (D52).
@@ -236,6 +333,7 @@ private:
     bool sampled_local_ = false;
     Vec3 picket_goal_{};
     Vec3 station_{};
+    Vec3 goal_vel_{};
     const Track* stalk_ = nullptr;
     const Track* watch_ = nullptr;
     bool leashed_ = false;
@@ -244,6 +342,7 @@ private:
     Mode logged_mode_ = Mode::Forming;
     float heard_[kMaxFleet]{};
     Vec3 heard_at_[kMaxFleet]{};
+    Vec3 heard_vel_[kMaxFleet]{};
     uint8_t confirmed_dead_[kMaxFleet]{};
     uint8_t announced_dead_[kMaxFleet]{};
 };

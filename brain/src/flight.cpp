@@ -126,9 +126,10 @@ Vec3 LimitAccel(const Vec3& desired, const Config& cfg) {
 }
 
 Vec3 GoTo(const Vec3& target, const Vec3& position, const Vec3& velocity,
-          const Config& cfg, float pos_gain, float vel_gain) {
+          const Config& cfg, float pos_gain, float vel_gain,
+          const Vec3& target_velocity) {
     const Vec3 error = target - position;
-    Vec3 accel = error * pos_gain - velocity * vel_gain;
+    Vec3 accel = error * pos_gain - (velocity - target_velocity) * vel_gain;
     return LimitAccel(accel, cfg);
 }
 
@@ -309,6 +310,7 @@ Course SolveCollisionCourse(const Vec3& self_p, const Vec3& self_v,
     out.accel = accel;
     out.meeting = best.meeting;
     out.t_go = best.t;
+    out.miss = best.miss;
     return out;
 }
 
@@ -365,7 +367,8 @@ bool CatchableRam(const Vec3& self_p, const Vec3& self_v,
 
 Vec3 DesiredAccel(Mode mode, const Vec3& position, const Vec3& velocity,
                   const Vec3& goal, const Track* focus, bool leashed,
-                  float dt, const Config& cfg, const Vec3& self_a) {
+                  float dt, const Config& cfg, const Vec3& self_a,
+                  const Vec3& goal_velocity) {
     auto weave_of = [&](const Track& t) {
         return EstimatedAccel(t.velocity, t.last_velocity, dt,
                               cfg.lateral_limit);
@@ -395,9 +398,11 @@ Vec3 DesiredAccel(Mode mode, const Vec3& position, const Vec3& velocity,
     // Must match kCruise in policy.cpp.
     constexpr float kStationCruise = 14.0f;
     const float range = swarm::Distance(position, goal);
+    // Far out this is a transit and Cruise owns the speed. Close in, the
+    // station may be orbiting, so damp toward ITS velocity (D66).
     return (range > 25.0f)
                ? Cruise(goal, position, velocity, kStationCruise, cfg)
-               : GoTo(goal, position, velocity, cfg);
+               : GoTo(goal, position, velocity, cfg, 0.8f, 1.6f, goal_velocity);
 }
 
 float DesiredYaw(Mode mode, const Vec3& position, const Vec3& velocity,

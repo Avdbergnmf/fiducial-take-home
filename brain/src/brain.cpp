@@ -146,7 +146,7 @@ private:
                     if (age < 0.0f) age = 0.0f;
                     if (h.hops > 0 && age > links_.StaleAfter()) break;
                     const sw::Vec3 predicted = m.position + m.velocity * age;
-                    NotePeer(h.origin, predicted, now);
+                    NotePeer(h.origin, predicted, m.velocity, now);
                     // Measured range is to the transmitter. Only hop-0 is
                     // the origin; a relay would fail HeartbeatPlausible and
                     // smear identity onto the neighbour (D56).
@@ -217,11 +217,12 @@ private:
         }
     }
 
-    void NotePeer(uint8_t drone_id, const sw::Vec3& position, float now) {
+    void NotePeer(uint8_t drone_id, const sw::Vec3& position,
+                  const sw::Vec3& velocity, float now) {
         if (drone_id >= sw::kMaxFleet) return;
         peer_position_[drone_id] = position;
         peer_last_heard_[drone_id] = now;
-        policy_.NoteAlive(drone_id, position, now);
+        policy_.NoteAlive(drone_id, position, velocity, now);
     }
 
     swarm::Command Fly(const swarm::Observation& obs) {
@@ -247,7 +248,8 @@ private:
             last_t_go_ = 0.0f;
             accel = sw::flight::DesiredAccel(
                 mode, position, velocity, policy_.DesiredPosition(obs),
-                focus, policy_.leashed(), obs.dt(), cfg_, a_now);
+                focus, policy_.leashed(), obs.dt(), cfg_, a_now,
+                policy_.goal_velocity());
         }
 
         if (sw::Intercepting(mode))
