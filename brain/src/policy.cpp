@@ -1439,6 +1439,8 @@ void Policy::Compose(Outbox<24>& outbox, TrackStore& store,
         // for the facing owner to latch — score*120 was 72 on a fresh call
         // and needed three reports (D35 / x1-b403).
         m.confidence = 255;
+        m.sender_p = obs.position();
+        m.sender_v = obs.velocity();
         m.Write(w);
 
         const uint8_t prio = first ? kPrioTrackFirst : kPrioTrack;

@@ -213,6 +213,8 @@ struct TrackReportMsg {
     Vec3 velocity{};
     Belief belief = Belief::Unknown;
     uint8_t confidence = 0;   // 0..255
+    Vec3 sender_p{};          // author pose at send (D76 hop-0 range-vs-claim)
+    Vec3 sender_v{};
 
     /// No track_id. It is observer-local and means nothing to the receiver --
     /// the whole point. The receiver associates by geometry and time.
@@ -221,6 +223,8 @@ struct TrackReportMsg {
         w.PosQ(velocity);
         w.U8(static_cast<uint8_t>(belief));
         w.U8(confidence);
+        w.PosQ(sender_p);
+        w.PosQ(sender_v);
     }
     void Read(Reader& r) {
         position = r.PosQ();
@@ -228,6 +232,8 @@ struct TrackReportMsg {
         uint8_t b = r.U8();
         belief = (b <= 4) ? static_cast<Belief>(b) : Belief::Unknown;
         confidence = r.U8();
+        sender_p = r.PosQ();
+        sender_v = r.PosQ();
     }
 };
 

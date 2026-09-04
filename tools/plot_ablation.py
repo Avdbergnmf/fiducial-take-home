@@ -18,9 +18,14 @@ import argparse
 import csv
 import json
 import re
+import subprocess
 import sys
+from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
+from zoneinfo import ZoneInfo
+
+import matplotlib.dates as mdates
 
 import matplotlib
 
@@ -50,6 +55,7 @@ COL_MEAN = "#1d4ed8"
 COL_MAX = "#64748b"
 COL_BREACH = "#dc2626"
 COL_OK = "#15803d"
+LOCAL = ZoneInfo("Europe/Berlin")
 
 
 def version_key(name: str) -> tuple:
@@ -116,6 +122,42 @@ def style():
     )
 
 
+def git_commit_datetime(spec: str):
+    spec = (spec or "").strip()
+    if spec in ("", "SNAPSHOT", "WORKING", "."):
+        return None
+    try:
+        raw = subprocess.check_output(
+            ["git", "-C", str(REPO), "log", "-1", "--format=%ci", spec],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+    if not raw:
+        return None
+    dt = datetime.strptime(raw, "%Y-%m-%d %H:%M:%S %z")
+    return dt.astimezone(LOCAL).replace(tzinfo=None)
+
+
+def row_datetime(r: dict):
+    """Git author time, or ablation `when` for SNAPSHOT / WORKING."""
+    for key in ("commit_request", "commit_short", "commit"):
+        dt = git_commit_datetime(str(r.get(key) or ""))
+        if dt is not None:
+            r["_git_time"] = True
+            return dt
+    when = r.get("when")
+    if when:
+        dt = datetime.fromisoformat(str(when))
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(LOCAL).replace(tzinfo=None)
+        r["_git_time"] = False
+        return dt
+    r["_git_time"] = False
+    return None
+
+
 def save(fig, name: str) -> Path:
     NOTES.mkdir(parents=True, exist_ok=True)
     path = NOTES / name
@@ -145,6 +187,79 @@ def plot_ladder(rows: list[dict]) -> None:
     ax.legend(loc="lower right", framealpha=0.95)
     fig.tight_layout()
     save(fig, "ablation-ladder.png")
+
+
+def plot_timeline(rows: list[dict]) -> None:
+    """Same floor / mean / max, x = commit time (not equal version steps)."""
+    times = []
+    mins = []
+    means = []
+    maxs = []
+    labels = []
+    is_git = []
+    for r in rows:
+        dt = row_datetime(r)
+        if dt is None:
+            continue
+        times.append(dt)
+        mins.append(float(r["min"]))
+        means.append(float(r["mean"]))
+        maxs.append(float(r["max"]))
+        labels.append(r["version"])
+        is_git.append(bool(r.get("_git_time")))
+    if len(times) < 2:
+        return
+
+    fig, ax = plt.subplots(figsize=(13.2, 5.2))
+    ax.fill_between(times, mins, maxs, step="post", color="#cbd5e1", alpha=0.55, label="min–max")
+    ax.step(times, maxs, where="post", color=COL_MAX, lw=1.4, label="max")
+    ax.step(times, means, where="post", color=COL_MEAN, lw=2.0, label="mean")
+    ax.step(times, mins, where="post", color=COL_FLOOR, lw=2.2, label="floor (min)")
+    git_t = [t for t, g in zip(times, is_git) if g]
+    git_y = [y for y, g in zip(means, is_git) if g]
+    other_t = [t for t, g in zip(times, is_git) if not g]
+    other_y = [y for y, g in zip(means, is_git) if not g]
+    ax.plot(git_t, git_y, color=COL_MEAN, marker="o", ms=5.5, ls="none", zorder=4)
+    if other_t:
+        ax.plot(
+            other_t,
+            other_y,
+            color=COL_MEAN,
+            marker="D",
+            ms=6,
+            ls="none",
+            zorder=4,
+            markerfacecolor="white",
+            markeredgewidth=1.6,
+            label="V23/V24 sweep time (not git)",
+        )
+    ax.axhline(0.0, color="#94a3b8", lw=0.8)
+    # Version labels sit above the band. Dense Sep 1 cluster is the point.
+    y_top = max(maxs)
+    y_span = y_top - min(mins)
+    for i, (t, ver) in enumerate(zip(times, labels)):
+        bump = 0.018 * y_span if i % 2 == 0 else 0.055 * y_span
+        ax.annotate(
+            ver,
+            (mdates.date2num(t), y_top),
+            xytext=(0, 6 + (8 if i % 2 else 0)),
+            textcoords="offset points",
+            ha="center",
+            va="bottom",
+            fontsize=7,
+            color="#334155",
+        )
+        ax.plot([t, t], [maxs[i], y_top + bump * 0.15], color="#cbd5e1", lw=0.6, zorder=1)
+    ax.set_ylabel("score (8 named ids)")
+    ax.set_title("Ablation ladder — score vs commit time")
+    ax.xaxis.set_major_locator(mdates.DayLocator())
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%a %b %d"))
+    ax.xaxis.set_minor_locator(mdates.HourLocator(byhour=[6, 12, 18]))
+    ax.set_xlabel("commit time (local). Equal version steps hide that V1–V14 is one day.")
+    ax.legend(loc="lower right", framealpha=0.95)
+    fig.autofmt_xdate(rotation=0, ha="center")
+    fig.tight_layout()
+    save(fig, "ablation-timeline.png")
 
 
 def plot_heatmap(rows: list[dict]) -> None:

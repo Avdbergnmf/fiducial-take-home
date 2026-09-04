@@ -309,6 +309,33 @@ static void TestHeartbeatRangeCorroboration() {
     CHECK(!HeartbeatPlausible(self, claimed, 5.0f, 0.5f));
 }
 
+static void TestHop0TrackReportRangeIsTheTransmitter() {
+    // Forced replay (D76). TrackReport payload is the target at 170 m;
+    // RF range is to the sender at 40 m. Gating on the target would drop
+    // every valid hop-0 report from a neighbour.
+    std::printf("hop-0 TrackReport range is the sender, not the target\n");
+    const Vec3 self(0.0f, 0.0f, -30.0f);
+    const Vec3 sender(40.0f, 0.0f, -30.0f);
+    const Vec3 v(0.0f, 0.0f, 0.0f);
+    const float sig = 0.5f;
+    const float r_sender = swarm::Distance(self, sender);
+    CHECK(TrustHop0Sender(self, r_sender, sig, true, sender, v, 0.0f));
+    CHECK(TrustHop0Sender(self, r_sender + 1.0f, sig, true, sender, v, 0.2f));
+    // Far-side replay: measured range is the other side of the arena.
+    CHECK(!TrustHop0Sender(self, 200.0f, sig, true, sender, v, 0.0f));
+    CHECK(!TrustHop0Sender(self, 200.0f, sig, true, sender, v, 0.0f,
+                           kReportRangePad));
+    // Using the target range as if it were the transmitter.
+    const Vec3 target(170.0f, 0.0f, -40.0f);
+    CHECK(!TrustHop0Sender(self, swarm::Distance(self, target), sig, true,
+                           sender, v, 0.0f));
+    // No heartbeat yet: cannot check, so we do not drop.
+    CHECK(TrustHop0Sender(self, 200.0f, sig, false, sender, v, 0.0f));
+    // Coast a moving sender: 5 m/s for 0.4 s is 2 m, inside 3σ+2.
+    CHECK(TrustHop0Sender(self, r_sender + 2.0f, sig, true, sender,
+                          Vec3(5.0f, 0.0f, 0.0f), 0.4f));
+}
+
 static void TestPeerReportAssociatesByGeometry() {
     std::printf("peer reports associate by geometry, not track_id\n");
     TrackStore store;
@@ -412,6 +439,7 @@ int main() {
     TestLevelOverflightIsNotAimed();
     TestLevelDashIsNotAHit();
     TestHeartbeatRangeCorroboration();
+    TestHop0TrackReportRangeIsTheTransmitter();
     TestPeerReportAssociatesByGeometry();
     TestInboundRayPredictsPicketHeight();
     TestInboundRayIgnoresSpool();

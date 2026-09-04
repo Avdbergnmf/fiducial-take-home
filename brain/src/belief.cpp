@@ -122,14 +122,25 @@ bool LooksBallistic(const Vec3& velocity, const Vec3& prev_velocity, float dt) {
 }
 
 bool HeartbeatPlausible(const Vec3& self, const Vec3& claimed,
-                        float measured_range, float range_sigma) {
+                        float measured_range, float range_sigma, float extra_pad) {
     const float claimed_range = swarm::Distance(self, claimed);
     const float sigma = range_sigma > 0.1f ? range_sigma : 1.0f;
     // Three sigma plus a couple of metres for quantisation and a few ticks of
     // latency. A replay from the far side of the arena misses this by tens of
-    // metres, not by noise.
-    const float tol = 3.0f * sigma + 2.0f;
+    // metres, not by noise. extra_pad is for TrackReport outbox delay (D76).
+    const float tol = 3.0f * sigma + 2.0f + extra_pad;
     return std::fabs(claimed_range - measured_range) <= tol;
+}
+
+bool TrustHop0Sender(const Vec3& self, float measured_range, float range_sigma,
+                     bool have_sender, const Vec3& sender_p, const Vec3& sender_v,
+                     float sender_age, float extra_pad) {
+    if (!have_sender) return true;
+    float dt = sender_age;
+    if (dt < 0.0f) dt = 0.0f;
+    if (dt > kSenderCoast) dt = kSenderCoast;
+    return HeartbeatPlausible(self, sender_p + sender_v * dt, measured_range,
+                              range_sigma, extra_pad);
 }
 
 // ---------------------------------------------------------------------------

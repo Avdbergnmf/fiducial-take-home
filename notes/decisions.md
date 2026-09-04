@@ -3490,4 +3490,41 @@ x1-c 136.2, x2-a 201.1, x2-b 3/3 **185.5**. Canary `x1-06b926af…`
 **3/3 +87.1**, wasted 0, one ram (drone 5 at 28.86). fa56
 `x2-fa56ef…` 3/3 **83.2**.
 
+## D76 — Hop-0 TrackReport uses the same range-vs-claim as heartbeats
+
+s3 already scores without crypto (hardening, not rescue). What was
+undefended: a hop-0 TrackReport was merged on geometry alone. Heartbeats
+already compared claimed sender range to `SwRxFrame.range`. TrackReport
+payload is the *target*, so gating on that pose would drop every valid
+neighbour report.
+
+**Chosen.** Put the author's pose and velocity on the TrackReport (12 B
+PosQ). Hop-0: coast by `now − sent_time`, run `HeartbeatPlausible` against
+`SwRxFrame.range` with a 15 m outbox pad. Fail: do not merge, do not
+relay. Hopped frames unchanged (no range to the author). Heartbeats
+keep the old path (NotePeer always, MarkFriendly gated, always relay) —
+skipping radio-edge beats re-opened x2-b.
+
+**Tried.** Last-heartbeat lookup of `origin` (0 extra bytes). s3 impostors
+that match range overwrite that pose and the gate then drops the real
+seer's reports: s3 6/6 +192 → 5/6 −36, one breach. Rejected.
+Not relaying hop-0 heartbeats that miss 3σ+2: x2-b 3/3 → 2/3, one
+breach (D56 radio-edge). Rejected.
+
+**Not chosen.** Freshness sizing (already have `StaleAfter`). Ed25519.
+Gating hopped frames.
+
+**Forced replay.** Unit test: sender at 40 m, target at 170 m, measured
+range 200 m is rejected even with the 15 m pad; measured range to the
+sender is accepted.
+
+**Measured.** Identity 8: min **−7.9** (x1-a, 2 civ, 0 breach), mean
+**152.0**, 0 breaches. Wash vs V24 (−7.7 / 152.3) on the graded story.
+s3 **6/6 +172.8**, 0 breach (was +192.2 without the gate; hardening tax,
+not a survival regression). Three fresh x3: **+54.4** (3/3, 1 ground
+waste), **+127.1** 4/4, **+198.6** 3/3. No impersonation breach.
+
+
+
+
 

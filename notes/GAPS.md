@@ -16,13 +16,13 @@ the brief or in a measured hole, and was left on purpose.
 `sign`, `verify`, `agree`, `kdf`, `seal`, `unseal` are unused. Crypto
 primitives are in the host; group/session keys are **not** on boot
 (“deriving those is part of the problem”). Hopped TrackReports are
-trusted on freshness and geometry. A replay with a plausible pose pulls
-UniqueOwner off the ring.
+trusted on freshness and geometry. A replay that arrives as a *relay*
+(no measured range to the author) can still pull UniqueOwner off the
+ring. Hop-0 range-vs-claim is D76.
 
-Heartbeats already compare claimed range to measured range. That is the
-start of a defence, used early because it is free. It does not authenticate
-the payload and it does not apply to a hopped frame (no measured range to
-the *author*).
+Heartbeats and hop-0 TrackReports compare claimed sender range to
+measured range. That does not authenticate the payload and it does not
+apply to a hopped frame.
 
 ### s4 — hostiles overhear
 
@@ -53,8 +53,7 @@ because they are the next honest days, not because they were forgotten.
 
 | Item | Why it is still standing |
 |---|---|
-| Hop-0 TrackReport range-vs-claim | Heartbeats already do this. A hop-0 report could use the same `|claimed_sender_range − measured|` gate. Cheap, s3-adjacent, can drop a valid report if the sender pose is coarse. |
-| Range-vs-claim on hopped reports | No measured range to the author. Needs crypto or a multi-observer residual. Not cheap. |
+| Range-vs-claim on hopped reports | No measured range to the author. Needs crypto or a multi-observer residual. Not cheap. Hop-0 is D76. |
 | Adaptive `ω(R)` | D70: fat rings want slower, tight-sense wants more. Integrating ω while R shrinks phase-jumps the ring. Left at 0.06. Curves: `notes/orbit-cover-tradeoff.md`. |
 | Horizon AND into `CoverCloses` | D58: a six-picket ring never tiles el=0. Would abort shrink and leave the radio radius. |
 | Always-cover an 11 m inbound | 11 m at R=86 is 7.3°, under the 10° bracelet. Sitting at 11 m is under the D68 floor. Needs shrink-R or the rejected AND. |
@@ -166,8 +165,8 @@ links, bandwidth, report/score, time control, kill-envelope, extra-folder
 
 | §12 item | Standing |
 |---|---|
-| Brain library | s0–s2 + generated x1/x2. s3–s5 not attempted. |
-| DESIGN.md | Rewritten to present tense against D75. |
+| Brain library | s0–s2 + generated x1/x2. s3 hop-0 range-vs-claim (D76); hopped reports and s4–s5 not closed. |
+| DESIGN.md | Rewritten to present tense against D75; D76 hop-0 gate in “peer I cannot verify”. |
 | Visualiser | Graded Unity viewer, driven from the Editor. Remaining items in **Unity viewer** above. |
 | Tests | `ctest` + determinism + identity/canary sweeps. Loop: `notes/workflow.md`. |
 | Results | Ablation ladder V0–V24, plots in `notes/` (including attribution). |

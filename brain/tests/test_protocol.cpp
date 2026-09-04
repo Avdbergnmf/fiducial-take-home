@@ -122,6 +122,8 @@ static void TestPayloadRoundTrip() {
     out.velocity = Vec3(12.0f, -3.5f, 0.25f);
     out.belief = Belief::Hostile;
     out.confidence = 200;
+    out.sender_p = Vec3(10.0f, 4.0f, -20.0f);
+    out.sender_v = Vec3(1.0f, 0.0f, 0.0f);
     out.Write(w);
     CHECK(w.ok());
 
@@ -136,6 +138,8 @@ static void TestPayloadRoundTrip() {
     CHECK(swarm::Distance(in.velocity, out.velocity) < 0.3f);
     CHECK(in.belief == Belief::Hostile);
     CHECK(in.confidence == 200);
+    CHECK(swarm::Distance(in.sender_p, out.sender_p) < 0.3f);
+    CHECK(swarm::Distance(in.sender_v, out.sender_v) < 0.3f);
 }
 
 static void TestWriterOverflow() {
@@ -213,6 +217,8 @@ static void TestRelayCopy() {
     m.velocity = Vec3(-13, 0, 0);
     m.belief = Belief::Hostile;
     m.confidence = 200;
+    m.sender_p = Vec3(1, 2, -3);
+    m.sender_v = Vec3(0, 1, 0);
     m.Write(w);
     CHECK(w.ok());
 

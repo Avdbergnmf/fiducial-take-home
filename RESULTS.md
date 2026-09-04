@@ -44,6 +44,14 @@ Hard generated ids (not in the eight): canary
 canary dual-ram, not for a move on this eight (V23 sitting-wall was a
 wash here).
 
+s3 (hardening, D76): **6/6 +172.8**, 0 breaches, 0 civilians. Hop-0
+TrackReport now carries the author's pose and must match `SwRxFrame.range`
+(same residual as heartbeats, plus 15 m outbox pad). Without that gate
+s3 was already +192.2 6/6; this is not a rescue. Hopped reports are still
+trusted. Identity eight is a wash (floor −7.7 → −7.9). Three fresh x3:
++54.4 (3/3, 1 ground waste — F2, not impersonation), +127.1 4/4,
++198.6 3/3.
+
 V10 on the same eight was min **−524.6** (x2-b 0/3, three breaches),
 mean **−136.4**. The floor moved off breaches and onto x1-a's civilian
 chords.

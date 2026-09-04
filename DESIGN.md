@@ -211,20 +211,20 @@ frame. What we do not trust: the payload.
   extrapolated by `now − sent_time`. Hold 2.5 s. A replay from the wrong
   side of the arena fails the range check — that is the start of a tier-3
   defence, used early because it is free. s1 hostiles do not transmit.
-- A track report is associated by pose, not `track_id`. Hopped reports have
-  no measured range to the *author*; they are trusted on freshness and
-  geometry. That is the s3 hole.
+- A hop-0 TrackReport carries the author's pose and uses the same residual
+  against `SwRxFrame.range`, not the reported target (D76). Hopped reports
+  have no measured range to the *author*; they are trusted on freshness and
+  geometry. That is the leftover s3 hole.
 - A fused Hostile is a commit if UniqueOwner can catch it. Hearsay used to
   sit at `track_id` 0 and park a picket on the ring; policy now keys on a
   store-local id.
 
 Failed verification is a range mismatch: we ignore the heartbeat, we do not
-latch Friendly, we do not accuse.
+latch Friendly, we do not merge that hop-0 report, we do not accuse.
 
 **Cost I accepted.** A hostile that transmits a plausible heartbeat (tier 3
 that also matches range, or a tier-5 insider) is marked Friendly and not
-rammed. A hostile that transmits a plausible TrackReport can pull UniqueOwner
-off the ring.
+rammed. A hopped TrackReport can still pull UniqueOwner off the ring.
 
 ## What I do about a compromised member
 
@@ -271,7 +271,7 @@ The loop, determinism, and viewer-as-debugger write-up is
   priority/expiry, seen-set, relay stamps), `test_policy` (facing slot, unique
   owner, live ring, yield corridor, closed cover, connect-first abort, default
   picket 20 m), `test_belief` (classifier geometry plus peer-report
-  association by pose, not track_id).
+  association by pose, not track_id; hop-0 TrackReport range-vs-claim).
 - **Determinism:** `scripts\determinism.ps1` — `--threads 1 --record` then
   `--threads 8 --replay`. Compute timings stripped (not scored).
 - **One id, then the eight, then named hard ids.** `iterate.ps1` with a
@@ -291,11 +291,9 @@ The loop, determinism, and viewer-as-debugger write-up is
 
 The honest list is `notes/GAPS.md`. The next useful days, in order:
 
-1. **s3 range-vs-claim as a real gate on hop-0 TrackReport.** Heartbeats
-   already compare claimed range to measured range. A hopped report has no
-   measured range to the author. Freshness from `now − sent_time`, and refuse
-   a hop-0 report whose sender pose fails the same check. Crypto is a day on
-   its own.
+1. **Hopped TrackReport residual.** Hop-0 range-vs-claim is D76. A relay
+   still has no measured range to the author. Crypto or a multi-observer
+   check. Ed25519 is a day on its own.
 2. **Insider residual.** The origin stamped on a fused track is the start of
    a per-peer model. Naming someone has to change forwarding and merge, not
    just a report line. `P_false_accuse` is unclamped, so the detector has to
@@ -308,8 +306,8 @@ horizon cell into CoverCloses.
 
 ## Known gaps
 
-See `notes/GAPS.md` for the deliverable list. In short: no crypto (s3–s5),
-no insider handling, hopped TrackReports trusted, Claim unused on purpose,
+See `notes/GAPS.md` for the deliverable list. In short: no crypto (s3 hopped
+reports / s4–s5), no insider handling, Claim unused on purpose,
 x1-a two civilians by D44, one generated cover hole slack does not close,
 a set of GUESS constants left for time (`notes/provenance.md`), and the
 Unity backlog (1 m grid, compass, standalone player, multi-run compare).
@@ -330,7 +328,7 @@ true.
 **Brain.** The *decisions* are mine: sure-hit-or-shrink, friends-only then
 local Hostile on the scoring hook, catchable commit, one owner clockwise,
 hops, hopped heartbeats, handoff/orbit, closed-cover slack, connect-first
-duplicate abort (D2, D9, D11, D15, D18, D56, D66, D70, D75). Most of the C++ was written by
+duplicate abort, hop-0 range-vs-claim (D2, D9, D11, D15, D18, D56, D66, D70, D75, D76). Most of the C++ was written by
 an LLM from those instructions. A lot of it was already right when I
 measured it, and I kept it. That is specify, generate, sweep, keep or
 reject. I can reconstruct the rules from scratch. I would not type

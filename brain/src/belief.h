@@ -155,7 +155,20 @@ bool LooksBallistic(const Vec3& velocity, const Vec3& prev_velocity, float dt);
 /// receiver measured. Used to reject a frame that did not come from where
 /// it claims to be.
 bool HeartbeatPlausible(const Vec3& self, const Vec3& claimed,
-                        float measured_range, float range_sigma);
+                        float measured_range, float range_sigma,
+                        float extra_pad = 0.0f);
+
+/// Hop-0 TrackReport: RF range is to the *transmitter*, not the reported
+/// aircraft. Compare against the sender pose on this frame, coasted by
+/// `sender_age`. `extra_pad` covers outbox delay (heartbeats are 0).
+/// Hopped frames must not call this (no range to the author).
+constexpr float kSenderCoast = 2.5f;
+/// Outbox delay on a TrackReport before the radio fires. Heartbeats are
+/// priority 5 and do not need this. 15 m is 0.75 s at max_speed.
+constexpr float kReportRangePad = 15.0f;
+bool TrustHop0Sender(const Vec3& self, float measured_range, float range_sigma,
+                     bool have_sender, const Vec3& sender_p, const Vec3& sender_v,
+                     float sender_age, float extra_pad = 0.0f);
 
 // ---------------------------------------------------------------------------
 // Inbound ray. 2-D, radially symmetric: altitude h = h0 + slope · r, r =

@@ -123,19 +123,10 @@ private:
             if (h.hops == 0)
                 links_.Observe(h.origin, h.seq, h.sent_time, now);
 
-            // TODO(tier 3): everything needed to be suspicious is right here.
-            // f.range and f.bearing are measurements OUR receiver made, with
-            // published sigmas -- not claims the sender made. For a single-hop
-            // frame, the claimed position and the measured range can be
-            // compared, and a replay from the wrong side of the arena fails
-            // that test with no crypto involved.
-            //
-            // TODO(tier 3): freshness is measured (D53). A hopped report
-            // older than the hop-0 stale window is dropped below.
-            //
-            // TODO(tier 5): the residual between a peer's claimed position and
-            // our measured range to it is the one thing an insider cannot lie
-            // about, because range is physical. Accumulate it per peer here.
+            // Hop-0 range-vs-claim is D76 (heartbeats + TrackReports).
+            // Hopped frames have no measured range to the author (still open).
+            // Freshness is measured (D53). Per-peer residual for insiders
+            // is still a TODO.
 
             switch (h.type) {
                 case sw::MsgType::Heartbeat: {
@@ -149,7 +140,9 @@ private:
                     NotePeer(h.origin, predicted, m.velocity, now);
                     // Measured range is to the transmitter. Only hop-0 is
                     // the origin; a relay would fail HeartbeatPlausible and
-                    // smear identity onto the neighbour (D56).
+                    // smear identity onto the neighbour (D56). TrackReport
+                    // range-vs-claim uses the pose on that frame, not this
+                    // roster slot (D76).
                     if (h.hops == 0) {
                         store_.MarkFriendly(predicted, obs.position(),
                                             f.range, f.range_sigma, now);
@@ -173,6 +166,17 @@ private:
                     float age = now - h.sent_time;
                     if (age < 0.0f) age = 0.0f;
                     if (age > links_.StaleAfter()) break;   // stale or replayed
+                    // Payload is the *target*. RF range is to the transmitter.
+                    // Hop-0: sender pose on this frame vs f.range (D76). A
+                    // last-heartbeat lookup was poisonable on s3. Hopped
+                    // frames have no range to the author.
+                    if (h.hops == 0) {
+                        if (!sw::TrustHop0Sender(obs.position(), f.range,
+                                                 f.range_sigma, true, m.sender_p,
+                                                 m.sender_v, age,
+                                                 sw::kReportRangePad))
+                            break;
+                    }
                     const sw::Vec3 predicted = m.position + m.velocity * age;
                     store_.MergePeerReport(predicted, m.velocity, m.belief,
                                            m.confidence, now, h.origin, h.hops);
@@ -221,6 +225,7 @@ private:
                   const sw::Vec3& velocity, float now) {
         if (drone_id >= sw::kMaxFleet) return;
         peer_position_[drone_id] = position;
+        peer_velocity_[drone_id] = velocity;
         peer_last_heard_[drone_id] = now;
         policy_.NoteAlive(drone_id, position, velocity, now);
     }
@@ -381,6 +386,7 @@ private:
 
     sw::DirectLinkStats links_;
     sw::Vec3 peer_position_[sw::kMaxFleet]{};
+    sw::Vec3 peer_velocity_[sw::kMaxFleet]{};
     float peer_last_heard_[sw::kMaxFleet]{};
 
     bool announced_ = false;
