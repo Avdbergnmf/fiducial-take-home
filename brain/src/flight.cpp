@@ -100,9 +100,10 @@ Vec3 LimitAccel(const Vec3& desired, const Config& cfg) {
 }
 
 Vec3 GoTo(const Vec3& target, const Vec3& position, const Vec3& velocity,
-          const Config& cfg, float pos_gain, float vel_gain) {
+          const Config& cfg, float pos_gain, float vel_gain,
+          const Vec3& target_velocity) {
     const Vec3 error = target - position;
-    Vec3 accel = error * pos_gain - velocity * vel_gain;
+    Vec3 accel = error * pos_gain - (velocity - target_velocity) * vel_gain;
     return LimitAccel(accel, cfg);
 }
 
@@ -300,7 +301,7 @@ bool CatchableRam(const Vec3& self_p, const Vec3& self_v,
 
 Vec3 DesiredAccel(Mode mode, const Vec3& position, const Vec3& velocity,
                   const Vec3& goal, const Track* focus, bool leashed,
-                  float dt, const Config& cfg) {
+                  float dt, const Config& cfg, const Vec3& goal_velocity) {
     auto weave_of = [&](const Track& t) {
         return EstimatedAccel(t.velocity, t.last_velocity, dt,
                               cfg.lateral_limit);
@@ -329,9 +330,11 @@ Vec3 DesiredAccel(Mode mode, const Vec3& position, const Vec3& velocity,
     // Must match kCruise in policy.cpp.
     constexpr float kStationCruise = 14.0f;
     const float range = swarm::Distance(position, goal);
+    // Far from station this is a transit and Cruise owns the speed. Close in,
+    // the station may be orbiting, so damp toward ITS velocity (D57).
     return (range > 25.0f)
                ? Cruise(goal, position, velocity, kStationCruise, cfg)
-               : GoTo(goal, position, velocity, cfg);
+               : GoTo(goal, position, velocity, cfg, 0.8f, 1.6f, goal_velocity);
 }
 
 float DesiredYaw(Mode mode, const Vec3& position, const Vec3& velocity,
@@ -425,7 +428,7 @@ Vec3 EnforceSeparation(const Vec3& desired, const Vec3& position, const Vec3& ve
 }
 
 Vec3 EnforceArena(const Vec3& desired, const Vec3& position, const Vec3& velocity,
-                  const Config& cfg) {
+                  const Config& cfg, bool ground_only) {
     constexpr float kSlack = 2.0f;
     Vec3 push;
 
@@ -440,13 +443,23 @@ Vec3 EnforceArena(const Vec3& desired, const Vec3& position, const Vec3& velocit
         else if (p > hi - stop_hi) out -= (p - (hi - stop_hi)) * 0.5f + v * 0.8f;
     };
 
-    wall(position.x, cfg.arena_min.x, cfg.arena_max.x, velocity.x,
-         cfg.lateral_limit, push.x);
-    wall(position.y, cfg.arena_min.y, cfg.arena_max.y, velocity.y,
-         cfg.lateral_limit, push.y);
-    // NED: z is down. arena_min.z is the ceiling, arena_max.z is the ground.
-    wall(position.z, cfg.arena_min.z, cfg.arena_max.z, velocity.z,
-         cfg.max_accel, push.z);
+    if (!ground_only) {
+        wall(position.x, cfg.arena_min.x, cfg.arena_max.x, velocity.x,
+             cfg.lateral_limit, push.x);
+        wall(position.y, cfg.arena_min.y, cfg.arena_max.y, velocity.y,
+             cfg.lateral_limit, push.y);
+        // NED: z is down. arena_min.z is the ceiling, arena_max.z is the ground.
+        wall(position.z, cfg.arena_min.z, cfg.arena_max.z, velocity.z,
+             cfg.max_accel, push.z);
+    } else {
+        // Floor only. Same stopping-distance band, and the ceiling half of
+        // the z wall is deliberately absent: climbing is never fatal.
+        const float p = position.z, v = velocity.z, hi = cfg.arena_max.z;
+        float stop_hi = kSlack;
+        if (cfg.max_accel > 0.1f && v > 0.1f)
+            stop_hi = (v * v) / (2.0f * cfg.max_accel) + kSlack;
+        if (p > hi - stop_hi) push.z -= (p - (hi - stop_hi)) * 0.5f + v * 0.8f;
+    }
 
     if (swarm::LengthSq(push) < 1e-6f) return desired;
     return LimitAccel(desired + push, cfg);

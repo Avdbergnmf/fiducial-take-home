@@ -366,6 +366,45 @@ static void TestProNavSteersAtTheZem() {
     CHECK(swarm::Distance(with_traj, along_v_only) > 1e-4f);
 }
 
+static void TestInterceptCostIsPureRangeWhenParked() {
+    std::printf("a parked ring scores exactly as the facing-slot rule (D59)\n");
+    Config cfg;
+    cfg.max_speed = 20.0f;
+    cfg.lateral_limit = 6.71f;
+    const Vec3 aim(100.0f, 0.0f, -30.0f);
+
+    // Zero velocity: no turn to pay for, so cost is range / max_speed and the
+    // nearer drone always wins. This is what makes the handoff inert on a
+    // static fleet -- it can only ever override, never quietly re-decide.
+    const float near = InterceptCost(Vec3(60, 0, -30), Vec3(), aim, cfg);
+    const float far = InterceptCost(Vec3(0, 0, -30), Vec3(), aim, cfg);
+    CHECK(std::fabs(near - 40.0f / 20.0f) < 1e-3f);
+    CHECK(far > near);
+}
+
+static void TestMovingAtTheTargetBeatsStandingNearIt() {
+    std::printf("velocity already pointed at the inbound beats bare range\n");
+    Config cfg;
+    cfg.max_speed = 20.0f;
+    cfg.lateral_limit = 6.71f;
+    const Vec3 aim(100.0f, 0.0f, -30.0f);
+
+    // Same range, opposite postures: one closing at 15 m/s, one crossing at
+    // 15 m/s. The crossing drone must turn ~90 deg first, which is what the
+    // facing-slot rule cannot see.
+    const Vec3 at(40.0f, 0.0f, -30.0f);
+    const float closing = InterceptCost(at, Vec3(15, 0, 0), aim, cfg);
+    const float crossing = InterceptCost(at, Vec3(0, 15, 0), aim, cfg);
+    CHECK(closing < crossing);
+
+    // And the turn is priced, not free: ~(pi/2)*15/6.71 seconds of it.
+    CHECK(crossing - closing > 3.0f);
+
+    // A drone flying AWAY is worst of the three, even from the same spot.
+    const float away = InterceptCost(at, Vec3(-15, 0, 0), aim, cfg);
+    CHECK(away > crossing);
+}
+
 static void TestArenaAllowsADiveIntercept() {
     std::printf("arena floor is stopping distance, not a 20 m halo\n");
     Config cfg;
@@ -705,7 +744,7 @@ static void TestCatchableRamUsesDivert() {
 }
 
 static void TestArenaSpringsOnStation() {
-    std::printf("on station, walls ceiling and ground all push; intercepts skip them\n");
+    std::printf("on station all three push; intercepting keeps only the floor\n");
     Config cfg;
     cfg.max_accel = 19.7f;
     cfg.lateral_limit = 6.71f;
@@ -723,6 +762,21 @@ static void TestArenaSpringsOnStation() {
     const Vec3 floor = flight::EnforceArena(
         Vec3(0, 0, 15.0f), Vec3(0, 0, -2.0f), Vec3(0, 0, 10.0f), cfg);
     CHECK(floor.z < 14.0f);
+
+    // D58: while intercepting the walls and ceiling come off, but not the
+    // floor. A ram must not be steered around an obstacle; the dirt is not
+    // an obstacle, it is the end of the airframe, and no hostile is under it.
+    const Vec3 ram_wall = flight::EnforceArena(
+        Vec3(10.0f, 0, 0), Vec3(198.0f, 0, -30.0f), Vec3(5.0f, 0, 0), cfg, true);
+    CHECK(std::fabs(ram_wall.x - 10.0f) < 1e-3f);
+
+    const Vec3 ram_roof = flight::EnforceArena(
+        Vec3(0, 0, -10.0f), Vec3(0, 0, -98.0f), Vec3(0, 0, -8.0f), cfg, true);
+    CHECK(std::fabs(ram_roof.z + 10.0f) < 1e-3f);
+
+    const Vec3 ram_floor = flight::EnforceArena(
+        Vec3(0, 0, 15.0f), Vec3(0, 0, -2.0f), Vec3(0, 0, 10.0f), cfg, true);
+    CHECK(ram_floor.z < 14.0f);
 }
 
 static void TestModeNames() {
@@ -748,6 +802,8 @@ int main() {
     TestAimAheadUsesConfiguredDistance();
     TestProNavSteersAtTheZem();
     TestArenaAllowsADiveIntercept();
+    TestInterceptCostIsPureRangeWhenParked();
+    TestMovingAtTheTargetBeatsStandingNearIt();
     TestProNavDoesNotBrakeAlongTheLos();
     TestCollisionCourseCutsOffACrossingInbound();
     TestStationEvensTheLiveRing();

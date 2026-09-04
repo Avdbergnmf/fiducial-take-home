@@ -2493,3 +2493,178 @@ one leak (4/5) and one wasted ground — not the D30 collapse.
 **D55 re-eval.** Leave rejected. The leftover was the empty arc, not
 spawn-inside or default height (D54). Sitting the ring in still does
 not convert the hard-id north miss, and first sight is still not spawn.
+
+## D57 — Orbiting picket: measured on held-out ids, rejected
+
+Revisits D23. The proposal: fly the ring tangentially so a drone handed an
+inbound is already **moving** toward its intercept and only has to turn that
+velocity rather than build it.
+
+The physics says when that can pay. Turning speed `v` through angle `φ` costs
+about `φ·v/a`; building `v` from rest costs `v/a`. So orbiting wins only while
+the required turn is under **1 radian** — and the drone standing on the inbound
+bearing is the one whose tangential velocity is most nearly perpendicular to
+it. That is the worst drone on the ring, and it is the one D23 handed every
+inbound to, because it kept `FacingSlot` ownership. D23's own reason 2 ("a
+rotating picket always carries tangential velocity across the inbound
+corridor") is this mechanism, measured only in its harmful orientation.
+
+Two things D23 did not have, both fixed here before measuring:
+
+1. **`GoTo` damps velocity toward zero.** Chasing a moving station with it
+   means braking against the orbit every tick — the ring gets dragged, not
+   flown. `GoTo` now takes the target's own velocity as feed-forward.
+2. **Ownership must de-spin.** `FacingSlot` quantised a world bearing against
+   an unrotated ring, so every inbound went to a drone that had orbited away.
+   Left in, the fleet collapses: 22/107 stopped, 82 breaches, 40 ground losses.
+   That first run was a bug, not a result.
+
+**Measured, 26 ids (11 fixed + 15 generated), against baseline mean +57.2:**
+
+| rate rad/s | mean | capture | breaches | stopped | ground |
+|---|---:|---:|---:|---:|---:|
+| 0 (baseline) | +57.2 | 21.4% | 10 | 97/107 | 4 |
+| 0.02 | +80.9 | 23.1% | 5 | 101/106 | 13 |
+| 0.03 | **+95.9** | 22.9% | 7 | 100/107 | 3 |
+| 0.04 | −6.9 | 21.3% | 16 | 91/107 | 15 |
+| 0.06 | +57.8 | 23.0% | 10 | 96/106 | 12 |
+| 0.10 | +42.8 | 22.3% | 12 | 95/107 | 1 |
+
+With the handoff of D59 on top, 0.03 reached mean **+108.8**, capture 23.8%,
+102/107 stopped — better than either half alone on every column, and the two
+fixed each other's failure mode: the handoff alone sent distant drones on long
+stern chases into the dirt (ground 17), and the orbit made those chases short
+and shallow (ground 2).
+
+**Then it did not survive held-out ids.** 15 fresh `--new-token` draws, never
+used while tuning:
+
+| build | mean | min | stopped | wasted | ground |
+|---|---:|---:|---:|---:|---:|
+| baseline | +27.2 | −581.1 | 52/58 | 13 | 13 |
+| orbit 0.03 | +12.8 | −1259.6 | 53/59 | 13 | 13 |
+| orbit + handoff | +26.2 | −1019.3 | 55/59 | 15 | 12 |
+| **handoff alone** | **+63.5** | **−382.3** | 54/59 | **1** | **1** |
+
+**Rejected.** The +38.7 that rotation looked worth on the tuning set is worth
+−14.4 on ids it has not seen, and it costs 678 points of floor. The rate curve
+was the tell and I should have read it sooner: +80.9 / +95.9 / −6.9 across
+0.02 / 0.03 / 0.04 is not a curve with an optimum in it, it is noise with a
+peak, and `ground` tracks it exactly (13 / 3 / 15). Picking 0.03 off that
+surface is fitting to 26 layouts.
+
+**What was real:** more hostiles stopped and fewer breaches, on both sets.
+That part is the handoff (D59), which carries it alone and generalises.
+
+**Kept in the tree, disabled** (`kOrbitRate = 0`), against the D23/D24
+convention of recording rejected options only here: the de-spin and the
+feed-forward are latent correctness fixes on their own, and the mechanism is
+one rate constant away if a later change makes long chases cheap. At zero it
+is provably inert — 22 of 26 ids byte-identical, and `fmod` over a zero phase
+reproduces the old `FacingSlot` exactly.
+
+---
+
+## D58 — The ground is not a wall
+
+D48 turns the arena box off while intercepting, so a ram that can still hit is
+not steered around an obstacle. Right for walls and the ceiling; wrong for the
+floor, and it was costing 4 drones across the sweep with 3 on one id.
+
+The asymmetry: clipping a wall costs an arena exit **only if we actually
+leave**, and climbing is never fatal. The dirt ends the airframe outright. And
+no hostile is ever below the ground, so a ram diving into the floor is one
+whose geometry has already failed — pulling it up forfeits no intercept that
+was still live.
+
+`EnforceArena` gains `ground_only`, applied while intercepting: floor kept,
+walls and ceiling dropped. Same stopping-distance band as before.
+
+| | mean | wasted | ground |
+|---|---:|---:|---:|
+| before | +57.2 | 7 | 4 |
+| after | **+58.9** | 6 | 3 |
+
+Small, strictly positive, no kills lost. **Adopted.**
+
+**What it does not fix.** Three ground losses remain and they are not during
+an intercept: a version of this as an `abort ground` reason — bail out once
+inside our own vertical stopping band — was **bit-identical on all 26 ids**,
+so it never fired once. Those deaths happen on station, where the full box is
+already applied, and the cause is still open. Reverted rather than shipped as
+a branch that never executes.
+
+---
+
+## D59 — Hand the inbound to whoever is already moving at it
+
+Revisits D24, which measured min-time-to-intercept assignment as worse
+(+22.0 against +99.1) and named its own missing prerequisite: *"a real
+weapon-target assignment needs claims broadcast again."*
+
+Two things were wrong with that prototype rather than with the idea. It scored
+candidates **from their stations** — poses with no velocity — so it could not
+see a velocity advantage even in principle. And it replaced the facing-slot
+rule outright rather than overriding it.
+
+**The score.** For a candidate at `(p, v)` and an aim point:
+
+```
+cost = φ·|v| / lateral_limit  +  range / max_speed
+       └ turn what we have ┘     └ then fly the rest ┘
+```
+
+`φ` is the angle between current velocity and the direction to the aim. At
+`|v| = 0` the turn term vanishes and this is pure range, so a parked ring
+scores exactly as the facing-slot rule always did — the change is inert on a
+static fleet and only speaks up when someone is already moving.
+
+**Nothing new on the wire.** Heartbeats already carry velocity for dead
+reckoning; it was parsed and thrown away. Keeping it lets every drone score
+every live peer from the same hopped beats, so the fleet agrees on the owner
+with no Claim frame and no bandwidth — which matters against a comms term
+already scoring 22.8–39.6 of 40, and against s4, where a claim is exactly the
+intent a hostile is listening for.
+
+**The margin is load-bearing.** With a bare comparison two near-equal
+candidates trade the track every time a heartbeat lands: x4-cbeb2340 lost
+**13 airframes** to that thrash, and the sweep's `ground` went 3 → 17. The
+facing drone is therefore the **incumbent**, and a challenger must beat it by
+`kHandoffMargin` = 1.0 s of cost before ownership moves. "Much better", not
+"better".
+
+| | tuning, 26 ids | held-out, 15 ids |
+|---|---|---|
+| mean | +57.2 → **+80.5** | +27.2 → **+78.9** |
+| floor | −656.9 → **−242.5** | −581.1 → **−428.5** |
+| stopped | 97/107 → **100/107** | 52/58 → **55/59** |
+| breaches | 10 → **7** | 5 → **4** |
+| wasted / ground | 7/4 → 8/3 | 13/13 → **1/1** |
+| capture | 21.4% → 21.9% | 27.8% → **28.9%** |
+
+**Adopted.** Better mean and better floor on both sets, and the held-out set
+is the one that counts (§11.2).
+
+**It is surgical.** 22 of 26 ids are unchanged; the effect is almost entirely
+tier 5, where it is large:
+
+| id | before | after | |
+|---|---:|---:|---|
+| s5 | −656.9 | **−23.7** | 3/7 → **6/7** stopped |
+| x5-f9a3dc60 | −595.7 | −385.2 | 2/5 → 3/5 |
+| x3-fe5c574c | +127.4 | +172.5 | ground 1 → 0 |
+| x5-973cc513 | +122.2 | **−153.7** | 5/5 → 4/5 — **the cost** |
+
+That tier-5 concentration is not a coincidence and is the most interesting
+thing here: with a compromised peer in the fleet, picking the interceptor by
+**physics each drone can check for itself** is harder to corrupt than a slot
+assignment inherited from a roster the insider is inside. s5 gains three
+hostiles with no insider detection written at all.
+
+**What I accept.** One tier-5 regression (x5-973cc513, −275.9, one hostile
+lost). `pair_friendly` 2 → 4 on the tuning set: consensus is not guaranteed,
+since each drone scores itself from its true pose and its peers from beats up
+to 0.5 s old, so two drones can briefly both believe they own an inbound. The
+existing closer-chaser `duplicate` abort is the backstop and it is not
+airtight. A claim on the wire would close it — and that is now a bandwidth
+question, not an unknown one.

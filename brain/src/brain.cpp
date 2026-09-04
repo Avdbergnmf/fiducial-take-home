@@ -146,7 +146,7 @@ private:
                     if (age < 0.0f) age = 0.0f;
                     if (h.hops > 0 && age > links_.StaleAfter()) break;
                     const sw::Vec3 predicted = m.position + m.velocity * age;
-                    NotePeer(h.origin, predicted, now);
+                    NotePeer(h.origin, predicted, m.velocity, now);
                     // Measured range is to the transmitter. Only hop-0 is
                     // the origin; a relay would fail HeartbeatPlausible and
                     // smear identity onto the neighbour (D56).
@@ -217,11 +217,12 @@ private:
         }
     }
 
-    void NotePeer(uint8_t drone_id, const sw::Vec3& position, float now) {
+    void NotePeer(uint8_t drone_id, const sw::Vec3& position,
+                  const sw::Vec3& velocity, float now) {
         if (drone_id >= sw::kMaxFleet) return;
         peer_position_[drone_id] = position;
         peer_last_heard_[drone_id] = now;
-        policy_.NoteAlive(drone_id, position, now);
+        policy_.NoteAlive(drone_id, position, velocity, now);
     }
 
     swarm::Command Fly(const swarm::Observation& obs) {
@@ -233,7 +234,8 @@ private:
 
         sw::Vec3 accel = sw::flight::DesiredAccel(
             mode, position, velocity, policy_.DesiredPosition(obs),
-            focus, policy_.leashed(), obs.dt(), cfg_);
+            focus, policy_.leashed(), obs.dt(), cfg_,
+            policy_.goal_velocity());
 
         accel = sw::flight::EnforceSeparation(accel, position, velocity,
                                               store_.tracks(), cfg_, target,
@@ -241,8 +243,11 @@ private:
         // Intercepting skips the box. Leaving the arena is a wasted loss on
         // station; a ram that can still hit must not be steered around a
         // wall, the ceiling, or the dirt (D48). Uncatchable aborts first.
-        if (!sw::Intercepting(mode))
-            accel = sw::flight::EnforceArena(accel, position, velocity, cfg_);
+        // Walls and ceiling are off while intercepting (D48); the floor is
+        // not (D58). No hostile is below the dirt, so pulling up gives up
+        // no intercept that was still live.
+        accel = sw::flight::EnforceArena(accel, position, velocity, cfg_,
+                                         sw::Intercepting(mode));
 
         LogProximity(obs, target);
 

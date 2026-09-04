@@ -20,8 +20,13 @@ Vec3 LimitAccel(const Vec3& desired, const Config& cfg);
 
 /// PD station keeping. The workhorse: formation, waypoints and loiter are all
 /// this with a different target.
+/// `target_velocity` is the velocity of the target point itself. The damping
+/// term pulls toward it rather than toward zero, so a MOVING station is
+/// flown rather than chased: with it the drone settles on the station's own
+/// velocity, without it the same term brakes against it every tick (D57).
 Vec3 GoTo(const Vec3& target, const Vec3& position, const Vec3& velocity,
-          const Config& cfg, float pos_gain = 0.8f, float vel_gain = 1.6f);
+          const Config& cfg, float pos_gain = 0.8f, float vel_gain = 1.6f,
+          const Vec3& target_velocity = Vec3());
 
 /// Travel toward a point at a commanded speed, decelerating into it.
 Vec3 Cruise(const Vec3& target, const Vec3& position, const Vec3& velocity,
@@ -76,7 +81,8 @@ bool CatchableRam(const Vec3& self_p, const Vec3& self_v,
 /// after this, in Fly.
 Vec3 DesiredAccel(Mode mode, const Vec3& position, const Vec3& velocity,
                   const Vec3& goal, const Track* focus, bool leashed,
-                  float dt, const Config& cfg);
+                  float dt, const Config& cfg,
+                  const Vec3& goal_velocity = Vec3());
 
 /// Yaw for the named mode. Outward on station, at the watch target, or
 /// along velocity when intercepting / stalking.
@@ -113,8 +119,15 @@ Vec3 EnforceSeparation(const Vec3& desired, const Vec3& position, const Vec3& ve
 /// The band is stopping distance to the actual wall, not a fixed halo.
 /// Vertical uses `max_accel`. Not called while intercepting: a ram that
 /// can still hit must not be steered around the box (D48).
+/// `ground_only` keeps the floor and drops the walls and ceiling. That is the
+/// intercepting case: D48 is right that a ram which can still hit must not be
+/// steered around a wall, but the ground is not a wall. Clipping a wall costs
+/// an arena exit only if we actually leave; the dirt ends the drone outright,
+/// and no hostile is ever below it -- so a ram diving into the floor is one
+/// whose geometry has already failed, and pulling it up forfeits no intercept
+/// (D58).
 Vec3 EnforceArena(const Vec3& desired, const Vec3& position, const Vec3& velocity,
-                  const Config& cfg);
+                  const Config& cfg, bool ground_only = false);
 
 /// Evenly spaced ring station. `index` is the rank among `count` stations
 /// (drone_id on a full fleet; live rank after a death, D19). No negotiation.
