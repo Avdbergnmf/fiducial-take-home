@@ -2494,7 +2494,228 @@ one leak (4/5) and one wasted ground — not the D30 collapse.
 spawn-inside or default height (D54). Sitting the ring in still does
 not convert the hard-id north miss, and first sight is still not spawn.
 
-## D57 — Orbiting picket: measured on held-out ids, rejected
+---
+
+## D57 — Kill-envelope cue (viewer only)
+
+**The question.** Can we draw the theoretical safety area: each living
+drone's remaining intercept cone, projected onto a sphere around the
+asset, and see whether those patches close?
+
+**Not in the brain.** No new log, no control-loop change. The recording
+already has the numbers: live poses, `params sense/maxv/lat/ring`,
+header `kill_radius` and `asset.radius`.
+
+**Model (labelled, not the commit gate).** Hostile first appears on that
+drone's sense sphere and flies `maxv` (D37) straight at the asset.
+Divert from rest is `lat`. `Reach()` is the same closed form as
+`flight.cpp`. A cell is covered if any living friendly can still get
+within `kill_radius` of that inbound before it enters the asset
+cylinder. UniqueOwner, scramble delay, and the 0.1 s cylinder evidence
+are left out — this is geometry, not policy.
+
+**Drawn.** A translucent belt on the direction sphere (radius
+`ring+sense`), green / red. The picket-height ring is the closed/hole
+readout. Select a friendly: generators to first-sight on its sense
+sphere. Chip: `closed · N live` or `hole X°`.
+
+---
+
+## D58 — Closed-cover radius; default picket 25 m
+
+**The question.** The kill-envelope cue (D57) shows the planned ring is
+not a closed belt at picket altitude, even after a cone is fitted. The
+radio fraction 0.625 is a measured standoff, not a coverage rule. Sitting
+5 m lower would put the bracelet in the inbound band hostiles actually
+use; the high-el part of the belt is unused.
+
+**Not D54 / D55.** Default 20 m and 12 m were identity washes and did not
+convert the hard-id first arrival. Compact-then-open pulled the ring in
+by tens of metres and collapsed identity. This is 30 → 25 only, and a
+shrink cap on radius, never a grow and never a spawn-inside pull-in.
+
+**Radius rule.** Keep D21/D28/D33 (radio, chord preservation, spawn 0.65,
+3.5 s react, floor `asset+10`). Then shrink, never grow, to the largest
+`R` at the *current* station height where the unique-owner Voronoi-edge
+inbound is still catchable from rest:
+
+- Hostile appears on that picket's sense sphere, flies `maxv` at the
+  asset (same as D57).
+- Divert from rest is `lat`. `Reach()` matches `flight.cpp`.
+- Test the picket elevation (`atan(H/R)`), the bracelet the overlay
+  scores as closed/hole. Horizon is not AND-ed: a six-picket ring never
+  catches a ground-level bisector, and that abort would leave the radio
+  radius.
+- If even the floor is open, leave the caps: shrinking cannot invent
+  time, and growing is the D21 F0.75 collapse.
+
+Height is an input. After a ray, `H` drops and the same predicate runs
+again.
+
+**Altitude.** `kRayDefaultAlt = 25`. Fitted cone still clamps to
+`kRayCapAlt = 30` (friendly spawn). Floor 6 m unchanged.
+
+**On-station arithmetic.** An even 16-picket s1 ring at 86 m / 30 m
+already tiles under this model (and at 25 m). The open belt at t≈0 is
+the spawn cluster, not a too-large planned `(R,H)`. The cap binds when
+`N` is small (six stations cannot hold 86 m) or `sense` is tight (35 m
+cannot tile 86 m). That is the mathematical rule the radio fraction was
+not.
+
+**Measured.** Identity 8/8, mean **153.8 → 154.5**, worst **x1-a −4.5 →
+−3.6**. 0 breaches. s2 **6/6, 180.7 → 182.0**. s1 6/6 **203.6**. x1-a
+still 4/4, 2 civ (D44). Hard id still **2/3**, hostile_0 still
+**21.31 s**, score **−109 → −113.6** (comms 32.4 → 30.8). Default 25 m
+is not D54's 20/12 wash and not a D55 pull-in. Keep.
+
+---
+
+## D59 — First yielder keeps the intercept
+
+**The leak.** `x2-34c55aeb5ae617e74dac318d1645dd2c` missed the first
+inbound because two drones both flew at it, then **both** stepped off
+the same remaining-flight corridor. Each treated the other as the
+interceptor (`FlyingAt`). Yield is symmetric, so the path emptied.
+
+**Chosen.** When a picket would yield, ignore a mate who has already
+yielded: fully outside `friendly_margin` of the owner-slot corridor, or
+peeling away from it faster than 3 m/s with at least 1.5 m of offset.
+If that leaves nobody intercepting and **we** are already flying at the
+inbound, keep our goal. Same-tick both still on the line both still
+yield — ACK later.
+
+**Not chosen.** Duplicate abort (`CloserChaser`) is already asymmetric
+(range, then lower id). This is the picket corridor, not that gate.
+Do not put yield on interceptors (D51).
+
+**Measured.** `x2-34c55aeb…` **4/5 −16.4 → 5/5 +190.4**, 0 breaches.
+Identity 8/8 unchanged (mean **154.5 → 154.6**, worst x1-a **−3.6**,
+2 civ, D44). s2 still 6/6 **182.8**.
+
+---
+
+## D60 — Aim cue is the believed body, coasted; this miss is tilt
+
+**The miss.** `x2-fa56ef171718281fef54383d2dba36d6`, drone 1 vs
+hostile_0. Closest **1.78 m** at 15.90 against kill **1.16**. Abort
+`uncatchable` at 15.93 (already past, closing −15.6), breach at 17.85.
+Scramble 12.74, ram 13.24. Drone 2 committed the same inbound at 14.66
+and aborted `duplicate` 0.1 s later — they had a 28 m CPA miss; this
+geometry is drone 1's or nobody's.
+
+**The cue is not the intercept, and should not sit ahead.** `commit` /
+`near` / `ram` log `t.position` (believed **current** pose). Guidance
+flies CollisionCourse to `I(t) = tgt + v t`, which *is* metres ahead
+along their track (4–26 m on this pass). AimIndex used n=/e=/alt= only,
+so the ghost sat on the last sample: the commit pose for ~2 s, then
+0–0.1 s old in the last second (~0–2 m behind at 18 m/s). Own-fix is
+another ~1.8 m off the truth tetrahedron. Along-track error vs truth at
+the log instants is **0.00–0.05 s** — not a stale track.
+
+**Chosen (viewer).** Coast the Aim ghost with `vn/ve` to the playhead.
+Still the believed body, still not I. Without vz the altitude stays on
+the sample.
+
+**The unused accel.** Commanded xy is **maxed from ~14.5** (6.71) and
+~5.3 before that (N=2 thinks a double integrator hits with that).
+**Achieved** xy from 10 Hz Δv is **~4.2 for the whole chase**, almost
+independent of commanded 4.8–6.7. Tilt 0.6 rad takes ~0.4 s to deliver
+xy (D49). The t-bin also jumps every few ticks and rotates the xy
+heading 20–40° / 0.1 s, so the attitude loop never settles. In the last
+second t_cpa is already < tilt; there is no leftover plant to spend.
+Passing behind is the leftover 0.57 m after 3.2 s of ~4 m/s², not a
+steer at the current body.
+
+**Tried and rejected on this id.**
+
+1. Denser earliest-t (0.05 s). First kill sat between 2.4 s and 2.8 s
+   and saturated, but the shorter meeting aligned velocities;
+   CatchableRam aborted at 3 m still closing 1.4. Closest **1.78 → 2.33**.
+2. Same I, scale xy to `lateral_limit` once N=2 says killable. Achieved
+   xy still ~4.2. Closest **1.80**. Score −111.2 → −114.4.
+
+**Not chosen.** Baking tilt into t_go (D49). 0.5·kill lead on
+CollisionCourse (at CPA it picked a 7 s stern chase). Dropping
+`closing ≥ 5 ⇒ catchable` — drone 2 cannot take this shot.
+
+**Flight unchanged.** The 0.57 m is actuator lag on a crossing
+overtake (hostile 18.4 m/s, interceptor peaked at 13). Commanding
+harder does not raise delivered xy. A shorter t makes the merge worse.
+
+**Measured.** Cue only; this id still 2/3, −111.2. Identity not re-run
+(command path untouched).
+
+---
+
+## D61 — Aim is I; reach-horizon cue; published tilt plant
+
+**Aim.** The ghost sat on the believed body (`n=/e=`), so it looked
+beside the hostile. CollisionCourse already flies to `I(t)`. `commit` /
+`near` / `ram` now also log `in=/ie=/ialt=`. AimIndex draws that meeting
+when present. `fix_sigma` is not added — the sample is already believed;
+inspector sigma is the noise display. Old traces without `in=` fall back
+to the body.
+
+**Reach horizon.** Not a tetrahedron. Own-fix uncertainty is the
+tetrahedron (inspector sigma). The double-integrator reachable set in N
+seconds is a ball of radius `Reach(N, lat, maxv)` around the ballistic
+point `p + v N` — same closed form as the kill envelope, from the current
+velocity rather than from rest. New cue, slider 0.2–4 s (default 1).
+Viewer-only; not a recorded field. Cover/picket `Reach` is unchanged.
+
+**Tilt.** D49's ~0.4 s was *observed* Δv vs command, not the published
+plant. `--dump-params`: `drone.max_tilt=0.6`, `drone.max_body_rate=8`.
+CHALLENGE.md: no actuator delay; xy bound is `g·tan(max_tilt)`; inner
+loop has finite bandwidth. `φ = atan(a_h / g)`, `|φ̇| ≤ ω`, so time to
+max tilt from 0 is `τ = 0.6/8 ≈ 75 ms`, and `|ȧ_h| ≈ g ω ≈ 78 m/s³` near
+hover.
+
+Two uses of that, not D49's `t_go += delay` (that *softens* the command):
+
+1. N=2 invert: `a = 2 ZEM / (t − τ)²`, skip bins with `t − τ < 0.12`.
+   Scoring still `PredictedPosition` on the full `t`, so the chosen bin
+   can move later rather than always commanding harder.
+2. Issued xy is slewed at `g ω dt` while intercepting (`SlewHorizontal`).
+   z is copied through. Separation still after.
+
+75 ms will not turn a 1.78 m miss into a 1.16 m kill by itself. Identity
+and this id re-measured after the command path changed.
+
+**Measured.** This id still 2/3, **−111.2 → −112.1**, breach still 17.85.
+Identity 8/8, 0 breaches, mean **154.6 → 149.8**, worst x1-a **−3.6 →
+−2.0**, still 4/4 with 2 civ (D44). s2 6/6 **180.9**, s1 6/6 **203.9**.
+Hard id still **2/3, −113.6**, hostile_0 still the first-arrival miss.
+`params` now logs `rate=8.0`. `in=` on a commit sits metres ahead of
+`n=/e=` (e.g. body 80/98 vs meeting 41/52).
+
+---
+
+## D62 — Drop τ-invert; hold the intercept clock
+
+**τ out.** `(t − τ)²` was a fake delay on the shot, not a better
+prediction of where we will be. N=2 is `a = 2 ZEM / t²` again.
+`SlewHorizontal` stays: that is the published body-rate cap on issued
+xy, not a number added onto t_go.
+
+**The lever.** Receding-horizon over discrete t-bins hopped t_go every
+few ticks and rotated commanded xy 20–40° / 0.1 s, so the attitude loop
+never sat at 6.7 (D60). Denser earliest-t made this id *worse*. Hold
+`prefer_t = last t_go − dt`. Keep it while predicted miss ≤ kill. Only
+re-bin if the held clock no longer hits and a bin does, or neither hits
+and a bin is more than a kill-radius better.
+
+First commit still takes the earliest killable bin. After that the
+clock counts down instead of re-picking 2.4 vs 2.8.
+
+**Measured.** `x2-fa56ef…` **2/3 −112.1 → 3/3 +84.0**, 0 breaches,
+asset survived. Hostile_0 is the ram that used to miss at 1.78 m.
+
+Identity 8/8, 0 breaches, mean **149.8 → 140.0**. All kill counts
+hold: s1 6/6 **203.9 → 182.1**, s2 6/6 **180.9 → 175.5**, x1-a 4/4
+**−2.0 → −15.5** still 2 civ (D44). x2-b **105.9 → 139.1**. Hard id
+still **2/3, −113.4**. The named-bar dip is timing/comms on intercepts
+that already hit, not a new leak.
+## D63 — Orbiting picket: measured on held-out ids, rejected
 
 Revisits D23. The proposal: fly the ring tangentially so a drone handed an
 inbound is already **moving** toward its intercept and only has to turn that
@@ -2530,7 +2751,7 @@ Two things D23 did not have, both fixed here before measuring:
 | 0.06 | +57.8 | 23.0% | 10 | 96/106 | 12 |
 | 0.10 | +42.8 | 22.3% | 12 | 95/107 | 1 |
 
-With the handoff of D59 on top, 0.03 reached mean **+108.8**, capture 23.8%,
+With the handoff of D65 on top, 0.03 reached mean **+108.8**, capture 23.8%,
 102/107 stopped — better than either half alone on every column, and the two
 fixed each other's failure mode: the handoff alone sent distant drones on long
 stern chases into the dirt (ground 17), and the orbit made those chases short
@@ -2554,7 +2775,7 @@ peak, and `ground` tracks it exactly (13 / 3 / 15). Picking 0.03 off that
 surface is fitting to 26 layouts.
 
 **What was real:** more hostiles stopped and fewer breaches, on both sets.
-That part is the handoff (D59), which carries it alone and generalises.
+That part is the handoff (D65), which carries it alone and generalises.
 
 **Kept in the tree, disabled** (`kOrbitRate = 0`), against the D23/D24
 convention of recording rejected options only here: the de-spin and the
@@ -2565,7 +2786,7 @@ reproduces the old `FacingSlot` exactly.
 
 ---
 
-## D58 — The ground is not a wall
+## D64 — The ground is not a wall
 
 D48 turns the arena box off while intercepting, so a ram that can still hit is
 not steered around an obstacle. Right for walls and the ceiling; wrong for the
@@ -2585,7 +2806,21 @@ walls and ceiling dropped. Same stopping-distance band as before.
 | before | +57.2 | 7 | 4 |
 | after | **+58.9** | 6 | 3 |
 
-Small, strictly positive, no kills lost. **Adopted.**
+Small, strictly positive, no kills lost.
+
+**Then the baseline moved under it.** Re-measured after merging D57–D62, it is
+**bit-identical with and without**: mean +101.4, ground 1, on all 26 ids. The
+closed-cover radius and the tilt-lag work had already removed the case it
+guards — a ram diving at a low hostile from a 60 m ring — by bringing the
+default picket in to 25 m.
+
+**Kept anyway, and worth being explicit about why**, because by this project's
+usual standard a change with no measured benefit does not ship. This one is not
+a tactic claiming a score; it is an invariant with a physical argument that does
+not depend on tuning — the floor ends the airframe, no hostile is ever beneath
+it, so pulling up can never forfeit a live intercept. It is eight lines, it is
+pinned by a test, and it measures as costing nothing. The case it guards
+returns the moment the ring goes back out.
 
 **What it does not fix.** Three ground losses remain and they are not during
 an intercept: a version of this as an `abort ground` reason — bail out once
@@ -2596,7 +2831,7 @@ a branch that never executes.
 
 ---
 
-## D59 — Hand the inbound to whoever is already moving at it
+## D65 — Hand the inbound to whoever is already moving at it
 
 Revisits D24, which measured min-time-to-intercept assignment as worse
 (+22.0 against +99.1) and named its own missing prerequisite: *"a real
@@ -2661,10 +2896,41 @@ thing here: with a compromised peer in the fleet, picking the interceptor by
 assignment inherited from a roster the insider is inside. s5 gains three
 hostiles with no insider detection written at all.
 
-**What I accept.** One tier-5 regression (x5-973cc513, −275.9, one hostile
-lost). `pair_friendly` 2 → 4 on the tuning set: consensus is not guaranteed,
-since each drone scores itself from its true pose and its peers from beats up
-to 0.5 s old, so two drones can briefly both believe they own an inbound. The
-existing closer-chaser `duplicate` abort is the backstop and it is not
-airtight. A claim on the wire would close it — and that is now a bandwidth
-question, not an unknown one.
+**Then D57–D62 landed and it stopped paying.** Re-measured against the merged
+tree rather than the baseline it was developed on:
+
+| | tuning, 26 ids | held-out, 15 ids |
+|---|---|---|
+| merged baseline | **+101.4** | **+73.8** |
+| with the handoff | +76.7 | +67.5 |
+| floor | −44.5 → −250.3 | −429.0 → −493.9 |
+| breaches | 4 → 7 | 1 → 1 |
+| stopped | 103/107 → 100/107 | 54/57 → 54/57 |
+
+**Not adopted; the code is removed.** The gain was real against the old
+baseline and is gone against this one, because D58's closed-cover radius and
+D59's first-yielder reached the same place by a different route — and they got
+further (breaches 10 → 4; the handoff managed 10 → 7). Two mechanisms now
+decide who goes, and the override fights the yield coordination rather than
+composing with it.
+
+**What this is actually evidence of.** Not that scoring an intercept on
+velocity is wrong — 22 of 26 ids were untouched and tier 5 gained three
+hostiles, which is a real mechanism. It is that the thing it was fixing has
+since been fixed better somewhere else, and a second fix for a solved problem
+is a liability. The measurement that mattered was re-running against the
+merged tree instead of trusting numbers taken against a baseline that had
+moved; without it this ships as a −24.7 regression wearing a +23.3 commit
+message.
+
+**Recoverable at commit `6e5c69b`** — full implementation, tests, and the
+tuning-set numbers — if the ownership rule is ever revisited. Left out of the
+tree per the D23 / D24 convention: a rejected option belongs in this log, and
+two disabled mechanisms in a file that was just refactored for clarity is how
+the spaghetti comes back.
+
+**Open, and it outlived the experiment:** `pair_friendly` is 4 on the merged
+baseline with no handoff at all. Consensus on who owns an inbound is not
+guaranteed — each drone scores itself from its true pose and its peers from
+beats up to 0.5 s old — and the closer-chaser `duplicate` abort is the only
+backstop. That is worth its own look.

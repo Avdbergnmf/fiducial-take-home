@@ -30,6 +30,7 @@ constexpr float kFacingTie = 0.08f;        // slots; bisector band so two observ
 constexpr float kMateIdGate = 20.0f;       // m; heartbeat pose → sensor track (same as FacingReceding)
 constexpr float kOwnerSilent = 1.5f;       // s; three missed 2 Hz heartbeats
 constexpr float kNeverHeard = -1.0e8f;
+constexpr float kYieldAway = 3.0f;         // m/s further off the corridor: already yielded (D59)
 
 constexpr uint8_t kPrioTrack = 3;
 constexpr uint8_t kPrioTrackFirst = 6;      // first Hostile report, above heartbeat
@@ -37,7 +38,132 @@ constexpr uint8_t kPrioHeartbeat = 5;       // identity first: claims/reports st
 constexpr float kRayEvery = 0.5f;           // s; cone hops between routine tracks
 constexpr float kReceding = 2.0f;           // m/s away; facing owner yields to clockwise
 
-float ComputePicketRadius(const Config& cfg, uint32_t live_count) {
+/// Same closed form as flight.cpp Reach (anonymous) and the kill-envelope
+/// cue: divert from rest at accel `a`, coast once |v| hits `vmax`.
+float CoverReach(float t, float a, float vmax) {
+    if (t <= 0.0f || a < 1e-6f) return 0.0f;
+    if (vmax < 1e-3f) return 0.5f * a * t * t;
+    const float tv = vmax / a;
+    if (t <= tv) return 0.5f * a * t * t;
+    return vmax * t - 0.5f * vmax * vmax / a;
+}
+
+/// Outer intersection of the outbound ray asset + s·u (s>0) with the
+/// sense sphere around the picket. Matches ReachCover.FirstSight.
+bool CoverFirstSight(const Vec3& asset, const Vec3& picket, const Vec3& u,
+                     float sense, Vec3& hit) {
+    const Vec3 d = picket - asset;
+    const float b = swarm::Dot(u, d);
+    const float disc = b * b - swarm::Dot(d, d) + sense * sense;
+    if (disc < 0.0f) return false;
+    const float s = b + std::sqrt(disc);
+    if (s < 0.5f) return false;
+    hit = asset + u * s;
+    return true;
+}
+
+/// Horizontal cylinder around the asset (NED xy). 0 miss, 1 already
+/// inside, 2 hits at t. Matches ReachCover.CylinderCase.
+int CoverCylinder(const Vec3& asset, float radius, const Vec3& pos,
+                  const Vec3& vel, float& t) {
+    t = 0.0f;
+    const Vec3 h0(pos.x - asset.x, pos.y - asset.y, 0.0f);
+    const Vec3 vh(vel.x, vel.y, 0.0f);
+    const float r2 = radius * radius;
+    const float h2 = swarm::LengthSq(h0);
+    if (h2 <= r2) return 1;
+    const float a = swarm::LengthSq(vh);
+    const float b = 2.0f * swarm::Dot(h0, vh);
+    const float c = h2 - r2;
+    if (a < 1e-8f) return 0;
+    const float disc = b * b - 4.0f * a * c;
+    if (disc < 0.0f) return 0;
+    const float s = std::sqrt(disc);
+    const float t0 = (-b - s) / (2.0f * a);
+    const float t1 = (-b + s) / (2.0f * a);
+    const float pick = t0 > 0.02f ? t0 : t1;
+    if (pick <= 0.02f) return 1;
+    t = pick;
+    return 2;
+}
+
+/// Unique-owner catch from rest. Same samples and margins as the
+/// kill-envelope cue, in NED (viewer is Y-up).
+bool CoverCanCatch(const Vec3& asset, float asset_radius, const Vec3& picket,
+                   const Vec3& u, float sense, float max_speed, float accel,
+                   float kill) {
+    Vec3 hit;
+    if (!CoverFirstSight(asset, picket, u, sense, hit)) return false;
+    const Vec3 vel = u * (-max_speed);
+    float t_hit = 0.0f;
+    const int cyl = CoverCylinder(asset, asset_radius, hit, vel, t_hit);
+    if (cyl == 0) return true;
+    if (cyl == 1 || t_hit <= 0.04f)
+        return swarm::Distance(picket, hit) <= kill + 0.5f;
+    constexpr int kSamples = 12;
+    for (int i = 0; i <= kSamples; ++i) {
+        const float t = t_hit * (static_cast<float>(i) / kSamples);
+        if (t < 0.04f) continue;
+        const Vec3 meet = hit + vel * t;
+        const float need = swarm::Distance(picket, meet) - kill;
+        if (need <= 0.0f) return true;
+        if (CoverReach(t, accel, max_speed) >= need) return true;
+    }
+    return false;
+}
+
+/// Unique-owner Voronoi-edge inbound at picket elevation — the bracelet
+/// the kill-envelope cue scores as closed/hole. Horizon (el=0) is not
+/// AND-ed in: a six-picket ring never catches a ground-level bisector,
+/// and that would abort the shrink and leave the radio radius.
+bool CoverCloses(const Config& cfg, float radius, float altitude,
+                 uint32_t count) {
+    if (count < 2) return true;
+    if (radius < 1.0f) return false;
+    if (cfg.sense_radius < 1.0f || cfg.max_speed < 0.1f) return true;
+    const float accel = cfg.lateral_limit > 0.1f ? cfg.lateral_limit
+                                                 : 6.7f;
+    const float h = altitude > 0.0f ? altitude : 0.0f;
+    const float elev = std::atan2(h, radius);
+    const float alpha = kPi / static_cast<float>(count);
+    const float ce = std::cos(elev);
+    const float se = std::sin(elev);
+    const Vec3 picket(cfg.asset.x + radius,
+                      cfg.asset.y,
+                      cfg.asset.z - h);
+    const Vec3 u(ce * std::cos(alpha), ce * std::sin(alpha), -se);
+    return CoverCanCatch(cfg.asset, cfg.asset_radius, picket, u,
+                         cfg.sense_radius, cfg.max_speed, accel,
+                         cfg.kill_radius);
+}
+
+/// Shrink-only. If the radio/spawn ring already tiles, keep the standoff
+/// (D21: growing past ~0.75·comm outruns recovery). If it does not, take
+/// the largest still-closed radius down to `floor_r`. If even the floor
+/// is open, shrinking cannot help — leave the caps alone.
+float ClampToClosedCover(const Config& cfg, float radius, float altitude,
+                         uint32_t count, float floor_r) {
+    if (count < 2) return radius;
+    if (CoverCloses(cfg, radius, altitude, count)) return radius;
+    if (floor_r >= radius - 0.5f) return radius;
+    if (!CoverCloses(cfg, floor_r, altitude, count)) return radius;
+    float lo = floor_r;
+    float hi = radius;
+    float best = floor_r;
+    for (int i = 0; i < 20; ++i) {
+        const float mid = 0.5f * (lo + hi);
+        if (CoverCloses(cfg, mid, altitude, count)) {
+            best = mid;
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    return best;
+}
+
+float ComputePicketRadius(const Config& cfg, uint32_t live_count,
+                          float altitude) {
     const float span_x = cfg.arena_max.x - cfg.arena_min.x;
     const float span_y = cfg.arena_max.y - cfg.arena_min.y;
     const float arena_half = 0.5f * (span_x < span_y ? span_x : span_y);
@@ -65,7 +191,7 @@ float ComputePicketRadius(const Config& cfg, uint32_t live_count) {
     if (radius > spawn_cap) radius = spawn_cap;
     if (radius > react_cap) radius = react_cap;
     if (radius < floor_r) radius = floor_r;
-    return radius;
+    return ClampToClosedCover(cfg, radius, altitude, count, floor_r);
 }
 
 /// Scoring hook, and the only channel the viewer has for "this drone called
@@ -82,8 +208,8 @@ SwClass PublishedClass(const Track& t) {
 
 }  // namespace
 
-float PicketRadius(const Config& cfg, uint32_t live_count) {
-    return ComputePicketRadius(cfg, live_count);
+float PicketRadius(const Config& cfg, uint32_t live_count, float altitude) {
+    return ComputePicketRadius(cfg, live_count, altitude);
 }
 
 void Policy::Configure(const Config& cfg, Rng rng) {
@@ -107,7 +233,15 @@ void Policy::Configure(const Config& cfg, Rng rng) {
     // (mean -52.5 -> -20.8). Past ~0.75 the ring outruns its own recovery --
     // a leaker at that range cannot be run down, since a hostile has our
     // lateral limit -- and tier-2 layouts collapse. See notes/decisions.md.
-    ring_radius_ = PicketRadius(cfg, cfg.fleet_size);
+    //
+    // Closed-cover (D58) then shrinks that radius if the unique-owner
+    // Voronoi-edge inbound at picket elevation is not catchable from rest.
+    // Same Reach / first-sight arithmetic as the kill-envelope bracelet.
+    // It does not grow: a larger ring that "buys time" is the D21 failure
+    // past F0.75. Height is an input because a lower station (default 25 m,
+    // or a fitted cone) changes the divert.
+    ring_altitude_ = kRayDefaultAlt;
+    ring_radius_ = PicketRadius(cfg, cfg.fleet_size, ring_altitude_);
 
     // ...but never out near the circle hostiles enter on (D28). A picket that
     // sits just inside it meets its first hostile already born on top of it,
@@ -134,7 +268,6 @@ void Policy::Configure(const Config& cfg, Rng rng) {
     // comparable (measured 19-21 m/s against our 17-24), so max_speed is the
     // proxy. This is the same reasoning as the spawn radius itself: a number the
     // brain is not given, derived from one it is.
-    ring_altitude_ = kRayDefaultAlt;
     ray_ = InboundRay{};
     last_ray_send_ = -1.0e9f;
     sampled_local_ = false;
@@ -155,12 +288,10 @@ void Policy::Configure(const Config& cfg, Rng rng) {
     }
 }
 
-void Policy::NoteAlive(uint8_t drone_id, const Vec3& position,
-                       const Vec3& velocity, float now) {
+void Policy::NoteAlive(uint8_t drone_id, const Vec3& position, float now) {
     if (drone_id >= kMaxFleet) return;
     heard_[drone_id] = now;
     heard_at_[drone_id] = position;
-    heard_vel_[drone_id] = velocity;
     confirmed_dead_[drone_id] = 0;
 }
 
@@ -211,7 +342,7 @@ void Policy::ApplyRayAltitude() {
     if (!ray_.ready()) return;
     float h = ray_.HeightAt(ring_radius_);
     if (h < kRayFloorAlt) h = kRayFloorAlt;
-    if (h > kRayDefaultAlt) h = kRayDefaultAlt;
+    if (h > kRayCapAlt) h = kRayCapAlt;
     ring_altitude_ = h;
 }
 
@@ -295,13 +426,21 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
                                                        candidate->velocity, cfg_.asset);
             const float ttg = TimeToCylinder(candidate->position, candidate->velocity,
                                              cfg_.asset, cfg_.asset_radius);
+            const Vec3 weave = flight::EstimatedAccel(
+                candidate->velocity, candidate->last_velocity, obs.dt(),
+                cfg_.lateral_limit);
+            const flight::Course course = flight::SolveCollisionCourse(
+                obs.position(), obs.velocity(), candidate->position,
+                candidate->velocity, cfg_, weave,
+                flight::InertialAccel(obs.attitude(), obs.accel()));
             std::snprintf(last_log_, sizeof(last_log_),
-                          "commit trk=%u score=%.2f miss=%.1f rng=%.0f close=%.1f ttg=%.1f n=%.1f e=%.1f alt=%.1f vn=%.1f ve=%.1f%s%s",
+                          "commit trk=%u score=%.2f miss=%.1f rng=%.0f close=%.1f ttg=%.1f n=%.1f e=%.1f alt=%.1f vn=%.1f ve=%.1f in=%.1f ie=%.1f ialt=%.1f%s%s",
                           candidate->has_local_id ? candidate->track_id : 0,
                           candidate->closing_score, miss, rng, closing, ttg,
                           candidate->position.x, candidate->position.y,
                           -candidate->position.z,
                           candidate->velocity.x, candidate->velocity.y,
+                          course.meeting.x, course.meeting.y, -course.meeting.z,
                           candidate->has_local_id ? "" : " peer",
                           early ? " early" : "");
         }
@@ -335,18 +474,15 @@ void Policy::Decide(TrackStore& store, const swarm::Observation& obs) {
         stalk_ = nullptr;
         watch_ = nullptr;
         leashed_ = false;
-        goal_vel_ = Vec3();
     }
 }
 
-uint32_t FacingSlot(const Vec3& position, const Vec3& asset, uint32_t count,
-                    float orbit_phase) {
+uint32_t FacingSlot(const Vec3& position, const Vec3& asset, uint32_t count) {
     const uint32_t n = count > 0 ? count : 1;
     const float hx = position.x - asset.x;
     const float hy = position.y - asset.y;
     if (hx * hx + hy * hy < 1e-8f) return 0;
-    float u = std::atan2(hy, hx) - orbit_phase;
-    u = std::fmod(u, 2.0f * kPi);
+    float u = std::atan2(hy, hx);
     if (u < 0.0f) u += 2.0f * kPi;
     const float x = u * static_cast<float>(n) / (2.0f * kPi);
     // Nearest slot, except a band around the Voronoi edge. lround alone lets
@@ -451,10 +587,7 @@ float StationBearing(uint32_t id, uint32_t fleet_size, uint32_t self_id,
                                     comm_radius, now, confirmed_dead);
     const uint32_t rank = LiveRank(id, n, self_id, heard, heard_at, self_pos,
                                    comm_radius, now, confirmed_dead);
-    // The orbit phase is a shared function of sim time, so every drone places
-    // every station identically without negotiating (D57).
-    return 2.0f * kPi * static_cast<float>(rank) / static_cast<float>(live)
-           + kOrbitRate * now;
+    return 2.0f * kPi * static_cast<float>(rank) / static_cast<float>(live);
 }
 
 Vec3 StationAt(float bearing, const Vec3& centre, float radius, float altitude) {
@@ -463,11 +596,6 @@ Vec3 StationAt(float bearing, const Vec3& centre, float radius, float altitude) 
                 -altitude);
 }
 
-Vec3 StationVelocityAt(float bearing, float radius) {
-    // d/dt of StationAt with bearing advancing at kOrbitRate: tangential, ωR.
-    const float w = kOrbitRate * radius;
-    return Vec3(-w * std::sin(bearing), w * std::cos(bearing), 0.0f);
-}
 
 uint32_t UniqueOwner(uint32_t facing, uint32_t fleet_size, uint32_t self_id,
                      const float* heard, float now) {
@@ -485,25 +613,6 @@ uint32_t InboundOwner(uint32_t facing, uint32_t fleet_size, uint32_t self_id,
     uint32_t start = facing % n;
     if (facing_receding) start = (start + 1) % n;
     return UniqueOwner(start, fleet_size, self_id, heard, now);
-}
-
-float InterceptCost(const Vec3& position, const Vec3& velocity, const Vec3& aim,
-                    const Config& cfg) {
-    const Vec3 to(aim.x - position.x, aim.y - position.y, 0.0f);
-    const float range = swarm::Length(to);
-    const float speed = cfg.max_speed > 0.1f ? cfg.max_speed : 1.0f;
-    if (range < 1.0f) return 0.0f;
-    float cost = range / speed;
-
-    const Vec3 vh(velocity.x, velocity.y, 0.0f);
-    const float v = swarm::Length(vh);
-    if (v < 0.5f || cfg.lateral_limit < 0.1f) return cost;   // parked: pure range
-
-    // Angle between where we are going and where we must go.
-    float c = swarm::Dot(vh, to) / (v * range);
-    if (c > 1.0f) c = 1.0f;
-    if (c < -1.0f) c = -1.0f;
-    return cost + std::acos(c) * v / cfg.lateral_limit;
 }
 
 float TowardTarget(const Vec3& position, const Vec3& velocity, const Vec3& target) {
@@ -539,45 +648,6 @@ bool Policy::FacingReceding(uint32_t facing, const Track& hostile,
     return TowardTarget(p, v, hostile.position) < -kReceding;
 }
 
-float Policy::CostFor(uint32_t id, const Track& t,
-                      const swarm::Observation& obs) const {
-    if (id >= kMaxFleet) return 1.0e30f;
-    if (id == cfg_.drone_id)
-        return InterceptCost(obs.position(), obs.velocity(), t.position, cfg_);
-    if (heard_[id] <= 0.0f) return 1.0e30f;
-    float age = obs.time() - heard_[id];
-    if (age < 0.0f) age = 0.0f;
-    const Vec3 p = heard_at_[id] + heard_vel_[id] * age;
-    return InterceptCost(p, heard_vel_[id], t.position, cfg_);
-}
-
-uint32_t Policy::BestInterceptor(const Track& t,
-                                 const swarm::Observation& obs) const {
-    const float now = obs.time();
-    const uint32_t n = cfg_.fleet_size < kMaxFleet ? cfg_.fleet_size : kMaxFleet;
-    uint32_t best_id = cfg_.drone_id;
-    float best = 1.0e30f;
-    for (uint32_t id = 0; id < n; ++id) {
-        if (!RingAlive(id, cfg_.drone_id, heard_, heard_at_, obs.position(),
-                       cfg_.comm_radius, now, cfg_.fleet_size, nullptr))
-            continue;
-        Vec3 p, v;
-        if (id == cfg_.drone_id) {
-            p = obs.position();
-            v = obs.velocity();
-        } else {
-            if (heard_[id] <= 0.0f) continue;   // never heard: no pose to score
-            float age = now - heard_[id];
-            if (age < 0.0f) age = 0.0f;
-            p = heard_at_[id] + heard_vel_[id] * age;
-            v = heard_vel_[id];
-        }
-        const float c = InterceptCost(p, v, t.position, cfg_);
-        if (c < best - 1.0e-3f) { best = c; best_id = id; }
-    }
-    return best_id;
-}
-
 bool Policy::OwnsInbound(const Track& t, const TrackStore& store,
                          const swarm::Observation& obs) const {
     // Stations and ownership share the live ring (D56). Facing slot among
@@ -587,7 +657,7 @@ bool Policy::OwnsInbound(const Track& t, const TrackStore& store,
     const uint32_t live = CountLive(cfg_.fleet_size, cfg_.drone_id, heard_,
                                     heard_at_, obs.position(), cfg_.comm_radius,
                                     now, nullptr);
-    uint32_t face = FacingSlot(t.position, cfg_.asset, live, kOrbitRate * now);
+    uint32_t face = FacingSlot(t.position, cfg_.asset, live);
     uint32_t owner = LiveId(face, cfg_.fleet_size, cfg_.drone_id, heard_,
                             heard_at_, obs.position(), cfg_.comm_radius, now,
                             nullptr);
@@ -595,16 +665,6 @@ bool Policy::OwnsInbound(const Track& t, const TrackStore& store,
         owner = LiveId(face + 1, cfg_.fleet_size, cfg_.drone_id, heard_,
                        heard_at_, obs.position(), cfg_.comm_radius, now,
                        nullptr);
-    // The facing drone is the incumbent. Hand over only to a drone with a
-    // decisively cheaper intercept -- one already moving that way rather than
-    // merely standing nearer (D59). Every drone scores every peer from the
-    // same hopped heartbeats, so this needs nothing extra on the wire.
-    if (kHandoff) {
-        const uint32_t challenger = BestInterceptor(t, obs);
-        if (challenger != owner &&
-            CostFor(challenger, t, obs) < CostFor(owner, t, obs) - kHandoffMargin)
-            owner = challenger;
-    }
     return owner == cfg_.drone_id;
 }
 
@@ -627,17 +687,6 @@ bool FlyingAt(const Track& craft, const Track& hostile) {
     const float closing = ClosingSpeed(craft.position, craft.velocity,
                                        hostile.position, hostile.velocity);
     return closing >= kMinClosing;
-}
-
-Vec3 CorridorOrigin(const TrackStore& store, const Track& hostile, const Vec3& slot) {
-    const Track* best = nullptr;
-    float best_d = 1.0e9f;
-    for (const Track& t : store.tracks()) {
-        if (!FlyingAt(t, hostile)) continue;
-        const float d = swarm::Distance(t.position, hostile.position);
-        if (d < best_d) { best_d = d; best = &t; }
-    }
-    return best ? best->position : slot;
 }
 
 }  // namespace
@@ -704,20 +753,40 @@ Vec3 StalkAim(const Vec3& slot, const Vec3& target_p, const Vec3& target_v,
     return slot + to_aim * (along / len);
 }
 
-Vec3 YieldOffCorridor(const Vec3& goal, const Vec3& a, const Vec3& b, float clear) {
+float CorridorOffset(const Vec3& p, const Vec3& a, const Vec3& b, Vec3& closest) {
     const Vec3 ab(b.x - a.x, b.y - a.y, 0.0f);
     const float ab2 = ab.x * ab.x + ab.y * ab.y;
-    if (ab2 < 1e-4f || clear <= 0.0f) return goal;
-    const Vec3 ap(goal.x - a.x, goal.y - a.y, 0.0f);
+    closest = Vec3(p.x, p.y, p.z);
+    if (ab2 < 1e-4f) return 1.0e9f;
+    const Vec3 ap(p.x - a.x, p.y - a.y, 0.0f);
     float t = (ap.x * ab.x + ap.y * ab.y) / ab2;
     if (t < 0.0f) t = 0.0f;
     if (t > 1.0f) t = 1.0f;
-    const float cx = a.x + t * ab.x;
-    const float cy = a.y + t * ab.y;
-    Vec3 off(goal.x - cx, goal.y - cy, 0.0f);
-    const float dist = std::sqrt(off.x * off.x + off.y * off.y);
+    closest = Vec3(a.x + t * ab.x, a.y + t * ab.y, p.z);
+    const float dx = p.x - closest.x;
+    const float dy = p.y - closest.y;
+    return std::sqrt(dx * dx + dy * dy);
+}
+
+bool MateAlreadyYielded(const Vec3& pos, const Vec3& vel,
+                        const Vec3& a, const Vec3& b, float clear) {
+    Vec3 closest;
+    const float dist = CorridorOffset(pos, a, b, closest);
+    if (dist >= 1.0e8f) return false;
+    if (clear > 0.0f && dist >= clear) return true;
+    if (dist < 1.5f) return false;
+    const Vec3 off(pos.x - closest.x, pos.y - closest.y, 0.0f);
+    const float away = swarm::Dot(Vec3(vel.x, vel.y, 0.0f), off / dist);
+    return away > kYieldAway;
+}
+
+Vec3 YieldOffCorridor(const Vec3& goal, const Vec3& a, const Vec3& b, float clear) {
+    Vec3 closest;
+    const float dist = CorridorOffset(goal, a, b, closest);
+    if (dist >= 1.0e8f || clear <= 0.0f) return goal;
     if (dist >= clear) return goal;
-    Vec3 dir = off;
+    const Vec3 ab(b.x - a.x, b.y - a.y, 0.0f);
+    Vec3 dir(goal.x - closest.x, goal.y - closest.y, 0.0f);
     if (dist < 1e-3f) dir = Vec3(-ab.y, ab.x, 0.0f);
     const float len = std::sqrt(dir.x * dir.x + dir.y * dir.y);
     if (len < 1e-6f) return goal;
@@ -727,14 +796,38 @@ Vec3 YieldOffCorridor(const Vec3& goal, const Vec3& a, const Vec3& b, float clea
                 goal.z);
 }
 
+Vec3 YieldForMate(const Vec3& goal, const Vec3& self_p, const Vec3& self_v,
+                  const Vec3& owner_slot, const Vec3& hostile_p,
+                  const Vec3& hostile_v, const Vec3* mate_p, const Vec3* mate_v,
+                  float clear) {
+    const Vec3 slot_end = CorridorHorizon(owner_slot, hostile_p, hostile_v);
+    const bool they_chase = mate_p && mate_v &&
+        !MateAlreadyYielded(*mate_p, *mate_v, owner_slot, slot_end, clear);
+    const bool we_chase =
+        TowardTarget(self_p, self_v, hostile_p) >= kChasingToward &&
+        ClosingSpeed(self_p, self_v, hostile_p, hostile_v) >= kMinClosing;
+
+    if (!they_chase) {
+        // First mover already stepped off, or nobody is coming. If we are
+        // already flying at this inbound, keep it (D59). Else pre-clear
+        // the owner's remaining flight (D15 / D17).
+        if (we_chase) return goal;
+        return YieldOffCorridor(goal, owner_slot, slot_end, clear);
+    }
+    const Vec3 end = CorridorHorizon(*mate_p, hostile_p, hostile_v);
+    return YieldOffCorridor(goal, *mate_p, end, clear);
+}
+
 Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) {
     // Hold the live ring, but step off anyone else's remaining intercept.
     // After a nearby death the survivors re-space (D19). Past the predicted
     // ram they stay put (D17).
     const float now = obs.time();
-    ring_radius_ = PicketRadius(
-        cfg_, CountLive(cfg_.fleet_size, cfg_.drone_id, heard_, heard_at_,
-                        obs.position(), cfg_.comm_radius, now, confirmed_dead_));
+    const uint32_t live = CountLive(
+        cfg_.fleet_size, cfg_.drone_id, heard_, heard_at_,
+        obs.position(), cfg_.comm_radius, now, confirmed_dead_);
+    ApplyRayAltitude();
+    ring_radius_ = PicketRadius(cfg_, live, ring_altitude_);
     ApplyRayAltitude();
     const float bearing = StationBearing(cfg_.drone_id, cfg_.fleet_size,
                                         cfg_.drone_id, heard_, heard_at_,
@@ -745,9 +838,6 @@ Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) 
     stalk_ = nullptr;
     watch_ = nullptr;
     Vec3 goal = slot;
-    // Holding the ring means matching its motion. Replaced by zero below if
-    // the goal stops being the station.
-    goal_vel_ = StationVelocityAt(bearing, ring_radius_);
 
     // Ease toward a likely inbound before the Hostile latch, still close
     // enough to get back on station if it never confirms.
@@ -767,7 +857,6 @@ Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) 
         if (swarm::Distance(aim, slot) < 1.0f) continue;
         goal = aim;
         stalk_ = &t;
-        goal_vel_ = Vec3();   // a stalk aim is a fixed point, not the ring
         break;
     }
 
@@ -797,11 +886,7 @@ Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) 
     for (const Track& t : store.tracks()) {
         if (t.belief != Belief::Hostile) continue;
         if (OwnsInbound(t, store, obs)) continue;
-        const uint32_t live = CountLive(
-            cfg_.fleet_size, cfg_.drone_id, heard_, heard_at_,
-            obs.position(), cfg_.comm_radius, now, confirmed_dead_);
-        const uint32_t face = FacingSlot(t.position, cfg_.asset, live,
-                                         kOrbitRate * now);
+        const uint32_t face = FacingSlot(t.position, cfg_.asset, live);
         uint32_t owner = LiveId(face, cfg_.fleet_size, cfg_.drone_id, heard_,
                                 heard_at_, obs.position(), cfg_.comm_radius,
                                 now, confirmed_dead_);
@@ -814,9 +899,22 @@ Vec3 Policy::PicketGoal(const TrackStore& store, const swarm::Observation& obs) 
                            heard_at_, obs.position(), cfg_.comm_radius, now,
                            confirmed_dead_),
             cfg_.asset, ring_radius_, ring_altitude_);
-        const Vec3 from = CorridorOrigin(store, t, owner_slot);
-        const Vec3 end = CorridorHorizon(from, t.position, t.velocity);
-        goal = YieldOffCorridor(goal, from, end, cfg_.friendly_margin);
+        const Track* chase = nullptr;
+        float best_d = 1.0e9f;
+        const Vec3 slot_end = CorridorHorizon(owner_slot, t.position, t.velocity);
+        for (const Track& m : store.tracks()) {
+            if (!FlyingAt(m, t)) continue;
+            if (MateAlreadyYielded(m.position, m.velocity, owner_slot, slot_end,
+                                   cfg_.friendly_margin))
+                continue;
+            const float d = swarm::Distance(m.position, t.position);
+            if (d < best_d) { best_d = d; chase = &m; }
+        }
+        const Vec3* mate_p = chase ? &chase->position : nullptr;
+        const Vec3* mate_v = chase ? &chase->velocity : nullptr;
+        goal = YieldForMate(goal, obs.position(), obs.velocity(), owner_slot,
+                            t.position, t.velocity, mate_p, mate_v,
+                            cfg_.friendly_margin);
     }
     return goal;
 }

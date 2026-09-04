@@ -293,6 +293,63 @@ static void TestRingStaysInsideTheSpawnCircle() {
                     std::sin(3.14159265358979f / 15.0f)) < 1e-3f);
 }
 
+static Config WideRadioCfg() {
+    Config cfg;
+    cfg.drone_id = 0;
+    cfg.fleet_size = 16;
+    cfg.asset = Vec3(0, 0, 0);
+    cfg.asset_radius = 30.0f;
+    cfg.comm_radius = 90.0f;
+    cfg.sense_radius = 60.0f;
+    cfg.max_speed = 20.0f;
+    cfg.lateral_limit = 6.7f;
+    cfg.kill_radius = 1.0f;
+    cfg.arena_min = Vec3(-400, -400, -120);
+    cfg.arena_max = Vec3(400, 400, 0);
+    return cfg;
+}
+
+static void TestClosedCoverLeavesAFullS1Ring() {
+    std::printf("s1-like full ring is already catchable; radio still sizes it\n");
+    const Config cfg = WideRadioCfg();
+    const float radio = cfg.asset_radius + cfg.comm_radius * 0.625f;
+    CHECK(std::fabs(PicketRadius(cfg, 16, 30.0f) - radio) < 1e-3f);
+    CHECK(std::fabs(PicketRadius(cfg, 16, 25.0f) - radio) < 1e-3f);
+}
+
+static void TestClosedCoverPullsASparseRingIn() {
+    std::printf("six even stations cannot catch the bisector at the radio radius\n");
+    Config cfg = WideRadioCfg();
+    cfg.fleet_size = 6;
+    const float radio = cfg.asset_radius + cfg.comm_radius * 0.625f;
+    const float r = PicketRadius(cfg, 6, 30.0f);
+    CHECK(r < radio - 1.0f);
+    CHECK(r > 70.0f);
+    CHECK(r < 82.0f);
+}
+
+static void TestClosedCoverBindsOnTightSense() {
+    std::printf("sense 35 m cannot tile an 86 m 16-picket ring\n");
+    Config cfg = WideRadioCfg();
+    cfg.sense_radius = 35.0f;
+    const float radio = cfg.asset_radius + cfg.comm_radius * 0.625f;
+    const float r = PicketRadius(cfg, 16, 30.0f);
+    CHECK(r < radio - 1.0f);
+    CHECK(r > 70.0f);
+    CHECK(r < 84.0f);
+}
+
+static void TestDefaultPicketAltitudeIsTwentyFive() {
+    std::printf("boot picket sits at 25 m; fitted cone may still rise to 30\n");
+    Policy p;
+    p.Configure(WideRadioCfg(), Rng());
+    CHECK(p.ring_altitude() > kRayDefaultAlt - 0.1f &&
+          p.ring_altitude() < kRayDefaultAlt + 0.1f);
+    CHECK(kRayDefaultAlt == 25.0f);
+    CHECK(kRayCapAlt == 30.0f);
+    CHECK(kRayCapAlt > kRayDefaultAlt);
+}
+
 static void TestAimAheadUsesConfiguredDistance() {
     std::printf("aim lead moves the target estimate along its velocity\n");
     const Vec3 target(10, 20, -30);
@@ -364,45 +421,6 @@ static void TestProNavSteersAtTheZem() {
     const Vec3 along_v_only = flight::ProNav(
         self, self_v, shifted, tgt_v, cfg, weave_a, 0.0f);
     CHECK(swarm::Distance(with_traj, along_v_only) > 1e-4f);
-}
-
-static void TestInterceptCostIsPureRangeWhenParked() {
-    std::printf("a parked ring scores exactly as the facing-slot rule (D59)\n");
-    Config cfg;
-    cfg.max_speed = 20.0f;
-    cfg.lateral_limit = 6.71f;
-    const Vec3 aim(100.0f, 0.0f, -30.0f);
-
-    // Zero velocity: no turn to pay for, so cost is range / max_speed and the
-    // nearer drone always wins. This is what makes the handoff inert on a
-    // static fleet -- it can only ever override, never quietly re-decide.
-    const float near = InterceptCost(Vec3(60, 0, -30), Vec3(), aim, cfg);
-    const float far = InterceptCost(Vec3(0, 0, -30), Vec3(), aim, cfg);
-    CHECK(std::fabs(near - 40.0f / 20.0f) < 1e-3f);
-    CHECK(far > near);
-}
-
-static void TestMovingAtTheTargetBeatsStandingNearIt() {
-    std::printf("velocity already pointed at the inbound beats bare range\n");
-    Config cfg;
-    cfg.max_speed = 20.0f;
-    cfg.lateral_limit = 6.71f;
-    const Vec3 aim(100.0f, 0.0f, -30.0f);
-
-    // Same range, opposite postures: one closing at 15 m/s, one crossing at
-    // 15 m/s. The crossing drone must turn ~90 deg first, which is what the
-    // facing-slot rule cannot see.
-    const Vec3 at(40.0f, 0.0f, -30.0f);
-    const float closing = InterceptCost(at, Vec3(15, 0, 0), aim, cfg);
-    const float crossing = InterceptCost(at, Vec3(0, 15, 0), aim, cfg);
-    CHECK(closing < crossing);
-
-    // And the turn is priced, not free: ~(pi/2)*15/6.71 seconds of it.
-    CHECK(crossing - closing > 3.0f);
-
-    // A drone flying AWAY is worst of the three, even from the same spot.
-    const float away = InterceptCost(at, Vec3(-15, 0, 0), aim, cfg);
-    CHECK(away > crossing);
 }
 
 static void TestArenaAllowsADiveIntercept() {
@@ -499,6 +517,34 @@ static void TestCollisionCourseCutsOffACrossingInbound() {
     const Vec3 to_tgt = Vec3(-38.8f, -36.4f, -10.0f)
                         - Vec3(-37.9f, -39.5f, -11.3f);
     CHECK(swarm::Dot(a7, to_tgt) > 0.0f);
+
+    Config settled;
+    settled.max_speed = 23.9f;
+    settled.max_accel = 19.1f;
+    settled.lateral_limit = 6.71f;
+    settled.kill_radius = 1.157f;
+    settled.max_tilt = 0.6f;
+    CHECK(flight::TiltSettle(settled) < 1e-4f);  // rate unpublished
+    settled.max_body_rate = 8.0f;
+    CHECK(std::fabs(flight::TiltSettle(settled) - 0.6f / 8.0f) < 1e-4f);
+
+    const Vec3 p0(60.85f, 41.5f, -26.11f);
+    const Vec3 q0(82.55f, 98.41f, -20.95f);
+    const Vec3 w0(-11.66f, -13.9f, 2.96f);
+    const flight::Course c0 = flight::SolveCollisionCourse(
+        p0, Vec3(), q0, w0, settled);
+    CHECK(c0.t_go > 0.5f);
+    CHECK(swarm::Length(c0.meeting - q0) > 1.0f);
+    const flight::Course c1 = flight::SolveCollisionCourse(
+        p0, Vec3(), q0, w0, settled, Vec3(), Vec3(), c0.t_go - 0.01f);
+    CHECK(std::fabs(c1.t_go - (c0.t_go - 0.01f)) < 1e-3f);
+
+    const Vec3 slew = flight::SlewHorizontal(
+        Vec3(6.71f, 0.0f, 1.0f), Vec3(0.0f, 6.71f, -2.0f), 0.01f, settled);
+    const float da = std::sqrt((slew.x - 6.71f) * (slew.x - 6.71f)
+                               + slew.y * slew.y);
+    CHECK(da <= 9.81f * 8.0f * 0.01f + 1e-3f);
+    CHECK(std::fabs(slew.z + 2.0f) < 1e-4f);
 }
 
 static void TestStationEvensTheLiveRing() {
@@ -615,6 +661,45 @@ static void TestYieldHorizonIsRemainingFlight() {
     const Vec3 none = CorridorHorizon(from, hostile, outbound);
     CHECK(Horiz(none, from) < 0.1f);
     CHECK(Horiz(YieldOffCorridor(far, from, none, clear), far) < 0.1f);
+}
+
+static void TestFirstYielderKeepsTheIntercept() {
+    std::printf("a mate already peeling off the corridor is not yielded to\n");
+    const Vec3 slot(75.0f, 0.0f, -30.0f);
+    const Vec3 hostile(170.0f, 0.0f, -40.0f);
+    const Vec3 inbound(-16.0f, 0.0f, 0.0f);
+    const float clear = 19.0f;
+    const Vec3 end = CorridorHorizon(slot, hostile, inbound);
+
+    // Still on the line, chasing: not yielded.
+    CHECK(!MateAlreadyYielded(Vec3(100.0f, 0.5f, -30.0f), Vec3(14.0f, 0.0f, 0.0f),
+                              slot, end, clear));
+    // Off by a metre but still flying along the LOS: interceptor weave, stay.
+    CHECK(!MateAlreadyYielded(Vec3(100.0f, 1.0f, -30.0f), Vec3(14.0f, 0.5f, 0.0f),
+                              slot, end, clear));
+    // Peeling +y at 8 m/s, 8 m off: first yielder.
+    CHECK(MateAlreadyYielded(Vec3(100.0f, 8.0f, -30.0f), Vec3(2.0f, 8.0f, 0.0f),
+                             slot, end, clear));
+    // Fully clear of keep-out, even if still pointed inbound.
+    CHECK(MateAlreadyYielded(Vec3(100.0f, 20.0f, -30.0f), Vec3(14.0f, 0.0f, 0.0f),
+                             slot, end, clear));
+
+    const Vec3 self(110.0f, 2.0f, -30.0f);
+    const Vec3 chase_v(14.0f, 0.0f, 0.0f);
+    const Vec3 peeled(100.0f, 8.0f, -30.0f);
+    const Vec3 peel_v(2.0f, 8.0f, 0.0f);
+    // We are flying at it and they already yielded: keep the intercept.
+    const Vec3 kept = YieldForMate(self, self, chase_v, slot, hostile, inbound,
+                                   &peeled, &peel_v, clear);
+    CHECK(Horiz(kept, self) < 0.1f);
+
+    // They are still on the corridor: we step off (we do not own).
+    const Vec3 mate(90.0f, 1.0f, -30.0f);
+    const Vec3 mate_v(14.0f, 0.0f, 0.0f);
+    const Vec3 parked(110.0f, 5.0f, -30.0f);
+    const Vec3 still = YieldForMate(parked, parked, Vec3(), slot, hostile, inbound,
+                                    &mate, &mate_v, clear);
+    CHECK(Horiz(still, parked) > 1.0f);
 }
 
 static void TestStalkAimLeadsNotPursues() {
@@ -763,7 +848,7 @@ static void TestArenaSpringsOnStation() {
         Vec3(0, 0, 15.0f), Vec3(0, 0, -2.0f), Vec3(0, 0, 10.0f), cfg);
     CHECK(floor.z < 14.0f);
 
-    // D58: while intercepting the walls and ceiling come off, but not the
+    // D64: while intercepting the walls and ceiling come off, but not the
     // floor. A ram must not be steered around an obstacle; the dirt is not
     // an obstacle, it is the end of the airframe, and no hostile is under it.
     const Vec3 ram_wall = flight::EnforceArena(
@@ -799,17 +884,20 @@ int main() {
     TestInboundOwnerSkipsARecedingFacing();
     TestLiveRingRespaces();
     TestRingStaysInsideTheSpawnCircle();
+    TestClosedCoverLeavesAFullS1Ring();
+    TestClosedCoverPullsASparseRingIn();
+    TestClosedCoverBindsOnTightSense();
+    TestDefaultPicketAltitudeIsTwentyFive();
     TestAimAheadUsesConfiguredDistance();
     TestProNavSteersAtTheZem();
     TestArenaAllowsADiveIntercept();
-    TestInterceptCostIsPureRangeWhenParked();
-    TestMovingAtTheTargetBeatsStandingNearIt();
     TestProNavDoesNotBrakeAlongTheLos();
     TestCollisionCourseCutsOffACrossingInbound();
     TestStationEvensTheLiveRing();
     TestHeardSilenceIsDeadEverywhere();
     TestApproachingFarSilenceDoesNotKill();
     TestYieldHorizonIsRemainingFlight();
+    TestFirstYielderKeepsTheIntercept();
     TestStalkAimLeadsNotPursues();
     TestInterceptorKeepsGoingAtTheMerge();
     TestBornOutsideRing();

@@ -20,13 +20,8 @@ Vec3 LimitAccel(const Vec3& desired, const Config& cfg);
 
 /// PD station keeping. The workhorse: formation, waypoints and loiter are all
 /// this with a different target.
-/// `target_velocity` is the velocity of the target point itself. The damping
-/// term pulls toward it rather than toward zero, so a MOVING station is
-/// flown rather than chased: with it the drone settles on the station's own
-/// velocity, without it the same term brakes against it every tick (D57).
 Vec3 GoTo(const Vec3& target, const Vec3& position, const Vec3& velocity,
-          const Config& cfg, float pos_gain = 0.8f, float vel_gain = 1.6f,
-          const Vec3& target_velocity = Vec3());
+          const Config& cfg, float pos_gain = 0.8f, float vel_gain = 1.6f);
 
 /// Travel toward a point at a commanded speed, decelerating into it.
 Vec3 Cruise(const Vec3& target, const Vec3& position, const Vec3& velocity,
@@ -59,16 +54,43 @@ Vec3 ProNav(const Vec3& self_position, const Vec3& self_velocity,
             float lead_kill_radii = kPnLeadKillRadii,
             float navigation_gain = kPnGain);
 
-/// Vector ZEM intercept for scramble / ram (D49).
+/// Time to establish max tilt at published max_body_rate. 0 if rate is
+/// unpublished (tests). s1: 0.6 rad / 8 rad/s ≈ 75 ms, not a 0.4 s lag.
+float TiltSettle(const Config& cfg);
+
+/// Specific force (body FRD, includes gravity reaction) → inertial NED.
+Vec3 InertialAccel(const swarm::Quat& attitude, const Vec3& specific_force);
+
+/// Rotate / scale horizontal accel toward `to` at max_body_rate.
+/// z is thrust and is copied from `to`. Identity when rate is unpublished.
+Vec3 SlewHorizontal(const Vec3& from, const Vec3& to, float dt, const Config& cfg);
+
+/// Vector ZEM intercept for scramble / ram (D49 / D62).
 ///
-/// Full 3-D ZEM, not ZEMn + along-LOS. t_go is the earliest arrival, not
-/// range/closing. N=2 is the constant-accel intercept on a double
-/// integrator. Saturates with LimitAccel (5.4 cylinder: leftover z does
-/// not steal xy, D51). Do not add g. Do not bake tilt lag into t_go.
+/// Full 3-D ZEM, not ZEMn + along-LOS. t_go is a held intercept clock,
+/// not a fresh earliest-bin every tick (bin jumps rotated xy 20–40° and
+/// the attitude loop never settled). N=2 is a = 2 ZEM / t². Saturates
+/// with LimitAccel (5.4 cylinder: leftover z does not steal xy, D51).
+/// Do not add g. Do not add tilt settle onto t_go (that softens the
+/// command; D49 / D61). `prefer_t` is last t_go minus dt; keep it while
+/// it still hits.
+struct Course {
+    Vec3 accel;
+    Vec3 meeting;
+    float t_go = 0.0f;
+};
+Course SolveCollisionCourse(const Vec3& self_p, const Vec3& self_v,
+                            const Vec3& tgt_p, const Vec3& tgt_v,
+                            const Config& cfg,
+                            const Vec3& tgt_a = {},
+                            const Vec3& self_a = {},
+                            float prefer_t = 0.0f);
 Vec3 CollisionCourse(const Vec3& self_p, const Vec3& self_v,
                      const Vec3& tgt_p, const Vec3& tgt_v,
                      const Config& cfg,
-                     const Vec3& tgt_a = {});
+                     const Vec3& tgt_a = {},
+                     const Vec3& self_a = {},
+                     float prefer_t = 0.0f);
 
 /// True if a ram is still possible. Inside 2·kill we stay in the merge.
 /// Past CPA and outside that bubble, or a leftover miss `Reach` (½ a t²
@@ -81,8 +103,7 @@ bool CatchableRam(const Vec3& self_p, const Vec3& self_v,
 /// after this, in Fly.
 Vec3 DesiredAccel(Mode mode, const Vec3& position, const Vec3& velocity,
                   const Vec3& goal, const Track* focus, bool leashed,
-                  float dt, const Config& cfg,
-                  const Vec3& goal_velocity = Vec3());
+                  float dt, const Config& cfg, const Vec3& self_a = {});
 
 /// Yaw for the named mode. Outward on station, at the watch target, or
 /// along velocity when intercepting / stalking.
@@ -117,15 +138,15 @@ Vec3 EnforceSeparation(const Vec3& desired, const Vec3& position, const Vec3& ve
 /// Keep inside the arena. Leaving it is a wasted loss (CHALLENGE.md 9.2).
 ///
 /// The band is stopping distance to the actual wall, not a fixed halo.
-/// Vertical uses `max_accel`. Not called while intercepting: a ram that
-/// can still hit must not be steered around the box (D48).
+/// Vertical uses `max_accel`.
+///
 /// `ground_only` keeps the floor and drops the walls and ceiling. That is the
 /// intercepting case: D48 is right that a ram which can still hit must not be
 /// steered around a wall, but the ground is not a wall. Clipping a wall costs
 /// an arena exit only if we actually leave; the dirt ends the drone outright,
 /// and no hostile is ever below it -- so a ram diving into the floor is one
 /// whose geometry has already failed, and pulling it up forfeits no intercept
-/// (D58).
+/// (D64).
 Vec3 EnforceArena(const Vec3& desired, const Vec3& position, const Vec3& velocity,
                   const Config& cfg, bool ground_only = false);
 
